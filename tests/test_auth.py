@@ -177,36 +177,62 @@ class TestOIDCCallback(unittest.TestCase):
                 authmod._claims_from_id_token(_jwt(claims), self.cfg, nonce)
 
     def test_callback_creates_session(self):
-        url = authmod.login_url(self.cfg)
+        url, state = authmod.login_url(self.cfg)
         qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-        state, nonce = qs["state"][0], qs["nonce"][0]
+        nonce = qs["nonce"][0]
 
         orig = authmod._exchange_code
         authmod._exchange_code = lambda cfg, code: {"id_token": _jwt(self._good_claims(nonce))}
         try:
             token = authmod.handle_callback(
-                self.conn, self.cfg, {"code": "abc", "state": state})
+                self.conn, self.cfg, {"code": "abc", "state": state},
+                cookie_state=state)
         finally:
             authmod._exchange_code = orig
 
         self.assertEqual(db.session_user(self.conn, token)["email"], "owner@example.com")
 
     def test_callback_rejects_unknown_state(self):
+        # cookie_state matches the (never-issued) callback state, so this exercises
+        # the _pending lookup rejection rather than the login-CSRF guard.
         with self.assertRaises(authmod.AuthError):
             authmod.handle_callback(self.conn, self.cfg,
-                                    {"code": "abc", "state": "never-issued"})
+                                    {"code": "abc", "state": "never-issued"},
+                                    cookie_state="never-issued")
+
+    def test_callback_rejects_state_cookie_mismatch(self):
+        """Login-CSRF guard: a valid pending state with a missing/mismatched
+        browser cookie is rejected, so an attacker's code+state replayed into a
+        victim's browser cannot plant an attacker-owned session."""
+        url, state = authmod.login_url(self.cfg)
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        nonce = qs["nonce"][0]
+        orig = authmod._exchange_code
+        authmod._exchange_code = lambda cfg, code: {"id_token": _jwt(self._good_claims(nonce))}
+        try:
+            with self.assertRaises(authmod.AuthError):
+                authmod.handle_callback(self.conn, self.cfg,
+                                        {"code": "abc", "state": state},
+                                        cookie_state="attacker-different")
+            with self.assertRaises(authmod.AuthError):
+                authmod.handle_callback(self.conn, self.cfg,
+                                        {"code": "abc", "state": state},
+                                        cookie_state=None)
+        finally:
+            authmod._exchange_code = orig
 
     def test_callback_open_signup_creates_session_for_stranger(self):
         cfg = _auth_cfg(allow_signup=True)
-        url = authmod.login_url(cfg)
+        url, state = authmod.login_url(cfg)
         qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-        state, nonce = qs["state"][0], qs["nonce"][0]
+        nonce = qs["nonce"][0]
         claims = self._good_claims(nonce, email="newbie@elsewhere.com", name="Newbie")
         orig = authmod._exchange_code
         authmod._exchange_code = lambda c, code: {"id_token": _jwt(claims)}
         try:
             token = authmod.handle_callback(self.conn, cfg,
-                                            {"code": "abc", "state": state})
+                                            {"code": "abc", "state": state},
+                                            cookie_state=state)
         finally:
             authmod._exchange_code = orig
         self.assertEqual(db.session_user(self.conn, token)["email"], "newbie@elsewhere.com")

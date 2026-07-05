@@ -39,6 +39,7 @@ TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
 JWKS_ENDPOINT = "https://www.googleapis.com/oauth2/v3/certs"
 SCOPES = "openid email profile"
 COOKIE = "plutus_session"
+STATE_COOKIE = "plutus_oauth_state"  # binds an in-flight OAuth login to the browser that began it (login-CSRF guard)
 _STATE_TTL = 600  # how long a login attempt's state/nonce stays valid (seconds)
 
 # Self-serve signup rate limiting (per hour globally)
@@ -240,8 +241,12 @@ def _take_state(state: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------- the flow ---
-def login_url(cfg) -> str:
-    """Build the Google authorization URL and stash its state/nonce."""
+def login_url(cfg) -> tuple[str, str]:
+    """Build the Google authorization URL and stash its state/nonce.
+
+    Returns ``(url, state)``; the caller sets ``state`` as a short-lived cookie
+    on the browser so :func:`handle_callback` can bind the callback to it.
+    """
     state = secrets.token_urlsafe(24)
     nonce = secrets.token_urlsafe(24)
     _remember_state(state, nonce)
@@ -255,7 +260,7 @@ def login_url(cfg) -> str:
         "access_type": "online",
         "prompt": "select_account",
     }
-    return AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params)
+    return AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params), state
 
 
 def _exchange_code(cfg, code: str) -> dict:
@@ -405,11 +410,14 @@ def _authorize_email(conn, cfg, email: str, name: Optional[str] = None,
     return None
 
 
-def handle_callback(conn, cfg, q: dict, client_ip: Optional[str] = None) -> str:
+def handle_callback(conn, cfg, q: dict, client_ip: Optional[str] = None,
+                    cookie_state: Optional[str] = None) -> str:
     """Process /auth/callback query params; return a fresh session token.
 
-    ``client_ip`` (fix #59) feeds the per-IP signup throttle. Raises
-    :class:`AuthError` on any problem.
+    ``client_ip`` (fix #59) feeds the per-IP signup throttle. ``cookie_state`` is
+    the value of the ``plutus_oauth_state`` cookie set on this browser at
+    ``/auth/login``; the callback ``state`` must match it (login-CSRF guard).
+    Raises :class:`AuthError` on any problem.
     """
     if q.get("error"):
         raise AuthError(f"Google returned an error: {q['error']}")
@@ -417,6 +425,12 @@ def handle_callback(conn, cfg, q: dict, client_ip: Optional[str] = None) -> str:
     state = q.get("state")
     if not code or not state:
         raise AuthError("missing code or state")
+    # Login-CSRF guard: the callback state must match the state cookie this
+    # browser received at /auth/login. Without this an attacker could feed a
+    # victim's browser their own code+state and plant an attacker-owned session
+    # (the global _pending pool alone does not bind the flow to a browser).
+    if not cookie_state or not secrets.compare_digest(str(state), str(cookie_state)):
+        raise AuthError("sign-in state did not match this browser — start again")
     nonce = _take_state(state)
     if nonce is None:
         raise AuthError("invalid or expired sign-in state — try again")
@@ -454,7 +468,7 @@ def csrf_token(session_token: str) -> str:
 
 
 # ----------------------------------------------------------- cookie helpers ---
-def read_cookie(handler) -> str:
+def read_cookie(handler, name: str = COOKIE) -> str:
     raw = handler.headers.get("Cookie", "")
     if not raw:
         return ""
@@ -463,7 +477,7 @@ def read_cookie(handler) -> str:
         jar.load(raw)
     except Exception:
         return ""
-    m = jar.get(COOKIE)
+    m = jar.get(name)
     return m.value if m else ""
 
 
@@ -481,6 +495,16 @@ def set_cookie_header(token: str, cfg, *, max_age: Optional[int] = None) -> str:
 
 def clear_cookie_header(cfg) -> str:
     return f"{COOKIE}=; Path=/; HttpOnly; SameSite=Lax{_secure_attr(cfg)}; Max-Age=0"
+
+
+def set_state_cookie_header(state: str, cfg) -> str:
+    """Short-lived cookie binding an in-flight OAuth login to this browser."""
+    return (f"{STATE_COOKIE}={state}; Path=/; HttpOnly; SameSite=Lax"
+            f"{_secure_attr(cfg)}; Max-Age={int(_STATE_TTL)}")
+
+
+def clear_state_cookie_header(cfg) -> str:
+    return f"{STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax{_secure_attr(cfg)}; Max-Age=0"
 
 
 def current_user(handler, conn):

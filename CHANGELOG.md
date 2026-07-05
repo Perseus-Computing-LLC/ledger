@@ -4,6 +4,17 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+### Security
+- **OIDC login-CSRF: bind the OAuth flow to the browser that started it.** The
+  authorization `state` was held only in a process-global pool, so an attacker
+  could complete their own Google sign-in, capture their `code`+`state`, and feed
+  a victim's browser a `/auth/callback?code=…&state=…` link — planting an
+  attacker-owned session in the victim's browser (the victim would then operate
+  inside, and leak API keys to, the attacker's tenant). `/auth/login` now sets a
+  short-lived `HttpOnly; SameSite=Lax` `plutus_oauth_state` cookie and
+  `handle_callback` requires the callback `state` to match it (constant-time),
+  in addition to the existing `_pending` nonce check. (2026-07-05 security review)
+
 ## [1.0.0] — 2026-06-27
 
 **Plutus 1.0 — the billing loop is closed and the contract is frozen.** The
