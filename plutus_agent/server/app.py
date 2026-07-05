@@ -160,6 +160,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        # Security headers on every response: block clickjacking + MIME-sniffing
+        # and lock the resource origin. The dashboard is inline-only and loads no
+        # external resources (favicon is a data: URI), so script/style keep
+        # 'unsafe-inline'; moving to a nonce-based script-src is a follow-up.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "same-origin")
+        self.send_header("Content-Security-Policy",
+                         "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                         "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                         "frame-ancestors 'none'; base-uri 'none'; object-src 'none'; "
+                         "form-action 'self'")
         for k, v in (headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -834,13 +846,13 @@ class Handler(BaseHTTPRequestHandler):
         sig = self.headers.get("Stripe-Signature", "")
         try:
             event = self.ctx.stripe.construct_event(payload, sig)
-        except BillingError as e:
-            return self._json(400, {"error": str(e)})
-        except Exception as e:  # signature failure etc.
-            return self._json(400, {"error": f"invalid webhook: {e}"})
-        # Stripe events are dict-like
+        except Exception as e:  # signature/parse failure — log detail, don't echo it
+            sys.stderr.write(f"plutus: webhook rejected: {e!r}\n")
+            return self._json(400, {"error": "invalid webhook signature or payload"})
         result = handle_webhook_event(conn, event)
-        sys.stderr.write(f"plutus: stripe event {result}\n")
+        # Log event id/type only — not the applied result (org_id/amount/balance).
+        sys.stderr.write(
+            f"plutus: stripe event id={event.get('id', '')} type={event.get('type', '')}\n")
         return self._json(200, {"received": True, "result": result})
 
 
