@@ -255,11 +255,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _auth_login(self):
         try:
-            url = authmod.login_url(self.ctx.cfg)
+            url, state = authmod.login_url(self.ctx.cfg)
         except authmod.AuthError as e:
             return self._send(500, views.simple_page(
                 "Sign in", "Sign-in is misconfigured", html.escape(str(e)), ok=False))
-        return self._send(200, views.login_page(url))
+        # Bind this login attempt to the browser (login-CSRF guard): the callback
+        # state must match this cookie.
+        return self._send(200, views.login_page(url), headers={
+            "Set-Cookie": authmod.set_state_cookie_header(state, self.ctx.cfg)})
 
     def _client_ip(self) -> str:
         """Best-effort client IP for rate limiting (fix #59). Honors the first
@@ -277,14 +280,16 @@ class Handler(BaseHTTPRequestHandler):
     def _auth_callback(self, conn, q):
         flat = {k: (v[0] if isinstance(v, list) else v) for k, v in q.items()}
         try:
-            token = authmod.handle_callback(conn, self.ctx.cfg, flat,
-                                            client_ip=self._client_ip())
+            token = authmod.handle_callback(
+                conn, self.ctx.cfg, flat, client_ip=self._client_ip(),
+                cookie_state=authmod.read_cookie(self, authmod.STATE_COOKIE))
         except authmod.AuthError as e:
             return self._send(403, views.simple_page(
                 "Sign in", "Could not sign you in", html.escape(str(e)), ok=False))
         self.send_response(303)
         self.send_header("Location", "/")
         self.send_header("Set-Cookie", authmod.set_cookie_header(token, self.ctx.cfg))
+        self.send_header("Set-Cookie", authmod.clear_state_cookie_header(self.ctx.cfg))
         self.end_headers()
 
     def _auth_logout(self, conn):
