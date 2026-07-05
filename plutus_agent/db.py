@@ -387,9 +387,10 @@ def count_orgs_created_since(conn, since_ts: float) -> int:
     return int(row["n"])
 
 
-def set_org_tier(conn, org_id: str, tier: str) -> None:
+def set_org_tier(conn, org_id: str, tier: str, commit: bool = True) -> None:
     conn.execute("UPDATE organizations SET tier=? WHERE id=?", (tier, org_id))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def set_org_allow_negative(conn, org_id: str, allow: bool) -> None:
@@ -774,13 +775,18 @@ def stripe_event_seen(conn, event_id: str) -> bool:
     ).fetchone() is not None
 
 
-def mark_stripe_event(conn, event_id: str, type_: str) -> bool:
-    """Mark a Stripe event as processed atomically. Returns True if newly inserted."""
+def mark_stripe_event(conn, event_id: str, type_: str, commit: bool = True) -> bool:
+    """Mark a Stripe event as processed atomically. Returns True if newly inserted.
+
+    Call with ``commit=False`` inside a ``db.immediate`` block so the claim is
+    atomic with the side effects it guards — a crash between the claim and the
+    credit must not leave a claimed-but-unapplied event (silent credit loss)."""
     cur = conn.execute(
         "INSERT OR IGNORE INTO stripe_events(event_id,type,processed_at) VALUES(?,?,?)",
         (event_id, type_, time.time()),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return cur.rowcount > 0
 
 

@@ -535,6 +535,45 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(200, csv_text, "text/csv; charset=utf-8",
                           {"Content-Disposition": 'attachment; filename="usage.csv"'})
 
+    def _usage_response(self, conn, org_id, out, n_blocked, n_over_balance, cfg):
+        """Build the (code, body) for a recorded /v1/usage batch. Called inside the
+        db.immediate block so the stored idempotent response commits atomically
+        with the debits it describes."""
+        from .. import metering
+        st = metering.tier_status(conn, org_id)
+        body = {
+            "org_id": org_id,
+            "tracked_tokens_mtd": st["tracked_tokens"],
+            "tracked_limit": st["tracked_limit"],
+            "tier": st["tier"],
+        }
+        n_recorded = len(out) - n_blocked - n_over_balance
+        if len(out) == 1:
+            body.update(out[0])
+        else:
+            body["results"] = out
+            body["recorded"] = n_recorded
+            # Fix #62: surface BOTH rejection reasons. `blocked` is the *total*
+            # so a 200 is never mistaken for "all recorded"; the breakdown
+            # distinguishes free-tier quota from the prepaid hard-stop, which a
+            # reconciler / SDK needs to act on a partially-rejected batch.
+            body["blocked"] = n_blocked + n_over_balance
+            body["free_limit_blocked"] = n_blocked
+            body["over_balance_blocked"] = n_over_balance
+        # 402 whenever NOTHING landed, regardless of the mix of reasons (Fix #62).
+        if n_recorded == 0:
+            base = (cfg.get("auth", {}).get("base_url") or "").rstrip("/")
+            if n_over_balance and not n_blocked:
+                body["error"] = "prepaid credit exhausted"
+            elif n_blocked and not n_over_balance:
+                body["error"] = "free-tier token quota reached — upgrade to Pro"
+            else:
+                body["error"] = ("usage rejected: free-tier quota and prepaid "
+                                 "credit both exhausted")
+            body["upgrade_url"] = (base + "/pricing") if base else "/pricing"
+            return 402, body
+        return 200, body
+
     def _ingest_usage(self, conn):
         """POST /v1/usage — meter one event (or a JSON array of them) via API key.
 
@@ -603,8 +642,14 @@ class Handler(BaseHTTPRequestHandler):
         replay = False
         try:
             with db.immediate(conn):
-                # Fix #65: claim the Idempotency-Key atomically with the recording
-                # so a retried/duplicated POST can't double-count or double-debit.
+                # Fix #65 + idempotency-reclaim double-debit fix: claim the
+                # Idempotency-Key AND store the response in the SAME transaction as
+                # the debits. Previously the claim+events committed here but the
+                # response/status was stored in a later separate commit — so a
+                # crash in between left committed events behind a NULL-status claim
+                # that the 120s reclaim would delete, letting a retry re-record the
+                # batch (double-debit). A truly-concurrent duplicate is serialized
+                # too: BEGIN IMMEDIATE makes the 2nd claim wait, then it replays.
                 if idem_key and not db.claim_idempotency_key(
                         conn, org_id, idem_key, commit=False):
                     replay = True
@@ -641,6 +686,11 @@ class Handler(BaseHTTPRequestHandler):
                             "over_balance": res.over_balance,
                             "unpriced": res.unpriced,
                         })
+                    code, body = self._usage_response(
+                        conn, org_id, out, n_blocked, n_over_balance, cfg)
+                    if idem_key:
+                        db.store_idempotency_response(
+                            conn, org_id, idem_key, code, json.dumps(body), commit=False)
         except Exception:
             return self._json(400, {"error": "batch recording failed"})
 
@@ -657,47 +707,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(409, {"error":
                 "a request with this Idempotency-Key is still in progress"})
 
-        st = metering.tier_status(conn, org_id)
-        body = {
-            "org_id": org_id,
-            "tracked_tokens_mtd": st["tracked_tokens"],
-            "tracked_limit": st["tracked_limit"],
-            "tier": st["tier"],
-        }
-        n_recorded = len(out) - n_blocked - n_over_balance
-        if len(out) == 1:
-            body.update(out[0])
-        else:
-            body["results"] = out
-            body["recorded"] = n_recorded
-            # Fix #62: surface BOTH rejection reasons. `blocked` is the *total*
-            # so a 200 is never mistaken for "all recorded"; the breakdown
-            # distinguishes free-tier quota from the prepaid hard-stop, which a
-            # reconciler / SDK needs to act on a partially-rejected batch.
-            body["blocked"] = n_blocked + n_over_balance
-            body["free_limit_blocked"] = n_blocked
-            body["over_balance_blocked"] = n_over_balance
-
-        # 402 whenever NOTHING landed, regardless of the mix of reasons. Fix #62:
-        # previously this only fired when a *single* reason accounted for the
-        # whole batch, so a batch split across both reasons (e.g. 60 over-balance
-        # + 40 over-quota) slipped through as a 200 with everything rejected.
-        if n_recorded == 0:
-            base = (cfg.get("auth", {}).get("base_url") or "").rstrip("/")
-            if n_over_balance and not n_blocked:
-                body["error"] = "prepaid credit exhausted"
-            elif n_blocked and not n_over_balance:
-                body["error"] = "free-tier token quota reached — upgrade to Pro"
-            else:
-                body["error"] = ("usage rejected: free-tier quota and prepaid "
-                                 "credit both exhausted")
-            body["upgrade_url"] = (base + "/pricing") if base else "/pricing"
-            code = 402
-        else:
-            code = 200
-        # Fix #65: persist the response so a duplicate Idempotency-Key replays it.
-        if idem_key:
-            db.store_idempotency_response(conn, org_id, idem_key, code, json.dumps(body))
         return self._json(code, body)
 
     # ---- admin API (token-scoped; #66) -------------------------------------

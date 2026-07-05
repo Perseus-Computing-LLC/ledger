@@ -164,7 +164,11 @@ def record_usage(conn, org_id: str, provider: str,
             "SELECT 1 FROM credit_ledger WHERE org_id=? AND kind IN ('topup','grant') LIMIT 1",
             (org_id,),
         ).fetchone()
-        if had_credit and balance - cost_usd < 0:
+        # Fix (#14): decide the hard-stop in integer micro-dollars, not float USD.
+        # `balance` above stays float only for the balance_after display field;
+        # a sub-micro float error must not let a debit slip past zero (or wrongly
+        # block one). get_balance_micros/usd_to_micros are exact integers.
+        if had_credit and db.get_balance_micros(conn, org_id) - db.usd_to_micros(cost_usd) < 0:
             return MeterResult(
                 event_id="", org_id=org_id, workspace_id=workspace_id,
                 provider=provider, model=model, task_type=task_type,
