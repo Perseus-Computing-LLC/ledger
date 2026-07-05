@@ -5,6 +5,26 @@ All notable changes to Plutus are documented here.
 ## [Unreleased]
 
 ### Security
+- **Fail closed instead of exposing an unauthenticated dashboard.** The server now
+  refuses to bind a non-loopback host (e.g. `--host 0.0.0.0`) when authentication
+  is disabled — previously the shipped Docker/compose default (`serve --demo
+  --host 0.0.0.0`) and the off-by-default / fail-off-on-misconfig auth could
+  publish an open billing console on the network. Override for a trusted network
+  with `--allow-insecure` / `PLUTUS_ALLOW_INSECURE=1`; the disposable demo image
+  sets it explicitly. New `docs/deploy-hardening.md` documents the safe config.
+- **Config backups no longer escape the ignore rules.** `.gitignore`/`.dockerignore`
+  matched only `*.plutus-bak-*` but the real backup name is `config.yaml.bak-<ts>`,
+  which could carry file-sourced secrets into a commit or image; now `config.yaml*`
+  and `*.bak-*` are ignored.
+- **SMTP `alerts.require_tls` (opt-in)** refuses to send alerts over an
+  unencrypted connection (protects alert bodies, not just credentials, from a
+  STARTTLS downgrade). **PyYAML** is now a hard requirement at server start
+  (fail fast) rather than silently degrading config parsing.
+
+### Changed
+- Dependency floors gained upper bounds (`stripe<14`, `reportlab<5`, `PyYAML<7`,
+  `pytest<10`) for reproducible builds; the Docker image now runs as a non-root
+  user.
 - **Ledger atomicity: every money side effect now commits in the same transaction
   as the marker guarding it.** Two crash-window bugs are closed:
   (1) *Webhook silent credit loss / double-reverse* — `mark_stripe_event` committed

@@ -7,6 +7,11 @@ plutus.html
 plutus.err
 *.plutus-bak-*
 config.yaml.plutus-bak-*
+# Config and its timestamped backups (config.yaml.bak-<ts>) can hold file-sourced
+# secrets — never commit them (the old patterns above missed the .bak- form).
+config.yaml
+config.yaml.*
+*.bak-*
 
 # Python
 __pycache__/

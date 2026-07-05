@@ -84,6 +84,7 @@ def send_pending(conn, cfg: dict, org_id: str,
     port = int(acfg.get("smtp_port", 587))
     user = acfg.get("smtp_user") or ""
     password = acfg.get("smtp_password") or ""
+    require_tls = bool(acfg.get("require_tls"))  # #15: fail closed if TLS unavailable
 
     sent = 0
     errors = []
@@ -117,6 +118,14 @@ def send_pending(conn, cfg: dict, org_id: str,
                     except Exception:
                         pass
                 
+                # Fix (#15): with require_tls set, refuse to send at all over an
+                # unencrypted link — protects alert bodies (mild PII), not just
+                # credentials, from a STARTTLS downgrade/MITM.
+                if require_tls and not tls_secured:
+                    return {"sent": 0, "dry_run": False, "pending": len(items),
+                            "error": "alerts.require_tls is set but STARTTLS "
+                                     "could not be established"}
+
                 # Only login if TLS is secured OR if no credentials are required
                 if user and password:
                     if not tls_secured:

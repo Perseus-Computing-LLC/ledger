@@ -14,3 +14,8 @@ dist
 *.egg-info
 tests
 demo.cast
+# Never bake config or its secret-bearing backups into the image context
+config.yaml
+config.yaml.*
+*.bak-*
+data

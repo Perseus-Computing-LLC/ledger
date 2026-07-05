@@ -75,6 +75,8 @@ def cmd_init(args):
 def cmd_serve(args, demo=False):
     from . import server
     cfg = cfgmod.load()
+    if getattr(args, "allow_insecure", False):
+        cfg.setdefault("server", {})["allow_insecure"] = True
     demo = demo or args.demo
     db_path = str(cfgmod.db_path())
     if demo:
@@ -419,11 +421,16 @@ def build_parser():
     ps.add_argument("--host"); ps.add_argument("--port", type=int)
     ps.add_argument("--demo", action="store_true", help="serve realistic sample data")
     ps.add_argument("--open", action="store_true", help="open a browser")
+    ps.add_argument("--allow-insecure", action="store_true",
+                    help="permit binding a non-loopback host with auth disabled "
+                         "(trusted networks only; the default fails closed)")
     ps.set_defaults(func=cmd_serve)
 
     pd = sub.add_parser("demo", help="serve with sample data (zero setup)")
     pd.add_argument("--host"); pd.add_argument("--port", type=int)
     pd.add_argument("--open", action="store_true")
+    pd.add_argument("--allow-insecure", action="store_true",
+                    help="permit binding a non-loopback host with auth disabled")
     pd.set_defaults(func=lambda a: cmd_serve(a, demo=True), demo=True)
 
     sub.add_parser("status", help="show orgs, balances, Stripe mode").set_defaults(func=cmd_status)

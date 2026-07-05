@@ -18,16 +18,26 @@ COPY pyproject.toml README.md LICENSE ./
 COPY plutus_agent ./plutus_agent
 RUN pip install --no-cache-dir ".[all]"
 
+# Run as a non-root user; /data (config + SQLite) is owned by it.
+RUN useradd --system --create-home --uid 10001 plutus \
+ && mkdir -p /data && chown -R plutus:plutus /data /app
+USER plutus
+
 # State (config + SQLite) persists in a mounted volume.
 VOLUME ["/data"]
 EXPOSE 8420
 
-# Bind to all interfaces inside the container; map the port on the host.
-# Default to the demo so `docker run -p 8420:8420 plutus-agent` shows value
-# instantly. For real use, override the command:
-#   docker run -p 8420:8420 -v plutus:/data plutus-agent serve --host 0.0.0.0
+# Default is DEMO mode (throwaway sample data, no auth) so
+# `docker run -p 8420:8420 plutus-agent` shows value instantly; it passes
+# --allow-insecure because it is a disposable demo. For a REAL deploy, override
+# the command AND configure auth — the server refuses to bind 0.0.0.0 with auth
+# off (see docs/deploy-hardening.md):
+#   docker run -p 8420:8420 -v plutus:/data \
+#     -e PLUTUS_AUTH_ENABLED=1 -e PLUTUS_GOOGLE_CLIENT_ID=... \
+#     -e PLUTUS_GOOGLE_CLIENT_SECRET=... -e PLUTUS_BASE_URL=https://host \
+#     plutus-agent serve --host 0.0.0.0
 HEALTHCHECK --interval=30s --timeout=4s --start-period=5s \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8420/healthz',timeout=3).status==200 else 1)"
 
 ENTRYPOINT ["plutus"]
-CMD ["serve", "--demo", "--host", "0.0.0.0"]
+CMD ["serve", "--demo", "--host", "0.0.0.0", "--allow-insecure"]
