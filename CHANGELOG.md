@@ -5,6 +5,25 @@ All notable changes to Plutus are documented here.
 ## [Unreleased]
 
 ### Security
+- **Ledger atomicity: every money side effect now commits in the same transaction
+  as the marker guarding it.** Two crash-window bugs are closed:
+  (1) *Webhook silent credit loss / double-reverse* — `mark_stripe_event` committed
+  the event claim in a separate transaction from the credit `add_ledger`, so a
+  crash between them plus Stripe's retry left the event marked "duplicate" with the
+  credit never applied (customer paid, no credit); concurrent refund/dispute events
+  for one charge could also double-reverse. `handle_webhook_event` now wraps the
+  claim and all side effects in one `db.immediate` (`BEGIN IMMEDIATE`) transaction
+  with `commit=False` threaded through `mark_stripe_event`/`add_ledger`/
+  `set_org_tier`; any error rolls the whole thing back for a clean retry.
+  (2) *`/v1/usage` idempotency double-debit* — the batch committed, but the
+  idempotency-key status was flipped in a later separate commit, so a crash in
+  between left committed events behind a NULL-status claim that the 120s reclaim
+  deleted, letting a retry re-record the batch. The response is now stored inside
+  the same `db.immediate` block as the debits. (2026-07-05 security review)
+- **Prepaid hard-stop decided in integer micro-dollars.** The `block_over_balance`
+  check compared float USD (`balance - cost_usd < 0`); it now uses
+  `get_balance_micros`/`usd_to_micros` so sub-micro float error can't let a debit
+  slip past zero or wrongly block one. (2026-07-05 security review)
 - **OIDC login-CSRF: bind the OAuth flow to the browser that started it.** The
   authorization `state` was held only in a process-global pool, so an attacker
   could complete their own Google sign-in, capture their `code`+`state`, and feed

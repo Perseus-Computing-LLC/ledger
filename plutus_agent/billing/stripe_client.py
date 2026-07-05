@@ -204,15 +204,20 @@ def handle_webhook_event(conn, event: dict) -> dict:
     """
     event_id = event.get("id", "")
     etype = event.get("type", "")
-    
-    # Atomically claim the event first (fix #26: prevent concurrent double-credit)
-    if event_id and not db.mark_stripe_event(conn, event_id, etype):
-        return {"status": "duplicate", "type": etype, "id": event_id}
-
     obj = (event.get("data") or {}).get("object") or {}
-    result = {"status": "ignored", "type": etype, "id": event_id}
 
-    try:
+    # Fix F2/F5/F6: claim the event AND apply its side effects in ONE serialized
+    # transaction. Previously the claim committed separately from the credit, so a
+    # crash between them + Stripe's retry left the event marked "duplicate" with
+    # the credit never applied (silent credit loss); and concurrent refund/dispute
+    # deliveries for one charge could double-reverse. BEGIN IMMEDIATE serializes
+    # them, and any exception rolls the whole transaction back — including the
+    # claim — so the event is cleanly retried (no manual unmark needed).
+    with db.immediate(conn):
+        if event_id and not db.mark_stripe_event(conn, event_id, etype, commit=False):
+            return {"status": "duplicate", "type": etype, "id": event_id}
+
+        result = {"status": "ignored", "type": etype, "id": event_id}
         if etype == "checkout.session.completed":
             result = _apply_checkout_completed(conn, obj)
         elif etype in ("customer.subscription.created", "customer.subscription.updated"):
@@ -226,11 +231,6 @@ def handle_webhook_event(conn, event: dict) -> dict:
             result = _apply_dispute(conn, obj)
         elif etype == "invoice.payment_failed":
             result = _apply_payment_failed(conn, obj)
-    except Exception:
-        # Rollback the event claim so it can be retried
-        if event_id:
-            db.unmark_stripe_event(conn, event_id)
-        raise
 
     result.setdefault("type", etype)
     result.setdefault("id", event_id)
@@ -269,11 +269,11 @@ def _apply_checkout_completed(conn, obj) -> dict:
         # PaymentIntent but not always the customer — can be mapped back to it.
         ref = obj.get("payment_intent") or obj.get("id")
         row = db.add_ledger(conn, org_id, usd, "topup",
-                            reason="Stripe checkout", stripe_ref=ref)
+                            reason="Stripe checkout", stripe_ref=ref, commit=False)
         return {"status": "credited", "org_id": org_id, "amount_usd": usd,
                 "balance_after": float(row["balance_after"])}
     if kind == "subscription" or obj.get("mode") == "subscription":
-        db.set_org_tier(conn, org_id, "pro")
+        db.set_org_tier(conn, org_id, "pro", commit=False)
         return {"status": "subscribed", "org_id": org_id, "tier": "pro"}
     return {"status": "ignored", "org_id": org_id}
 
@@ -288,7 +288,7 @@ def _apply_subscription_change(conn, obj) -> dict:
     # restores `active` (→ Pro again) when payment succeeds, and emits
     # `subscription.deleted` (→ free) when dunning is exhausted.
     tier = "pro" if status in ("active", "trialing") else "free"
-    db.set_org_tier(conn, org_id, tier)
+    db.set_org_tier(conn, org_id, tier, commit=False)
     return {"status": "tier_set", "org_id": org_id, "tier": tier,
             "subscription_status": status}
 
@@ -297,7 +297,7 @@ def _apply_subscription_deleted(conn, obj) -> dict:
     org_id = _org_from_metadata_or_customer(conn, obj)
     if not org_id:
         return {"status": "no_org"}
-    db.set_org_tier(conn, org_id, "free")
+    db.set_org_tier(conn, org_id, "free", commit=False)
     return {"status": "downgraded", "org_id": org_id, "tier": "free"}
 
 
@@ -326,7 +326,8 @@ def _reverse(conn, org_id: str, ref: str, target_reversed_usd: float,
     delta = round(max(0.0, target_reversed_usd) - already, 6)
     if delta <= 0:
         return None
-    row = db.add_ledger(conn, org_id, -delta, kind, reason=reason, stripe_ref=ref)
+    row = db.add_ledger(conn, org_id, -delta, kind, reason=reason, stripe_ref=ref,
+                        commit=False)
     return row, delta
 
 
@@ -376,5 +377,5 @@ def _apply_payment_failed(conn, obj) -> dict:
     if not org_id:
         return {"status": "no_org"}
     db.log_alert(conn, org_id, "payment_failed",
-                 "Stripe reported a failed invoice payment.")
+                 "Stripe reported a failed invoice payment.", commit=False)
     return {"status": "payment_failed", "org_id": org_id}
