@@ -4,6 +4,17 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-07-05
+
+**Security-hardening release.** A four-part follow-up to the internal pre-1.0
+review, from a fresh 2026-07-05 audit (money/ledger, auth/OIDC, HTTP surface,
+deploy posture). No API/contract changes; the `/v1` surface is unchanged. Every
+finding was traced to source and covered by tests. Highlights: closed an OIDC
+login-CSRF, made all money side effects atomic with the markers guarding them
+(no webhook credit-loss / idempotency double-debit under crash+retry), added
+security headers + CSV-injection defense, and made the server fail closed rather
+than expose an unauthenticated dashboard on a public interface.
+
 ### Security
 - **Fail closed instead of exposing an unauthenticated dashboard.** The server now
   refuses to bind a non-loopback host (e.g. `--host 0.0.0.0`) when authentication
