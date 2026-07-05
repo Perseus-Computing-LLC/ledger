@@ -14,6 +14,25 @@ All notable changes to Plutus are documented here.
   short-lived `HttpOnly; SameSite=Lax` `plutus_oauth_state` cookie and
   `handle_callback` requires the callback `state` to match it (constant-time),
   in addition to the existing `_pending` nonce check. (2026-07-05 security review)
+- **Security headers on every response.** `_send` now emits `X-Frame-Options: DENY`
+  (+ CSP `frame-ancestors 'none'`) so the dashboard can't be framed/clickjacked,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and a CSP that
+  locks `default-src`/`object-src`/`base-uri`/`form-action` to self. Script/style
+  keep `'unsafe-inline'` (the dashboard is inline-only); a nonce-based `script-src`
+  is a follow-up. (2026-07-05 security review)
+- **CSV export formula-injection neutralized.** Tenant-controlled
+  `provider`/`model`/`workspace`/`task_type` cells beginning with `= + - @` (or a
+  leading tab/CR) are now quote-prefixed in `export.csv`, so a crafted value like
+  `=HYPERLINK(...)` can't execute when a teammate opens the export. (2026-07-05)
+- **Webhook error/log hardening.** `/webhook/stripe` no longer echoes the raw
+  exception text to the caller on a bad signature (returns a generic message, logs
+  detail server-side), and the success path logs only the event id/type instead of
+  the applied result (org_id/amount/balance). (2026-07-05 security review)
+
+### Changed
+- `views.simple_page`'s body parameter renamed to `body_html` with a docstring
+  making explicit that it is inserted as raw HTML and callers must pre-escape
+  untrusted data (removes a latent XSS foot-gun; no live path today). (2026-07-05)
 
 ## [1.0.0] — 2026-06-27
 

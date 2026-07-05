@@ -66,14 +66,28 @@ _EXPORT_COLUMNS = ["id", "ts", "provider", "model", "task_type", "workspace",
                    "reasoning_tokens", "cost_usd", "estimated", "source"]
 
 
+def _csv_safe(value):
+    """Neutralize spreadsheet formula injection: a cell whose text begins with
+    ``= + - @`` (or a leading tab/CR that a spreadsheet strips to reach them) is
+    prefixed with a single quote so Excel/Sheets treat it as text, not a formula."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def export_csv(conn, org_id: str, since=None, until=None) -> str:
-    """Org-scoped usage events as CSV text (fix #66)."""
+    """Org-scoped usage events as CSV text (fix #66).
+
+    Cells are formula-injection neutralized (2026-07-05 security review):
+    ``provider``/``model``/``workspace``/``task_type`` are tenant-controlled at
+    ingest, so a crafted value like ``=HYPERLINK(...)`` would otherwise execute
+    when a teammate opens the export in a spreadsheet."""
     rows = db.export_events(conn, org_id, since=since, until=until)
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=_EXPORT_COLUMNS, extrasaction="ignore")
     w.writeheader()
     for r in rows:
-        w.writerow(r)
+        w.writerow({k: _csv_safe(v) for k, v in r.items()})
     return buf.getvalue()
 
 

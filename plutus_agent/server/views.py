@@ -510,7 +510,10 @@ def login_page(login_href: str) -> str:
 </div></div></body></html>"""
 
 
-def simple_page(title: str, heading: str, body: str, *, ok: bool = True) -> str:
+def simple_page(title: str, heading: str, body_html: str, *, ok: bool = True) -> str:
+    """Render a minimal status page. ``title`` and ``heading`` are auto-escaped,
+    but ``body_html`` is inserted as RAW HTML — callers MUST pre-escape any
+    untrusted/user-controlled data (e.g. ``html.escape(...)``) before passing it."""
     color = "var(--green)" if ok else "var(--coral)"
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Plutus — {_e(title)}</title>{FAVICON}
@@ -518,6 +521,6 @@ def simple_page(title: str, heading: str, body: str, *, ok: bool = True) -> str:
 <div class="brand" style="margin-bottom:20px"><div class="logo">◆</div><div><h1>Plutus</h1></div></div>
 <div class="panel" style="padding:26px 22px">
   <h2 style="color:{color};font-size:18px;padding:0;text-transform:none;letter-spacing:0">{_e(heading)}</h2>
-  <div class="muted" style="margin-top:8px">{body}</div>
+  <div class="muted" style="margin-top:8px">{body_html}</div>
   <p style="margin-top:20px"><a href="/">← Back to dashboard</a></p>
 </div></div></body></html>"""
