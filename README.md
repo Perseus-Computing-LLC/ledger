@@ -1,5 +1,5 @@
 <div align="center">
-  <img src=".github/banner.png" alt="Plutus — Credit & Spend Monitor. Never run out mid-session." width="100%">
+  <img src=".github/banner.png" alt="Plutus — Credit & Spend Monitor. Usage metering + prepaid credit." width="100%">
 </div>
 
 # Plutus — the billing layer for AI agents
