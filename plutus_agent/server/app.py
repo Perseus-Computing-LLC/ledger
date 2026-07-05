@@ -10,6 +10,7 @@ import hashlib
 import html
 import json
 import math
+import os
 import secrets
 import sys
 import threading
@@ -865,9 +866,36 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(200, {"received": True, "result": result})
 
 
+def _guard_insecure_bind(host, auth_on, cfg):
+    """Fail closed rather than expose an UNAUTHENTICATED dashboard on a non-loopback
+    interface. The shipped Docker/compose default binds ``--host 0.0.0.0``, and auth
+    is off-by-default and falls off on misconfig, so without this a plain deploy
+    could publish an open billing console on the network. Bypass only with an
+    explicit opt-in (localhost-proxy / trusted-network deployments)."""
+    loopback = str(host) in ("127.0.0.1", "localhost", "::1", "")
+    allow_insecure = bool(cfg.get("server", {}).get("allow_insecure")) or \
+        os.environ.get("PLUTUS_ALLOW_INSECURE", "").strip().lower() in ("1", "true", "yes")
+    if auth_on or loopback or allow_insecure:
+        return
+    raise SystemExit(
+        f"plutus: refusing to serve on host {host!r} with authentication disabled; "
+        "this would expose the billing dashboard and API to the network.\n"
+        "  Do one of:\n"
+        "   - enable auth (PLUTUS_AUTH_ENABLED=1 + Google client id/secret + an https base_url)\n"
+        "   - bind 127.0.0.1 behind a TLS-terminating reverse proxy\n"
+        "   - for a trusted network only, pass --allow-insecure (PLUTUS_ALLOW_INSECURE=1)")
+
+
 def serve(host=None, port=None, db_path=None, demo=False, cfg=None,
           open_browser=False):
     """Start the dashboard/API server. Blocks until interrupted."""
+    # Fix (#17): PyYAML is a hard dependency; fail fast rather than silently
+    # degrading to the minimal config parser (which could reset a security config
+    # such as allowed_emails to defaults when run from source without deps).
+    import importlib.util
+    if importlib.util.find_spec("yaml") is None:
+        raise SystemExit("plutus: PyYAML is required to run the server "
+                         "(pip install 'plutus-agent[all]').")
     cfg = cfg or cfgmod.load()
     host = host or cfg.get("server", {}).get("host", "127.0.0.1")
     port = int(port or cfg.get("server", {}).get("port", 8420))
@@ -879,6 +907,7 @@ def serve(host=None, port=None, db_path=None, demo=False, cfg=None,
     c.close()
 
     ctx = _Ctx(cfg, db_path, demo=demo)
+    _guard_insecure_bind(host, ctx.auth_on, cfg)
     httpd = _Server((host, port), Handler, ctx)
     url = f"http://{host}:{port}/"
     stripe_mode = ctx.stripe.status()["mode"]

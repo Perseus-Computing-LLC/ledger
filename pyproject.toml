@@ -32,14 +32,17 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "PyYAML>=5.4",
+    "PyYAML>=5.4,<7",
 ]
 
 [project.optional-dependencies]
-stripe = ["stripe>=7.0"]
-pdf = ["reportlab>=4.0"]
-all = ["stripe>=7.0", "reportlab>=4.0"]
-dev = ["stripe>=7.0", "reportlab>=4.0", "pytest>=7.0"]
+# Upper bounds pin against surprise major bumps of money/report-critical deps
+# (reproducibility; deploy a hash-locked artifact for production — see
+# docs/deploy-hardening.md).
+stripe = ["stripe>=7.0,<14"]
+pdf = ["reportlab>=4.0,<5"]
+all = ["stripe>=7.0,<14", "reportlab>=4.0,<5"]
+dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "pytest>=7.0,<10"]
 
 [project.urls]
 Homepage = "https://perseus.observer/plutus/"

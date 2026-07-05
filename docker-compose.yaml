@@ -15,15 +15,25 @@ services:
       - plutus-data:/data
     environment:
       PLUTUS_HOME: /data
+      # --- Auth (REQUIRED for a real deploy: the server refuses to bind 0.0.0.0
+      #     with auth disabled). Uncomment + fill these, drop --allow-insecure
+      #     from the command below, and ideally sit behind a TLS proxy.
+      #     See docs/deploy-hardening.md. ---
+      # PLUTUS_AUTH_ENABLED: "1"
+      # PLUTUS_GOOGLE_CLIENT_ID: ${PLUTUS_GOOGLE_CLIENT_ID:-}
+      # PLUTUS_GOOGLE_CLIENT_SECRET: ${PLUTUS_GOOGLE_CLIENT_SECRET:-}
+      # PLUTUS_BASE_URL: ${PLUTUS_BASE_URL:-}   # https://... enables the Secure cookie
+      # PLUTUS_ALLOWED_DOMAIN: ${PLUTUS_ALLOWED_DOMAIN:-}
       # --- Stripe (optional; leave blank to run fully offline) ---
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
-    # Demo by default so the stack shows value on first `up`. Swap to the real
-    # server once you've run `plutus init`:
-    # command: ["serve", "--host", "0.0.0.0"]
-    command: ["serve", "--demo", "--host", "0.0.0.0"]
+    # DEMO by default (throwaway data, no auth) so the stack shows value on first
+    # `up`; --allow-insecure is required because auth is off. For a REAL deploy,
+    # configure the auth env vars above and switch to the production command:
+    #   command: ["serve", "--host", "0.0.0.0"]
+    command: ["serve", "--demo", "--host", "0.0.0.0", "--allow-insecure"]
     restart: unless-stopped
 
 volumes:
