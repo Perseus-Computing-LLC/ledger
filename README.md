@@ -1,3 +1,7 @@
+<div align="center">
+  <img src=".github/banner.png" alt="Plutus — Credit & Spend Monitor. Never run out mid-session." width="100%">
+</div>
+
 # Plutus — the billing layer for AI agents
 
 [![Test](https://github.com/Perseus-Computing-LLC/plutus/actions/workflows/test.yml/badge.svg)](https://github.com/Perseus-Computing-LLC/plutus/actions/workflows/test.yml)
