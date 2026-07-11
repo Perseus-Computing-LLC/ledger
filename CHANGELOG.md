@@ -4,6 +4,19 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Cost reconciliation (`plutus reconcile`).** The wired providers return
+  tokens, not dollars, so metered cost is priced from the static table in
+  `pricing.py` and flagged `estimated`. The new reconciler trues that up to a
+  provider's authoritative billing: give it the provider's own per-provider
+  total for a period (from its usage or cost export) and it writes one `adjust`
+  ledger entry per provider so the ledger, and the prepaid balance, match the
+  real invoice. Idempotent and restatement-safe (each provider+period keyed by
+  `reconcile:<period>:<provider>`, written net of prior adjusts), dry-run by
+  default, and it never assumes a provider with no supplied total should be
+  zeroed. New `plutus_agent.reconcile` module + `plutus reconcile` CLI. See
+  docs/reconciliation.md.
+
 ### Fixed
 - **Per-model spend attribution for mid-session model switches.** Plutus reads
   Hermes' `state.db` for spend. The `sessions` row attributes every token to the
