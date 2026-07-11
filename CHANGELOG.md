@@ -21,6 +21,19 @@ All notable changes to Plutus are documented here.
   back-filled). Reuses the Perseus Vault audit-chain design (#460/#463). No
   "tamper-evident" claim ships in public docs until an external crypto review
   covers this. See docs/ledger-integrity.md. (#108)
+- **Provider cost fetchers + scheduled close (`plutus close`).** Follow-up to
+  the reconciler (#107): the operator no longer supplies the authoritative
+  per-provider total by hand. New `plutus_agent.fetchers` pulls a period's real
+  spend from each provider's own cost API — OpenAI organization Costs
+  (`OPENAI_ADMIN_KEY`), Anthropic cost report (`ANTHROPIC_ADMIN_KEY`), and AWS
+  Bedrock via Cost Explorer (`pip install 'plutus-agent[fetchers]'`) — and
+  normalizes to the reconciler's `{provider: usd}` shape. `plutus close` runs
+  fetch → reconcile in one step (period defaults to the previous month;
+  providers default to those with recorded usage), dry-run by default, apply with
+  `--apply`. Carries #107's guardrails: a provider whose fetch fails is left
+  unreconciled and **never zeroed**, and `close` exits non-zero so a cron job
+  surfaces the gap. OpenAI/Anthropic use stdlib urllib (no new hard dependency);
+  the offline story is untouched. See docs/reconciliation.md. (#109)
 - **Cost reconciliation (`plutus reconcile`).** The wired providers return
   tokens, not dollars, so metered cost is priced from the static table in
   `pricing.py` and flagged `estimated`. The new reconciler trues that up to a

@@ -258,3 +258,45 @@ def month_window(period_label: str) -> tuple[float, float]:
     end = (_dt.datetime(year + 1, 1, 1, tzinfo=_dt.timezone.utc) if month == 12
            else _dt.datetime(year, month + 1, 1, tzinfo=_dt.timezone.utc))
     return start.timestamp(), end.timestamp()
+
+
+def previous_month_label(now_ts: Optional[float] = None) -> str:
+    """``YYYY-MM`` for the month before ``now`` (UTC). The cron default: a close
+    run shortly after month end trues up the month that just ended."""
+    now = _dt.datetime.fromtimestamp(now_ts if now_ts is not None else time.time(),
+                                     tz=_dt.timezone.utc)
+    first_of_this = now.replace(day=1)
+    last_of_prev = first_of_this - _dt.timedelta(days=1)
+    return f"{last_of_prev.year:04d}-{last_of_prev.month:02d}"
+
+
+# ------------------------------------------------------ scheduled period close --
+def close_period(conn, org_id: str, period_label: str, *,
+                 providers: Optional[list] = None, apply: bool = False,
+                 fetchers: Optional[dict] = None,
+                 ts: Optional[float] = None) -> dict:
+    """Fetch each provider's authoritative total for ``period_label`` and
+    reconcile the org's ledger to it — the unattended fetch → reconcile step
+    (#109) behind the cron close.
+
+    ``providers`` defaults to the providers that actually have recorded usage in
+    the period (so a routine close targets exactly what was metered). Pass an
+    explicit list to also true-up a provider that billed but wasn't metered.
+
+    A provider whose fetch fails is reported in ``fetch_errors`` and left OUT of
+    the reconcile input, so the ledger is never zeroed on a failed fetch. Dry-run
+    by default; nothing is written unless ``apply`` is True.
+    """
+    from . import fetchers as _fetchers  # lazy: keep provider SDKs off the import path
+    start_ts, end_ts = month_window(period_label)
+    if providers is None:
+        providers = sorted(recorded_cost_by_provider(conn, org_id, start_ts, end_ts))
+    totals, fetch_errors = _fetchers.fetch_authoritative(
+        providers, start_ts, end_ts, fetchers=fetchers)
+    report = reconcile(conn, org_id, totals, period_label=period_label,
+                       start_ts=start_ts, end_ts=end_ts, apply=apply, ts=ts)
+    out = report.as_dict()
+    out["providers_requested"] = list(providers)
+    out["fetch_errors"] = fetch_errors
+    out["fetched"] = {k: round(v, 6) for k, v in totals.items()}
+    return out
