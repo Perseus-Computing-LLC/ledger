@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 # ---------------------------------------------------------------- locations ---
@@ -24,6 +24,19 @@ def config_path() -> Path:
 
 def db_path() -> Path:
     return Path(os.environ.get("PLUTUS_DB", str(home_dir() / "plutus.db")))
+
+
+def chain_hmac_key(cfg: Optional[dict] = None) -> Optional[bytes]:
+    """Resolve the ledger tamper-evidence HMAC key (#108) as bytes, or ``None``.
+
+    Precedence: the ``PLUTUS_CHAIN_HMAC_KEY`` env var, else ``ledger.hmac_key``
+    from the loaded config. Empty/absent => ``None`` (plain SHA-256 chain).
+    """
+    val = os.environ.get("PLUTUS_CHAIN_HMAC_KEY")
+    if not val and cfg is not None:
+        val = (cfg.get("ledger") or {}).get("hmac_key")
+    val = (val or "").strip()
+    return val.encode("utf-8") if val else None
 
 
 # ----------------------------------------------------------------- defaults ---
@@ -109,6 +122,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # management (orgs, credits, keys). Empty token => the admin API is
         # DISABLED (returns 404). Prefer the PLUTUS_ADMIN_TOKEN env var over file.
         "token": "",
+    },
+    "ledger": {
+        # #108: usage_events tamper-evidence hash chain. The chain is ALWAYS on
+        # (plain SHA-256, offline/self-hosted default). Set a secret here — or via
+        # the PLUTUS_CHAIN_HMAC_KEY env var (preferred) — to upgrade it to a keyed
+        # HMAC-SHA256 chain. When the key is held by the customer (not the
+        # operator), the operator cannot silently re-chain a rewritten history:
+        # this is the two-party "auditable by both parties" property. Rotating or
+        # losing the key makes rows written under the old key verify only with
+        # that old key; `plutus verify --hmac-key ...` accepts an explicit key.
+        "hmac_key": "",
     },
     "pricing": {
         # Override provider price tables here, shaped:
@@ -304,6 +328,9 @@ def load() -> dict:
     if env.get("PLUTUS_ALLOW_SIGNUP"):
         cfg["auth"]["allow_signup"] = env["PLUTUS_ALLOW_SIGNUP"].strip().lower() in (
             "1", "true", "yes", "on")
+    # #108: keyed-MAC secret for the ledger tamper-evidence chain.
+    if env.get("PLUTUS_CHAIN_HMAC_KEY"):
+        cfg.setdefault("ledger", {})["hmac_key"] = env["PLUTUS_CHAIN_HMAC_KEY"]
     return cfg
 
 
@@ -320,6 +347,7 @@ def _strip_env_secrets(cfg: dict) -> dict:
         ("alerts", "smtp_password", "PLUTUS_SMTP_PASSWORD"),
         ("auth", "google_client_secret", "PLUTUS_GOOGLE_CLIENT_SECRET"),
         ("admin", "token", "PLUTUS_ADMIN_TOKEN"),
+        ("ledger", "hmac_key", "PLUTUS_CHAIN_HMAC_KEY"),
     ]
     for section, key, envvar in pairs:
         val = out.get(section, {}).get(key)

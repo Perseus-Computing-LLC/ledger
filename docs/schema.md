@@ -15,6 +15,7 @@ ships at schema_version 5.** Read the stored value with `db.get_schema_version(c
 |---|---|
 | 4 | Money stored as integer micro-dollars (`*_micros`); the `allow_negative_balance` org column. |
 | 5 | Adds the `ingest_idempotency` table (per-org `Idempotency-Key` store, #65). |
+| 6 | Adds `usage_events.prev_hash`/`row_hash` — the per-org tamper-evidence hash chain (#108). Nullable; rows written before the upgrade stay `NULL` ("pre-chain", unverifiable). See docs/ledger-integrity.md. |
 
 ## The contract (within the 1.0 major line)
 

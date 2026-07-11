@@ -31,7 +31,8 @@ from typing import Optional
 # 1.0 line, changes are ADDITIVE only (new tables / nullable or defaulted columns)
 # so an older reader keeps working — see docs/schema.md for the forward-compat
 # contract. 5 = adds the ingest_idempotency table (#65).
-SCHEMA_VERSION = 5
+# 6 = adds the usage_events hash chain (prev_hash/row_hash) for tamper-evidence (#108).
+SCHEMA_VERSION = 6
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -56,6 +57,159 @@ def micros_to_usd(micros) -> float:
     if micros is None:
         return None
     return micros / MICROS_PER_USD
+
+
+# ---- tamper-evidence hash chain (#108) --------------------------------------
+# The ledger is integer-exact and re-queryable, but was append-only *by
+# convention* only — an operator with DB access could rewrite history
+# undetectably. We chain every ``usage_events`` row: each row carries the hash
+# of the previous row for the same org, so modifying, deleting, reordering, or
+# inserting an event breaks the chain from that point on and ``verify_chain``
+# reports the first divergence. This reuses the design Perseus Vault shipped for
+# its memory audit trail (SHA-256 chain + optional keyed MAC).
+#
+# The chain is PER ORG (the two-party billing unit): each customer can verify
+# their own stream independently. Ordering is by SQLite ``rowid`` (monotonic
+# with insertion) since ``usage_events`` is append-only.
+CHAIN_GENESIS = "plutus-usage-chain/v1"
+
+# Immutable columns that define an event, in a fixed order. The hash covers all
+# of them, so tampering with any (notably ``cost_micros``) is detectable.
+_CHAIN_FIELDS = (
+    "id", "org_id", "workspace_id", "provider", "model", "task_type",
+    "input_tokens", "output_tokens", "cache_read_tokens", "reasoning_tokens",
+    "cost_micros", "estimated", "source", "ts",
+)
+
+
+def _chain_scalar(value) -> str:
+    """Deterministic string form of a column value for hashing.
+
+    Floats use ``repr`` so a value round-tripped through SQLite REAL hashes
+    identically at write time and at verify time; ``None`` is a distinct empty
+    token so a NULL never collides with an empty string.
+    """
+    if value is None:
+        return "\x00"
+    if isinstance(value, float):
+        return repr(value)
+    return str(value)
+
+
+def _canonical_event(fields: dict) -> str:
+    # Unit separator between fields; the key name is included so a value can
+    # never migrate across columns without changing the digest.
+    return "\x1f".join(f"{k}={_chain_scalar(fields.get(k))}" for k in _CHAIN_FIELDS)
+
+
+def compute_row_hash(prev_hash: Optional[str], fields: dict,
+                     hmac_key: Optional[bytes] = None) -> str:
+    """Hash one event, chained onto ``prev_hash`` (or the genesis constant).
+
+    With ``hmac_key`` set, uses HMAC-SHA256 so only a holder of the key (held by
+    the customer, not the operator) can produce a valid chain — this is the
+    two-party property. Without it, plain SHA-256 (offline/self-hosted default).
+    """
+    payload = ((prev_hash or CHAIN_GENESIS) + "\x1e" + _canonical_event(fields)).encode("utf-8")
+    if hmac_key:
+        import hmac as _hmac
+        return _hmac.new(hmac_key, payload, hashlib.sha256).hexdigest()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def chain_head(conn, org_id: str) -> Optional[str]:
+    """The most recent (highest rowid) ``row_hash`` for an org, or ``None``.
+
+    Called inside ``record_usage``'s transaction; under ``BEGIN IMMEDIATE`` the
+    write lock is held, so read-head + insert cannot interleave with another
+    writer, and rows inserted earlier in the same batch are visible here.
+    """
+    row = conn.execute(
+        "SELECT row_hash FROM usage_events "
+        "WHERE org_id=? AND row_hash IS NOT NULL ORDER BY rowid DESC LIMIT 1",
+        (org_id,),
+    ).fetchone()
+    return row["row_hash"] if row else None
+
+
+def verify_chain(conn, org_id: Optional[str] = None,
+                 hmac_key: Optional[bytes] = None) -> dict:
+    """Walk the usage_events hash chain and report the first divergence per org.
+
+    Returns ``{"ok": bool, "orgs": [ {org_id, events, verified, pre_chain,
+    status, first_divergence} ]}``. ``status`` is ``"ok"`` (chain intact),
+    ``"broken"`` (a divergence was found), or ``"empty"`` (no events). Rows with
+    a NULL ``row_hash`` predate the chain and are counted in ``pre_chain`` and
+    reported as unverifiable rather than treated as a failure — unless they
+    appear *after* a chained row, which is itself a divergence (a hash was
+    stripped).
+    """
+    if org_id is not None:
+        org_ids = [org_id]
+    else:
+        org_ids = [r["org_id"] for r in conn.execute(
+            "SELECT DISTINCT org_id FROM usage_events ORDER BY org_id").fetchall()]
+
+    orgs = []
+    all_ok = True
+    for oid in org_ids:
+        rows = conn.execute(
+            "SELECT rowid AS _rowid, * FROM usage_events WHERE org_id=? ORDER BY rowid",
+            (oid,),
+        ).fetchall()
+        events = len(rows)
+        pre_chain = 0
+        verified = 0
+        chain_started = False
+        running_prev: Optional[str] = None
+        divergence = None
+        for r in rows:
+            stored_hash = r["row_hash"]
+            if stored_hash is None:
+                if chain_started:
+                    divergence = {
+                        "event_id": r["id"], "rowid": r["_rowid"],
+                        "reason": "row_hash missing after chain start "
+                                  "(event deleted or hash stripped)",
+                    }
+                    break
+                pre_chain += 1
+                continue
+            chain_started = True
+            fields = {k: r[k] for k in _CHAIN_FIELDS}
+            expected = compute_row_hash(running_prev, fields, hmac_key=hmac_key)
+            if r["prev_hash"] != running_prev:
+                divergence = {
+                    "event_id": r["id"], "rowid": r["_rowid"],
+                    "reason": "prev_hash does not match the prior row's row_hash "
+                              "(event inserted, deleted, or reordered)",
+                    "expected_prev": running_prev, "stored_prev": r["prev_hash"],
+                }
+                break
+            if expected != stored_hash:
+                divergence = {
+                    "event_id": r["id"], "rowid": r["_rowid"],
+                    "reason": "row_hash mismatch (event contents were modified)",
+                    "expected": expected, "stored": stored_hash,
+                }
+                break
+            verified += 1
+            running_prev = stored_hash
+
+        if divergence is not None:
+            status = "broken"
+            all_ok = False
+        elif events == 0:
+            status = "empty"
+        else:
+            status = "ok"
+        orgs.append({
+            "org_id": oid, "events": events, "verified": verified,
+            "pre_chain": pre_chain, "status": status,
+            "first_divergence": divergence,
+        })
+    return {"ok": all_ok, "orgs": orgs}
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS organizations (
@@ -105,7 +259,15 @@ CREATE TABLE IF NOT EXISTS usage_events (
     cost_micros       INTEGER NOT NULL DEFAULT 0,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
-    ts                REAL NOT NULL
+    ts                REAL NOT NULL,
+    -- Tamper-evidence hash chain (#108). Per-org, in insertion (rowid) order:
+    -- row_hash = H(prev_hash-or-genesis || canonical(row)); prev_hash is the
+    -- previous event's row_hash for the same org. NULL on rows written before
+    -- the chain existed ("pre-chain prefix" — verify reports these as
+    -- unverifiable rather than pretending). Written inside record_usage's
+    -- transaction; see compute_row_hash / verify_chain.
+    prev_hash         TEXT,
+    row_hash          TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_usage_org_ts ON usage_events(org_id, ts);
 CREATE INDEX IF NOT EXISTS ix_usage_ws_ts  ON usage_events(workspace_id, ts);
@@ -282,6 +444,11 @@ def _migrate_add_columns(conn) -> None:
     additions = [
         # (table, column, definition) — #28: per-org hard-stop exemption.
         ("organizations", "allow_negative_balance", "INTEGER NOT NULL DEFAULT 0"),
+        # #108: usage_events tamper-evidence chain. Nullable (no default) so the
+        # chain starts at upgrade and pre-existing rows stay NULL = "unverifiable
+        # (pre-chain)" rather than being back-filled with a hash we can't attest.
+        ("usage_events", "prev_hash", "TEXT"),
+        ("usage_events", "row_hash", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)

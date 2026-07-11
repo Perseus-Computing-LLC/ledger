@@ -89,6 +89,7 @@ def record_usage(conn, org_id: str, provider: str,
                  alert_cfg: Optional[dict] = None,
                  block_over_limit: bool = False,
                  block_over_balance: bool = False,
+                 chain_hmac_key: Optional[bytes] = None,
                  commit: bool = True) -> MeterResult:
     """Meter one LLM/agent call. Returns a :class:`MeterResult`.
 
@@ -179,13 +180,30 @@ def record_usage(conn, org_id: str, provider: str,
             )
 
     eid = db.new_id("evt")
+    # #108: tamper-evidence. Chain this row onto the org's current chain head so
+    # any later edit/delete/reorder/insert breaks verification. Computed here,
+    # inside the caller's transaction (the server wraps this in db.immediate),
+    # so read-head + insert are atomic under the write lock.
+    cost_micros = db.usd_to_micros(cost_usd)
+    prev_hash = db.chain_head(conn, org_id)
+    row_fields = {
+        "id": eid, "org_id": org_id, "workspace_id": workspace_id,
+        "provider": provider, "model": model, "task_type": task_type,
+        "input_tokens": int(input_tokens), "output_tokens": int(output_tokens),
+        "cache_read_tokens": int(cache_read_tokens),
+        "reasoning_tokens": int(reasoning_tokens), "cost_micros": cost_micros,
+        "estimated": int(estimated), "source": source, "ts": ts,
+    }
+    row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
         "INSERT INTO usage_events(id,org_id,workspace_id,provider,model,task_type,"
         "input_tokens,output_tokens,cache_read_tokens,reasoning_tokens,cost_micros,"
-        "estimated,source,ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
-         int(reasoning_tokens), db.usd_to_micros(cost_usd), int(estimated), source, ts),
+         int(reasoning_tokens), cost_micros, int(estimated), source, ts,
+         prev_hash, row_hash),
     )
 
     # Deplete prepaid credit (only when there's credit to deplete; orgs on the

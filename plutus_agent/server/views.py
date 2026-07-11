@@ -146,7 +146,8 @@ def _e(s):
 def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                      stripe_status: dict, demo: bool = False,
                      runway: dict | None = None, user=None,
-                     api_keys: list | None = None, csrf: str = "") -> str:
+                     api_keys: list | None = None, csrf: str = "",
+                     integrity: dict | None = None) -> str:
     # Fix #58: hidden CSRF field embedded in every state-changing form.
     csrf_field = (f"<input type='hidden' name='_csrf' value='{_e(csrf)}'>"
                   if csrf else "")
@@ -227,6 +228,30 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                  f"<div class='v amber'>{tracked:,}</div>"
                  f"<div class='s'>unlimited — {tier['name']} plan</div></div>")
 
+    # Ledger integrity tile (#108): tamper-evidence status for this org's chain.
+    integrity_card = ""
+    if integrity is not None:
+        o = next((x for x in integrity.get("orgs", []) if x["org_id"] == org["id"]),
+                 None)
+        keyed = bool((cfg.get("ledger") or {}).get("hmac_key"))
+        mode = "keyed HMAC" if keyed else "SHA-256"
+        if o is None or o["status"] == "empty":
+            integrity_card = (
+                "<div class='card'><div class='l'>Ledger integrity</div>"
+                "<div class='v'>—</div>"
+                "<div class='s'>no metered events yet</div></div>")
+        elif o["status"] == "ok":
+            pre = (f" · {o['pre_chain']:,} pre-chain" if o["pre_chain"] else "")
+            integrity_card = (
+                "<div class='card'><div class='l'>Ledger integrity</div>"
+                f"<div class='v green'>✓ verified</div>"
+                f"<div class='s'>{o['verified']:,} events chained ({mode}){pre}</div></div>")
+        else:
+            integrity_card = (
+                "<div class='card'><div class='l'>Ledger integrity</div>"
+                "<div class='v coral'>✗ tampered</div>"
+                "<div class='s'>hash chain broken — run <span class='num'>plutus verify</span></div></div>")
+
     cards = f"""
     <div class="grid cards">
       <div class="card"><div class="l">Credit balance</div>
@@ -239,6 +264,7 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
         <div class="v" id="v-mtd">{_usd(w['mtd']['cost'])}</div>
         <div class="s"><span id="v-events">{w['mtd']['events']:,}</span> calls · 7d {_usd(w['7d']['cost'])}</div></div>
       {meter}
+      {integrity_card}
     </div>"""
 
     # workspaces with budget bars

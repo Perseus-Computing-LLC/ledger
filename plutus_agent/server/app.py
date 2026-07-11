@@ -29,6 +29,7 @@ _PUBLIC_PATHS = {"/healthz", "/favicon.ico", "/webhook/stripe", "/pricing",
                  "/v1/usage",  # authenticated by its own Bearer API key, not a session
                  "/v1/usage/export.csv", "/v1/usage/export.json",  # Bearer-auth (#66)
                  "/v1/admin/orgs", "/v1/admin/credits", "/v1/admin/keys",  # admin-token (#66)
+                 "/v1/admin/verify",  # ledger tamper-evidence (#108), admin-token
                  "/auth/login", "/auth/callback", "/auth/logout"}
 
 # Max request body size (1 MiB) — protects /v1/usage and /webhook/stripe from DoS
@@ -505,12 +506,15 @@ class Handler(BaseHTTPRequestHandler):
             ))
         from .. import metering
         summary = metering.org_summary(conn, org_id)
+        integrity = db.verify_chain(  # #108: tamper-evidence tile for this org
+            conn, org_id=org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg))
         page = views.render_dashboard(
             summary, orgs=self._scoped_orgs(conn), cfg=self.ctx.cfg,
             stripe_status=self.ctx.stripe.status(), demo=self.ctx.demo,
             runway=self.ctx.runway(authed=self._user is not None), user=self._user,
             api_keys=[dict(k) for k in db.list_api_keys(conn, org_id)],
             csrf=authmod.csrf_token(authmod.read_cookie(self)),
+            integrity=integrity,
         )
         return self._send(200, page)
 
@@ -619,7 +623,8 @@ class Handler(BaseHTTPRequestHandler):
         cfg = self.ctx.cfg
         block_free = bool(cfg.get("pricing", {}).get("block_over_free_limit"))
         block_balance = bool(cfg.get("pricing", {}).get("block_over_balance"))
-        
+        chain_key = cfgmod.chain_hmac_key(cfg)  # #108: keyed-MAC chain, if configured
+
         # Fix #27: validate ALL events before recording ANY
         for ev in events:
             if not isinstance(ev, dict) or not ev.get("provider"):
@@ -682,6 +687,7 @@ class Handler(BaseHTTPRequestHandler):
                             alert_cfg=cfg.get("alerts", {}),
                             block_over_limit=block_free,
                             block_over_balance=block_balance,
+                            chain_hmac_key=chain_key,
                             commit=False,  # defer commit to db.immediate()
                         )
                         if not res.recorded:
@@ -772,6 +778,16 @@ class Handler(BaseHTTPRequestHandler):
                      "revoked_at": k["revoked_at"]}
                     for k in db.list_api_keys(conn, org_id, include_revoked=True)]
             return self._json(200, {"org_id": org_id, "keys": keys})
+        if path == "/v1/admin/verify":
+            # #108: walk the usage-event tamper-evidence chain. 200 with the
+            # per-org report; ``ok`` is false (but still HTTP 200) when a
+            # divergence is found so a monitor can alert on the body.
+            org_id = (q.get("org") or [None])[0]
+            if org_id and not db.get_org(conn, org_id):
+                return self._json(404, {"error": "unknown org"})
+            report = db.verify_chain(
+                conn, org_id=org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg))
+            return self._json(200, report)
         return self._json(404, {"error": f"no admin route for {path}"})
 
     def _admin_post(self, conn, path):
