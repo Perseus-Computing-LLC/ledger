@@ -12,6 +12,16 @@
 > usage metering and prepaid-credit billing for LLM/agent spend — drop it into
 > your agent, see every call's cost live, and bill against prepaid credit.
 
+**Four things in one, which no OSS tool does together:**
+
+- **Live balance monitoring** — real per-provider balances fused with your ledger
+- **Ledger spend** — append-only, integer-micro-dollar credit ledger
+- **Self-calibrating budgets** — back-solve a budget from real balance vs. spend
+- **Runway routing** — shift your flagship model to the provider with the most days left
+
+Plutus *bills*, it doesn't proxy your calls — it complements gateways (LiteLLM,
+OpenRouter) and observability (Langfuse, Helicone) rather than replacing them.
+
 ```bash
 pip install plutus-agent          # stdlib + PyYAML; Stripe optional
 plutus demo                       # zero-setup tour with a month of sample data
