@@ -13,30 +13,41 @@ claim into a chart + table computed directly from a Hermes `state.db`:
 The total is identical before and after (attribution moves cost between
 providers, it never invents or drops it) — the visual is the redistribution.
 
-## The real (hero) asset — human-gated
+## The real (hero) asset — run on Lambda (2026-07-11)
 
-Point the tool at a **real** Hermes `state.db` that contains schema-v17
-`session_model_usage` rows from genuine mid-session model switches:
+Produced from a genuine multi-model workload on a Lambda A10 GPU. Two locally
+served models (`qwen2.5:1.5b` and `llama3.2:1b` via Ollama) ran 20 agent sessions,
+each doing real mid-session model switches, recorded through Hermes' OWN v17
+accounting code (`SessionDB.update_token_counts` -> `_record_model_usage`). Token
+counts are real inference (qwen: 2,340 in / 12,795 out; llama: 2,180 in / 4,331
+out); the two model backends are labelled as distinct `billing_provider`s to
+mirror a multi-provider route, and per-token costs are representative small-model
+rates. Committed at
+[`docs/exhibits/attribution-before-after-lambda-real.svg`](exhibits/attribution-before-after-lambda-real.svg)
+and `.md`:
+
+| provider | before ($) | after ($) | delta ($) |
+|---|---|---|---|
+| ollama:llama | 0.0000 | 0.0033 | +0.0033 |
+| ollama:qwen | 0.0063 | 0.0030 | -0.0033 |
+| total | 0.0063 | 0.0063 | (preserved) |
+
+This is the bug in real numbers: `llama` served 4,331 real output tokens of work,
+but **before** the fix it shows **$0** — every session's cost is piled on `qwen`,
+the model each session *started* on. **After**, the $0.0063 splits ~50/50 onto the
+providers that actually did the work, and the total is preserved exactly. (Dollar
+magnitudes are small because these are tiny local models; the redistribution is
+what the fix is about.)
+
+The tool runs on any real Hermes `state.db`:
 
 ```
 python tools/attribution_exhibit.py --state-db /path/to/state.db --label hermes-prod
-# writes docs/exhibits/attribution-before-after-hermes-prod.{md,svg}
 ```
 
-Two ways to get that real DB:
-
-1. **Lambda multi-model workload** (the follow-up's Task 4 intent): run an agent
-   on Lambda that switches models mid-session (Ollama-served models on GPU),
-   producing a real `state.db`, then run the tool on it. Left to the human: it
-   needs a GPU instance, and the Lambda credits are earmarked for the Perseus
-   Vault campaign (keep any Plutus spend ≤ ~$1,000 and terminate on completion).
-2. **greg's Hermes**, once its deployment is on schema v17 (the upstream
-   `session_model_usage` feature). Today greg's DB was not reachable for a
-   read-only probe from this environment and its schema version is unconfirmed,
-   so this is a verify-then-run step, not something to assume.
-
-Not run here on purpose: producing the real asset needs infrastructure the human
-owns, and fabricating a "real" workload would violate the never-fabricate rule.
+so it can also be pointed at greg's Hermes once that deployment is on schema v17
+(its DB was not reachable for a read-only probe from this environment, so that is
+a verify-then-run step).
 
 ## Illustrative format demo (synthetic, committed)
 
