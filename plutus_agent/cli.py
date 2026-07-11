@@ -427,6 +427,44 @@ def cmd_reconcile(args):
     conn.close()
 
 
+def cmd_verify(args):
+    """#108: walk the usage_events tamper-evidence chain and report divergences."""
+    conn = _conn()
+    if args.hmac_key is not None:
+        hmac_key = args.hmac_key.encode("utf-8") if args.hmac_key else None
+    else:
+        hmac_key = cfgmod.chain_hmac_key(cfgmod.load())
+    org_id = None
+    if args.org:
+        org_id = _resolve_org(conn, args.org)["id"]
+    report = db.verify_chain(conn, org_id=org_id, hmac_key=hmac_key)
+    conn.close()
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if report["ok"] else 2)
+
+    mode = "keyed HMAC-SHA256" if hmac_key else "SHA-256"
+    print(f"\n  ledger integrity — usage_events hash chain ({mode})\n")
+    print(f"    {'ORG':<28} {'EVENTS':>7} {'VERIFIED':>9} {'PRE-CHAIN':>10}  STATUS")
+    print("    " + "-" * 72)
+    for o in report["orgs"]:
+        mark = {"ok": "✓", "broken": "✗", "empty": "·"}.get(o["status"], "?")
+        print(f"    {o['org_id']:<28} {o['events']:>7} {o['verified']:>9} "
+              f"{o['pre_chain']:>10}  {mark} {o['status']}")
+        if o["first_divergence"]:
+            d = o["first_divergence"]
+            print(f"        ↳ first divergence at event {d['event_id']} "
+                  f"(rowid {d['rowid']}): {d['reason']}")
+    print("    " + "-" * 72)
+    if report["ok"]:
+        _ok("chain intact — no tampering detected")
+        sys.exit(0)
+    else:
+        print("  ✗ chain BROKEN — see divergence(s) above")
+        sys.exit(2)
+
+
 def cmd_version(args):
     print(f"plutus v{__version__} — {__tagline__}")
 
@@ -532,6 +570,16 @@ def build_parser():
                      help="write adjust entries (default: dry run)")
     prc.add_argument("--json", action="store_true")
     prc.set_defaults(func=cmd_reconcile)
+
+    pv = sub.add_parser(
+        "verify",
+        help="verify the usage-event tamper-evidence hash chain (#108)")
+    pv.add_argument("--org", help="verify a single org (default: all)")
+    pv.add_argument("--hmac-key", dest="hmac_key", default=None,
+                    help="keyed-MAC secret (default: config/PLUTUS_CHAIN_HMAC_KEY; "
+                         "pass empty string to force plain SHA-256)")
+    pv.add_argument("--json", action="store_true")
+    pv.set_defaults(func=cmd_verify)
 
     pa = sub.add_parser("alerts", help="deliver pending alerts")
     pa.add_argument("--org")

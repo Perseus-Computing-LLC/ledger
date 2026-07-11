@@ -156,5 +156,65 @@ class TestAdminOps(_Base):
         self.assertEqual(s, 400)
 
 
+class TestVerifyEndpoint(_Base):
+    """#108: GET /v1/admin/verify surfaces the ledger tamper-evidence report."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.httpd, cls.port, cls.dbpath = _start()
+        # seed an org with a few metered events (builds the hash chain)
+        from plutus_agent import metering
+        conn = db.connect(cls.dbpath)
+        cls.org_id = db.create_org(conn, "Verify Co", tier="pro")["id"]
+        db.add_ledger(conn, cls.org_id, 100.0, "topup", reason="seed")
+        for i in range(3):
+            metering.record_usage(conn, cls.org_id, provider="openai",
+                                  model="gpt-4o", cost_usd=1.0 + i,
+                                  input_tokens=100, output_tokens=50)
+        conn.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown(); cls.httpd.server_close()
+        for ext in ("", "-wal", "-shm"):
+            try:
+                os.unlink(cls.dbpath + ext)
+            except OSError:
+                pass
+
+    def test_verify_ok(self):
+        # Scope to the clean seed org (tests share one DB and run in name order).
+        s, rep = self._req("GET", f"/v1/admin/verify?org={self.org_id}")
+        self.assertEqual(s, 200)
+        self.assertTrue(rep["ok"])
+        o = rep["orgs"][0]
+        self.assertEqual(o["org_id"], self.org_id)
+        self.assertEqual(o["status"], "ok")
+        self.assertEqual(o["verified"], 3)
+
+    def test_verify_requires_admin_token(self):
+        s, _ = self._req("GET", "/v1/admin/verify", token="nope")
+        self.assertEqual(s, 401)
+
+    def test_verify_detects_tamper(self):
+        # Use a dedicated org so the shared seed org stays clean for other tests.
+        from plutus_agent import metering
+        conn = db.connect(self.dbpath)
+        org = db.create_org(conn, "Tamper Co", tier="pro")["id"]
+        db.add_ledger(conn, org, 50.0, "topup", reason="seed")
+        for i in range(2):
+            metering.record_usage(conn, org, provider="openai", model="gpt-4o",
+                                  cost_usd=2.0, input_tokens=10, output_tokens=5)
+        # rewrite a cost directly in the DB, then re-verify over HTTP
+        conn.execute("UPDATE usage_events SET cost_micros=1 WHERE org_id=? "
+                     "AND rowid=(SELECT MIN(rowid) FROM usage_events WHERE org_id=?)",
+                     (org, org))
+        conn.commit(); conn.close()
+        s, rep = self._req("GET", f"/v1/admin/verify?org={org}")
+        self.assertEqual(s, 200)          # 200 body, ok=false — a monitor alerts on the body
+        self.assertFalse(rep["ok"])
+        self.assertEqual(rep["orgs"][0]["status"], "broken")
+
+
 if __name__ == "__main__":
     unittest.main()

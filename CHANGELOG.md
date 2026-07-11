@@ -5,6 +5,22 @@ All notable changes to Plutus are documented here.
 ## [Unreleased]
 
 ### Added
+- **Ledger tamper-evidence (`plutus verify`).** The usage ledger was
+  integer-exact and re-queryable but append-only *by convention* only — an
+  operator with database access could rewrite a debit undetectably, which the
+  verified-savings work (perseus#749) made load-bearing. Every `usage_events`
+  row now carries a per-org SHA-256 hash chain (`prev_hash`/`row_hash`) computed
+  inside `record_usage`'s transaction, so any modification, deletion, reorder,
+  or insertion breaks the chain from that point. `plutus verify` walks the chain
+  and reports the first divergence (exit 2 on tampering); `GET /v1/admin/verify`
+  and a dashboard "Ledger integrity" tile surface the same. An optional keyed
+  HMAC (`ledger.hmac_key` / `PLUTUS_CHAIN_HMAC_KEY`), with the key held by the
+  customer, gives the two-party property — the operator alone cannot re-chain a
+  rewritten history. Schema v6 (additive: nullable columns; rows written before
+  the upgrade are reported as an unverifiable "pre-chain" prefix, not
+  back-filled). Reuses the Perseus Vault audit-chain design (#460/#463). No
+  "tamper-evident" claim ships in public docs until an external crypto review
+  covers this. See docs/ledger-integrity.md. (#108)
 - **Cost reconciliation (`plutus reconcile`).** The wired providers return
   tokens, not dollars, so metered cost is priced from the static table in
   `pricing.py` and flagged `estimated`. The new reconciler trues that up to a
