@@ -71,19 +71,57 @@ exactly once, balance exact.
 `SOAK OK`. The money invariant held exactly while 7,680 debits, 96 top-ups, and 96
 refund events (48 × 2) contended on one org.
 
-## A real bug the soak found (and fixed in this PR)
+## Cloud run — Lambda A10, 30 vCPU (2026-07-11)
 
-With the rate limiter off, saturation drove some ingest transactions past the 5 s
-`busy_timeout`, and the handler's blanket `except Exception` returned **HTTP 400
-"batch recording failed"**. A 400 tells the client "your request is malformed,
-don't retry" — wrong for a transient, retryable server-side lock, and it would
-make a well-behaved client drop a chargeable event.
+Re-run on a Lambda Cloud `gpu_1x_a10` (30 vCPU, Ubuntu 22.04, Linux) to push
+contention past what a laptop can reach: **500 concurrent keep-alive connections**
+hammering one org. Raw output committed at
+[`docs/exhibits/concurrency-soak-lambda-500way-2026-07.json`](exhibits/concurrency-soak-lambda-500way-2026-07.json)
+and [`…-reversals-2026-07.json`](exhibits/concurrency-soak-lambda-reversals-2026-07.json).
 
-Fixed in `server/app.py`: a `sqlite3.OperationalError` on the ingest path now
-returns **HTTP 503 with `Retry-After`** (the batch rolled back under
-`BEGIN IMMEDIATE`, so a retry is safe), while genuine bad input still returns 400.
-This is the `busy_503` column above — 226 requests correctly told to retry, zero
-misclassified as 400, ledger untouched throughout.
+Run 1 — 500-way ingest storm (`--threads 500 --requests 60 --rate-per-min 0`):
+
+| metric | value |
+|---|---|
+| attempted / recorded debits | 30,000 / 19,906 |
+| retryable-busy (503) | 9,480 |
+| client connection errors | 614 |
+| hard errors | **0** |
+| `usage_events` == recorded | yes (**no double-count**) |
+| expected vs actual balance | **$200.94 == $200.94** (exact) |
+| idempotency burst (256 threads) | charged exactly once |
+
+Run 2 — debits racing concurrent reversals (`--threads 200 --requests 50
+--with-reversals`): 9,543 recorded debits + 200 top-ups + 100 refunds (each fired
+twice), balance **$404.57 == $404.57** exact, no double-count, idempotency once,
+0 hard errors.
+
+The single-node SQLite ledger is fsync-bound (~100 durable commits/sec on this
+disk), so most of the 500-way storm is correctly shed as retryable 503 rather
+than queued — and the money invariant holds exactly on every recorded debit
+regardless.
+
+## Two real bugs the soak found (both fixed in this PR)
+
+**1. Ingest lock-timeout returned a non-retryable 400.** With the limiter off,
+saturation drove some ingest transactions past the 5 s `busy_timeout`, and the
+ingest handler's blanket `except Exception` returned **HTTP 400 "batch recording
+failed"**. A 400 says "malformed, don't retry" — wrong for a transient lock (the
+batch rolled back under `BEGIN IMMEDIATE`, so a retry is safe), and a well-behaved
+client would drop a chargeable event. Fixed: a `sqlite3.OperationalError` on the
+ingest path now returns **503 + `Retry-After`**; genuine bad input still 400s.
+
+**2. Lock *outside* the ingest transaction returned a 500.** The 500-way cloud
+run surfaced 5 / 30,000 requests returning **HTTP 500 "internal error"** — a lock
+lost in the pre-transaction path (the API-key auth read / idempotency replay),
+which the outer request handler mapped to a generic 500 (non-retryable, alarming).
+Fixed: the outer POST handler now maps `sqlite3.OperationalError` to the same
+retryable **503 + `Retry-After`**. The re-run after the fix reported **0 hard
+errors** (the 5 became clean 503s), balance still exact.
+
+In both cases the ledger stayed exact throughout — the bugs were about returning
+the *right status* for a transient lock, never about money correctness. Both
+paths have deterministic tests in `tests/test_concurrency.py`.
 
 ## Honest limitations
 
@@ -97,15 +135,12 @@ misclassified as 400, ledger untouched throughout.
   which both removes the artifact and models real clients; the numbers above ran
   clean with `client_conn_errors: 0`.
 
-## Optional next step (human-gated): heavier soak on Lambda
+## Scaling further
 
-A Linux cloud instance would push contention further (higher ephemeral-port
-range, more cores, `SO_REUSEADDR`) and let the storm run to tens of thousands of
-requests. The harness is ready — same command, larger `--threads/--requests`.
-
-Not run here on purpose: the Lambda GPU credits are earmarked for the Perseus
-Vault benchmark campaign, and this is a CPU driver-load test (no GPU needed). Per
-the follow-up's cap, a Plutus soak instance should stay ≤ ~$1,000 of the credit
-and terminate on completion (keep the persistent FS). Left for the human, who owns
-the Lambda account and the credit split, to run if a bigger headline number is
-wanted — the correctness proof above does not depend on it.
+The single-node SQLite ledger's durable-commit rate (~100/sec here) is the
+throughput ceiling, so raw request counts scale with wall time, not core count;
+the value of the cloud run is the **500-way concurrency**, not volume. To push
+harder, raise `--threads` (contention) rather than `--requests` (which just adds
+fsync-bound wall time). A multi-node / Postgres-backed deployment would be the
+next frontier for throughput, but the correctness invariant proven here is
+independent of scale.

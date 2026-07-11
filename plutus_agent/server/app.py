@@ -478,6 +478,16 @@ class Handler(BaseHTTPRequestHandler):
             # internal detail — safe to show.
             return self._send(400, views.simple_page("Billing", "Billing not available",
                               str(e), ok=False))
+        except sqlite3.OperationalError as e:
+            # Transient write contention anywhere in the request (e.g. an auth or
+            # idempotency-replay read that lost the lock race outside the ingest
+            # transaction's own handler). Nothing committed, so it's retryable:
+            # answer 503 + Retry-After, never a scary non-retryable 500. Surfaced
+            # by the concurrency soak at 500-way contention (5/30k requests);
+            # see docs/CONCURRENCY-PROOF-2026-07.md.
+            self._log_exc("POST", path, e)
+            return self._json(503, {"error": "temporarily busy, retry shortly"},
+                              headers={"Retry-After": "1"})
         except Exception as e:
             ref = self._log_exc("POST", path, e)
             return self._json(500, {"error": "internal error", "ref": ref})

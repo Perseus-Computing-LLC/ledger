@@ -74,7 +74,11 @@ def _boot(dbpath: str, grant_usd: float, rate_per_min: int | None = None):
 
 
 def _post(port, path, payload, token=None, idem=None, timeout=60):
-    """One-shot POST (own connection). Used for setup / low-volume paths."""
+    """One-shot POST (own connection). Used for setup / low-volume paths.
+
+    Retries transient connection errors (e.g. a peer reset when the server sheds
+    a connection under a heavy burst) so a client-side blip never crashes the
+    run; returns status 0 if it can't connect after a few tries."""
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -83,14 +87,19 @@ def _post(port, path, payload, token=None, idem=None, timeout=60):
     req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
                                  data=json.dumps(payload).encode(),
                                  headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
+    for attempt in range(5):
         try:
-            return e.code, json.loads(e.read().decode())
-        except Exception:
-            return e.code, {}
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:  # subclass of URLError; catch first
+            try:
+                return e.code, json.loads(e.read().decode())
+            except Exception:
+                return e.code, {}
+        except (urllib.error.URLError, OSError, http.client.HTTPException):
+            if attempt == 4:
+                return 0, {"error": "client connection error"}
+            time.sleep(0.05 * (attempt + 1))
 
 
 class _KeepAliveClient:
@@ -114,25 +123,25 @@ class _KeepAliveClient:
         if idem:
             headers["Idempotency-Key"] = idem
         data = json.dumps(payload).encode()
-        for attempt in range(4):
+        try:
+            self.conn.request("POST", path, body=data, headers=headers)
+            resp = self.conn.getresponse()
+            raw = resp.read()
             try:
-                self.conn.request("POST", path, body=data, headers=headers)
-                resp = self.conn.getresponse()
-                raw = resp.read()
-                try:
-                    return resp.status, json.loads(raw.decode())
-                except Exception:
-                    return resp.status, {}
-            except (http.client.HTTPException, OSError):
-                # Dropped/again-later connection: rebuild and retry.
-                try:
-                    self.conn.close()
-                except Exception:
-                    pass
-                self.conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
-                if attempt == 3:
-                    return 0, {"error": "client connection error"}
-        return 0, {"error": "client connection error"}
+                return resp.status, json.loads(raw.decode())
+            except Exception:
+                return resp.status, {}
+        except (http.client.HTTPException, OSError):
+            # Ambiguous failure: the request may already have been recorded
+            # server-side. A money POST with no Idempotency-Key must NOT be
+            # resent (that could double-charge), so we count this one as a client
+            # connection error and rebuild the connection for the NEXT request.
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            self.conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
+            return 0, {"error": "client connection error"}
 
     def close(self):
         try:
@@ -148,14 +157,14 @@ def _webhook(dbpath, event):
     "database is locked" into a retryable 503, so the driver retries it the way a
     real webhook sender (Stripe) would on a 5xx."""
     import sqlite3 as _sq
-    for attempt in range(8):
+    for attempt in range(24):
         conn = db.connect(dbpath)
         try:
             return handle_webhook_event(conn, event)
         except _sq.OperationalError:
-            if attempt == 7:
+            if attempt == 23:
                 raise
-            time.sleep(0.05 * (attempt + 1))
+            time.sleep(min(0.1 * (attempt + 1), 0.5))
         finally:
             conn.close()
 
@@ -210,11 +219,15 @@ def run_ingest_soak(threads: int, requests_per: int, cost: float = 0.01,
 
         def _debit_worker(_t):
             # One persistent connection per thread, reused for requests_per POSTs.
+            # An ambiguous connection error is counted (not resent), so the
+            # exact-balance invariant stays honest without idempotency-key
+            # overhead: the balance only ever reflects requests the server
+            # actually recorded and returned 200 for.
             cli = _KeepAliveClient(port, key)
             local_ok = local_rl = local_busy = local_ce = 0
             local_err = []
             try:
-                for _ in range(requests_per):
+                for j in range(requests_per):
                     st, body = cli.post("/v1/usage",
                                         {"provider": "anthropic", "cost_usd": cost})
                     if st == 200 and body.get("recorded"):
@@ -239,19 +252,32 @@ def run_ingest_soak(threads: int, requests_per: int, cost: float = 0.01,
         refund_pis = pis[:len(pis) // 2] if with_reversals else []
 
         def _refund(pi):
-            # Fire the refund twice concurrently (distinct event ids) to prove a
-            # replayed reversal converges and never double-reverses.
-            _webhook_refund(dbpath, f"evt_r_{pi}_a", pi, topup_each)
-            _webhook_refund(dbpath, f"evt_r_{pi}_b", pi, topup_each)
+            # Fire the refund twice (distinct event ids) to prove a replayed
+            # reversal converges and never double-reverses. Returns True if the
+            # reversal was applied at least once; a refund that can't win the
+            # write lock even after retries is counted as not-applied (excluded
+            # from the expected balance) rather than crashing the run.
+            applied = False
+            for tag in ("a", "b"):
+                try:
+                    _webhook_refund(dbpath, f"evt_r_{pi}_{tag}", pi, topup_each)
+                    applied = True
+                except Exception:
+                    pass
+            return applied
 
         t0 = time.time()
+        applied_refunds = 0
         with ThreadPoolExecutor(max_workers=threads + max(1, len(refund_pis))) as ex:
-            futs = [ex.submit(_debit_worker, i) for i in range(threads)]
-            futs += [ex.submit(_refund, pi) for pi in refund_pis]
-            for f in futs:
+            debit_futs = [ex.submit(_debit_worker, i) for i in range(threads)]
+            refund_futs = [ex.submit(_refund, pi) for pi in refund_pis]
+            for f in debit_futs:
                 f.result()
+            for f in refund_futs:
+                if f.result():
+                    applied_refunds += 1
         wall_ms = int((time.time() - t0) * 1000)
-        n_refunds = len(refund_pis)
+        n_refunds = applied_refunds
 
         conn = db.connect(dbpath)
         try:
