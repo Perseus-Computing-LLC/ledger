@@ -8,9 +8,9 @@ Drop this into a Hermes post-session hook, or batch-import an existing
 ``state.db`` (the loop at the bottom).
 """
 import os
-import sqlite3
 
 from plutus_agent import Meter
+from plutus_agent.hermes import read_spend_events
 from plutus_agent.integrations import track_hermes_session
 
 meter = Meter(org="Hermes", tier="pro")
@@ -26,20 +26,20 @@ def on_session_complete(session: dict):
 
 
 def backfill_from_state_db(state_db: str):
-    """One-time import of historical Hermes sessions into Plutus."""
-    conn = sqlite3.connect(f"file:{state_db}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT billing_provider, model, started_at, actual_cost_usd, "
-        "estimated_cost_usd, input_tokens, output_tokens, cache_read_tokens, "
-        "reasoning_tokens FROM sessions"
-    ).fetchall()
-    conn.close()
-    n = 0
-    for r in rows:
-        track_hermes_session(meter, dict(r))
-        n += 1
-    print(f"imported {n} sessions → balance ${meter.balance():.2f}")
+    """One-time import of historical Hermes sessions into Plutus.
+
+    Reads via :func:`plutus_agent.hermes.read_spend_events`, so mid-session
+    model switches are attributed to the provider that actually served each
+    call (schema v17 ``session_model_usage``), with a graceful fallback to the
+    aggregate ``sessions`` row for pre-v17 data. One meter event is recorded per
+    ``(session, model, provider)`` instead of one lump per session.
+    """
+    events = read_spend_events(state_db)
+    for ev in events:
+        track_hermes_session(meter, ev)
+    n_sessions = len({ev["session_id"] for ev in events})
+    print(f"imported {n_sessions} sessions ({len(events)} model-events) "
+          f"→ balance ${meter.balance():.2f}")
 
 
 if __name__ == "__main__":

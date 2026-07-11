@@ -40,23 +40,69 @@ def _session_columns(conn) -> set:
     return {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
 
 
+def _has_table(conn, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def _allocate_cost(total: float, weights: list) -> list:
+    """Split ``total`` across buckets proportional to ``weights`` (>=0), summing
+    back to ``total``; even split when all weights are zero. Mirrors
+    ``plutus_agent.hermes.allocate_cost`` (inline so this stays install-free)."""
+    n = len(weights)
+    if n == 0:
+        return []
+    if not total:
+        return [0.0] * n
+    pos = [w if w and w > 0 else 0.0 for w in weights]
+    s = sum(pos)
+    if s <= 0:
+        return [float(total) / n] * n
+    return [float(total) * (w / s) for w in pos]
+
+
+def _event(provider, model, task, workspace, itok, otok, ctok, rtok, cost) -> dict:
+    ev = {
+        "provider": provider,
+        "task_type": task or "agent",
+        "workspace": workspace,
+        "source": "hermes",
+        "input_tokens": int(itok), "output_tokens": int(otok),
+        "cache_read_tokens": int(ctok), "reasoning_tokens": int(rtok),
+    }
+    if model:
+        ev["model"] = model
+    if cost:
+        ev["cost_usd"] = float(cost)   # Hermes' own cost beats a re-estimate
+    return ev
+
+
 def collect_sessions(state_db: str, last_rowid: int = 0,
                      workspace: str = "hermes") -> list[tuple[int, dict]]:
     """Return ``[(rowid, event_dict), …]`` for sessions newer than ``last_rowid``.
 
-    Maps a Hermes session row to a ``/v1/usage`` event the same way
-    ``plutus_agent.integrations.track_hermes_session`` does: prefer the exact
-    ``actual_cost_usd``, fall back to ``estimated_cost_usd``. ``model`` /
-    ``task_type`` are selected only if the columns exist, so this tolerates
-    schema drift.
+    When the Hermes DB has the v17 ``session_model_usage`` table (and an ``id``
+    column to join on), each new session is emitted as one event *per model*,
+    so a mid-session ``/model`` switch is attributed to the provider that
+    actually served each call. The session's authoritative cost (actual over
+    estimated) is allocated across those per-model rows in proportion to their
+    estimated cost (or tokens), so the per-session total is preserved exactly.
+    All events for a session share the session's ``rowid`` — the watermark
+    advances per session, not per model. Falls back to the aggregate
+    ``sessions`` row on older databases so nothing is lost. Mirrors
+    ``plutus_agent.hermes.read_spend_events`` (kept inline; no install needed).
     """
     conn = sqlite3.connect(f"file:{state_db}?mode=ro", uri=True)
     try:
         cols = _session_columns(conn)
         model_sel = "model" if "model" in cols else "NULL"
         task_sel = "task_type" if "task_type" in cols else "NULL"
+        use_pm = "id" in cols and _has_table(conn, "session_model_usage")
+
         rows = conn.execute(
             f"""SELECT rowid,
+                   {'id' if 'id' in cols else 'NULL'} AS id,
                    coalesce(nullif(billing_provider,''),'unknown') AS provider,
                    {model_sel} AS model,
                    {task_sel} AS task_type,
@@ -66,24 +112,37 @@ def collect_sessions(state_db: str, last_rowid: int = 0,
                 FROM sessions WHERE rowid > ? ORDER BY rowid""",
             (last_rowid,),
         ).fetchall()
+
+        by_session = {}
+        if use_pm:
+            for u in conn.execute(
+                """SELECT session_id, model,
+                       coalesce(nullif(billing_provider,''),'unknown') AS provider,
+                       coalesce(input_tokens,0), coalesce(output_tokens,0),
+                       coalesce(cache_read_tokens,0), coalesce(reasoning_tokens,0),
+                       coalesce(estimated_cost_usd,0)
+                    FROM session_model_usage"""
+            ):
+                by_session.setdefault(u[0], []).append(u)
     finally:
         conn.close()
 
     out = []
-    for rowid, provider, model, task, cost, itok, otok, ctok, rtok in rows:
-        ev = {
-            "provider": provider,
-            "task_type": task or "agent",
-            "workspace": workspace,
-            "source": "hermes",
-            "input_tokens": int(itok), "output_tokens": int(otok),
-            "cache_read_tokens": int(ctok), "reasoning_tokens": int(rtok),
-        }
-        if model:
-            ev["model"] = model
-        if cost:
-            ev["cost_usd"] = float(cost)   # Hermes' own cost beats a re-estimate
-        out.append((rowid, ev))
+    for rowid, sid, provider, model, task, cost, itok, otok, ctok, rtok in rows:
+        urows = by_session.get(sid) if use_pm else None
+        if urows:
+            total = float(cost or 0)
+            weights = [float(u[7]) for u in urows]
+            if sum(w for w in weights if w > 0) <= 0:
+                weights = [u[3] + u[4] + u[5] + u[6] for u in urows]
+            for u, c in zip(urows, _allocate_cost(total, weights)):
+                out.append((rowid, _event(u[2], u[1], task, workspace,
+                                          u[3], u[4], u[5], u[6], c)))
+        else:
+            # No per-model rows for this session (pre-v17 / un-backfilled) — emit
+            # the aggregate, exactly as before.
+            out.append((rowid, _event(provider, model, task, workspace,
+                                      itok, otok, ctok, rtok, cost)))
     return out
 
 
@@ -100,6 +159,22 @@ def post_events(remote: str, api_key: str, events: list[dict], timeout: float = 
         method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode())
+
+
+def _batches(pairs, size):
+    """Yield chunks of ~``size`` pairs, cutting only at a session (rowid)
+    boundary so all of a session's per-model events land in the same batch — the
+    watermark then advances one whole session at a time and never re-sends or
+    drops a partially-sent session on a mid-run failure."""
+    chunk = []
+    for i, pair in enumerate(pairs):
+        chunk.append(pair)
+        at_boundary = (i + 1 == len(pairs)) or (pairs[i + 1][0] != pair[0])
+        if len(chunk) >= size and at_boundary:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
 
 
 def _load_watermark(path: str) -> int:
@@ -145,8 +220,7 @@ def main(argv=None) -> int:
         return 0
 
     sent = 0
-    for i in range(0, len(pairs), BATCH):
-        chunk = pairs[i:i + BATCH]
+    for chunk in _batches(pairs, BATCH):
         try:
             post_events(remote, api_key, [e for _, e in chunk])
         except urllib.error.HTTPError as e:

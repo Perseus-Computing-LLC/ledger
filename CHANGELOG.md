@@ -4,6 +4,25 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Per-model spend attribution for mid-session model switches.** Plutus reads
+  Hermes' `state.db` for spend. The `sessions` row attributes every token to the
+  `(model, billing_provider)` active when the session *started*, so a mid-session
+  `/model` switch dumped the whole session's cost onto the initial provider —
+  corrupting per-provider spend, and with it the runway projections and the
+  runway router's decisions (a provider with hidden burn looks like it has
+  infinite runway and gets *more* traffic). Plutus now reads the schema-v17
+  `session_model_usage` table (authored + fixed upstream in hermes-agent, issue
+  #51607) so spend lands on the provider that actually served each call. Tokens
+  come straight from the per-model rows; the session's authoritative
+  `actual_cost_usd` is allocated across those rows in proportion to their
+  estimated cost (falling back to token weight), so the per-session total is
+  preserved exactly and never regresses. Pre-v17 / un-backfilled databases fall
+  back to the aggregate `sessions` row. Applied across all three readers — the
+  standalone monitor (`plutus.py`), the hosted sync (`examples/hermes_sync.py`),
+  and the backfill (`examples/hermes_integration.py`) — with a new canonical,
+  unit-tested implementation in `plutus_agent/hermes.py`.
+
 ## [1.0.1] — 2026-07-05
 
 **Security-hardening release.** A four-part follow-up to the internal pre-1.0

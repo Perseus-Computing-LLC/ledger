@@ -51,15 +51,26 @@ def track_openai(meter, response: Any, *, model: Optional[str] = None,
 
 
 def track_hermes_session(meter, session: dict, *, workspace: Optional[str] = None):
-    """Meter a row from Hermes ``state.db`` ``sessions`` (the format the original
-    ``plutus.py`` reads). Prefers the exact ``actual_cost_usd`` when present.
+    """Meter one Hermes spend row.
+
+    Accepts either shape:
+    - a raw ``sessions`` row (``actual_cost_usd`` / ``estimated_cost_usd``), the
+      format the original ``plutus.py`` reads; or
+    - a per-model event from :func:`plutus_agent.hermes.read_spend_events`,
+      which carries an already-allocated ``cost_usd`` (the authoritative session
+      cost split across the providers that served each call).
+
+    Cost precedence: explicit ``cost_usd`` (the allocated per-model figure) →
+    ``actual_cost_usd`` → ``estimated_cost_usd``.
 
         track_hermes_session(meter, {
             "billing_provider": "anthropic", "model": "claude-opus-4-8",
             "actual_cost_usd": 0.14, "input_tokens": 1200, "output_tokens": 800,
         }, workspace="hermes")
     """
-    cost = session.get("actual_cost_usd") or session.get("estimated_cost_usd")
+    cost = (session.get("cost_usd")
+            or session.get("actual_cost_usd")
+            or session.get("estimated_cost_usd"))
     return meter.track(
         provider=session.get("billing_provider") or "unknown",
         model=session.get("model"),

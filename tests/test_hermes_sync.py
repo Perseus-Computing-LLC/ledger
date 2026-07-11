@@ -99,5 +99,66 @@ class TestCollectSessions(unittest.TestCase):
         self.assertEqual(ev["task_type"], "agent")  # default
 
 
+def _make_pm_db():
+    """A Hermes-shaped DB with an ``id`` PK and a v17 session_model_usage table
+    holding one mid-session model switch (anthropic → openai)."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.execute("""CREATE TABLE sessions (
+        id TEXT PRIMARY KEY, billing_provider TEXT, model TEXT, task_type TEXT,
+        started_at REAL, actual_cost_usd REAL, estimated_cost_usd REAL,
+        input_tokens INT, output_tokens INT, cache_read_tokens INT,
+        reasoning_tokens INT)""")
+    conn.execute("""CREATE TABLE session_model_usage (
+        session_id TEXT, model TEXT, billing_provider TEXT,
+        input_tokens INT, output_tokens INT, cache_read_tokens INT,
+        reasoning_tokens INT, estimated_cost_usd REAL,
+        PRIMARY KEY (session_id, model, billing_provider))""")
+    conn.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                 ("s1", "anthropic", "claude-opus-4-8", "code_review",
+                  1000.0, 1.00, 0.90, 1000, 500, 0, 0))
+    conn.execute("INSERT INTO session_model_usage VALUES (?,?,?,?,?,?,?,?)",
+                 ("s1", "claude-opus-4-8", "anthropic", 700, 300, 0, 0, 0.60))
+    conn.execute("INSERT INTO session_model_usage VALUES (?,?,?,?,?,?,?,?)",
+                 ("s1", "gpt-5", "openai", 300, 200, 0, 0, 0.30))
+    conn.commit()
+    conn.close()
+    return path
+
+
+class TestPerModelSync(unittest.TestCase):
+    def tearDown(self):
+        for p in getattr(self, "_paths", []):
+            for ext in ("", "-wal", "-shm"):
+                try:
+                    os.unlink(p + ext)
+                except OSError:
+                    pass
+
+    def test_switch_emits_one_event_per_provider(self):
+        db = _make_pm_db()
+        self._paths = [db]
+        pairs = hermes_sync.collect_sessions(db, 0, workspace="hermes")
+        self.assertEqual(len(pairs), 2)               # one per model
+        rowids = {rid for rid, _ in pairs}
+        self.assertEqual(len(rowids), 1)              # sharing the session rowid
+        by_prov = {ev["provider"]: ev for _, ev in pairs}
+        self.assertEqual(set(by_prov), {"anthropic", "openai"})
+        self.assertAlmostEqual(by_prov["anthropic"]["cost_usd"], 1.00 * 0.60 / 0.90)
+        self.assertAlmostEqual(by_prov["openai"]["cost_usd"], 1.00 * 0.30 / 0.90)
+        # authoritative total preserved
+        self.assertAlmostEqual(sum(ev["cost_usd"] for _, ev in pairs), 1.00)
+        self.assertEqual(by_prov["openai"]["input_tokens"], 300)
+        self.assertEqual(by_prov["openai"]["model"], "gpt-5")
+
+    def test_batches_never_split_a_session(self):
+        # Two sessions, three events sharing rowids; a size-1 batch must still
+        # keep each session's events together (cut only at rowid boundaries).
+        pairs = [(1, {}), (1, {}), (2, {})]
+        chunks = list(hermes_sync._batches(pairs, 1))
+        self.assertEqual([[r for r, _ in c] for c in chunks], [[1, 1], [2]])
+
+
 if __name__ == "__main__":
     unittest.main()
