@@ -465,6 +465,53 @@ def cmd_verify(args):
         sys.exit(2)
 
 
+def cmd_close(args):
+    """#109: fetch provider authoritative totals and reconcile — the cron close."""
+    conn = _conn()
+    org = _resolve_org(conn, args.org)
+    period = args.period or reconcile.previous_month_label()
+    providers = None
+    if args.providers:
+        providers = [p.strip().lower() for p in args.providers.split(",") if p.strip()]
+    out = reconcile.close_period(conn, org["id"], period,
+                                 providers=providers, apply=args.apply)
+    conn.close()
+
+    if args.json:
+        print(json.dumps(out, indent=2))
+        # non-zero exit if a requested provider could not be fetched, so a cron
+        # job surfaces the gap instead of silently under-reconciling.
+        sys.exit(1 if out["fetch_errors"] else 0)
+
+    mode = "APPLIED" if args.apply else "DRY RUN (pass --apply to write)"
+    print(f"\n  close {period} for '{org['name']}' — {mode}\n")
+    if out["fetched"]:
+        print("    fetched authoritative totals:")
+        for prov, usd in sorted(out["fetched"].items()):
+            print(f"      {prov:<12} ${usd:,.4f}")
+    else:
+        print("    fetched authoritative totals: (none)")
+    print(f"    {'PROVIDER':<12} {'RECORDED':>12} {'AUTHORITATIVE':>14} {'ADJUST':>12}  NOTE")
+    print("    " + "-" * 74)
+    for i in out["items"]:
+        print(f"    {i['provider']:<12} ${i['recorded_usd']:>10.4f} "
+              f"${i['authoritative_usd']:>12.4f} ${i['delta_usd']:>+10.4f}  {i['note']}")
+    print("    " + "-" * 74)
+    label = "balance" if args.apply else "projected balance"
+    print(f"    net adjust ${out['total_adjust_usd']:+,.4f}  ->  {label} "
+          f"${out['balance_after_usd']:,.4f}")
+    if out["fetch_errors"]:
+        print("\n  ⚠ could not fetch (left unreconciled — NOT zeroed):")
+        for prov, msg in sorted(out["fetch_errors"].items()):
+            print(f"      {prov}: {msg}")
+    if out["unreconciled_providers"]:
+        print(f"\n  not reconciled (no authoritative total): "
+              f"{', '.join(out['unreconciled_providers'])}")
+    _ok("adjust entries written" if args.apply else "no changes written (dry run)")
+    if out["fetch_errors"]:
+        sys.exit(1)
+
+
 def cmd_version(args):
     print(f"plutus v{__version__} — {__tagline__}")
 
@@ -580,6 +627,19 @@ def build_parser():
                          "pass empty string to force plain SHA-256)")
     pv.add_argument("--json", action="store_true")
     pv.set_defaults(func=cmd_verify)
+
+    pcl = sub.add_parser(
+        "close",
+        help="fetch provider authoritative totals and reconcile (cron close, #109)")
+    pcl.add_argument("--org")
+    pcl.add_argument("--period", help="YYYY-MM (default: previous month, for a "
+                                      "cron run just after month end)")
+    pcl.add_argument("--providers", help="comma-separated provider list to fetch "
+                                         "(default: providers with recorded usage)")
+    pcl.add_argument("--apply", action="store_true",
+                     help="write adjust entries (default: dry run)")
+    pcl.add_argument("--json", action="store_true")
+    pcl.set_defaults(func=cmd_close)
 
     pa = sub.add_parser("alerts", help="deliver pending alerts")
     pa.add_argument("--org")

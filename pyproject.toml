@@ -41,8 +41,11 @@ dependencies = [
 # docs/deploy-hardening.md).
 stripe = ["stripe>=7.0,<14"]
 pdf = ["reportlab>=4.0,<5"]
-all = ["stripe>=7.0,<14", "reportlab>=4.0,<5"]
-dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "pytest>=7.0,<10"]
+# #109: provider cost fetchers for `plutus close`. Only AWS Bedrock (Cost
+# Explorer) needs an SDK; OpenAI/Anthropic use stdlib urllib, no dependency.
+fetchers = ["boto3>=1.28"]
+all = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28"]
+dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "pytest>=7.0,<10"]
 
 [project.urls]
 Homepage = "https://perseus.observer/plutus/"
