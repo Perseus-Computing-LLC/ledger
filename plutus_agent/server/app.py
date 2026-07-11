@@ -12,6 +12,7 @@ import json
 import math
 import os
 import secrets
+import sqlite3
 import sys
 import threading
 import time
@@ -179,8 +180,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(data)
 
-    def _json(self, code, obj):
-        self._send(code, json.dumps(obj, default=str), "application/json")
+    def _json(self, code, obj, headers=None):
+        self._send(code, json.dumps(obj, default=str), "application/json",
+                   headers=headers)
 
     def _redirect(self, url):
         self.send_response(303)
@@ -692,6 +694,16 @@ class Handler(BaseHTTPRequestHandler):
                     if idem_key:
                         db.store_idempotency_response(
                             conn, org_id, idem_key, code, json.dumps(body), commit=False)
+        except sqlite3.OperationalError as e:
+            # Transient write contention (e.g. "database is locked" after the
+            # busy_timeout). The batch did NOT commit — BEGIN IMMEDIATE rolled it
+            # back, so the ledger is untouched and the client may safely retry.
+            # This must be a retryable 503, not a 400 (which says "don't retry").
+            # Surfaced by the concurrency soak under saturation; see
+            # docs/CONCURRENCY-PROOF-2026-07.md.
+            self._log_exc("POST", "/v1/usage", e)
+            return self._json(503, {"error": "temporarily busy, retry shortly"},
+                              headers={"Retry-After": "1"})
         except Exception:
             return self._json(400, {"error": "batch recording failed"})
 
