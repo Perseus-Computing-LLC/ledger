@@ -205,6 +205,7 @@ rather than importing it, so the two ship and run independently.
 - [docs/api.md](docs/api.md) — the `/v1/usage` ingest API + API keys + SDK remote mode
 - [docs/auth.md](docs/auth.md) — Google sign-in, allow-listing, and open signup
 - [docs/claude-code.md](docs/claude-code.md) — the Claude Code metering hook
+- [docs/reconciliation.md](docs/reconciliation.md) — true-up estimated cost to a provider's authoritative billing
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## License

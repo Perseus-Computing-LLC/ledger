@@ -11,6 +11,7 @@ Subcommands:
     plutus meter ...            record a usage event (deplete credit)
     plutus topup ...            add prepaid credit
     plutus report ...           monthly PDF/HTML spend report
+    plutus reconcile ...        true-up estimated cost to a provider's real billing
     plutus alerts [--test]      deliver pending low-balance/budget alerts
     plutus monitor              print live provider runway (monitor bridge)
 
@@ -25,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, __tagline__, config as cfgmod, db, metering, pricing
+from . import __version__, __tagline__, config as cfgmod, db, metering, pricing, reconcile
 
 
 # ----------------------------------------------------------------- helpers ---
@@ -385,6 +386,47 @@ def cmd_stripe_setup(args):
     print("    4. Watch the balance top up. See BILLING.md for the full flow.\n")
 
 
+def cmd_reconcile(args):
+    conn = _conn()
+    org = _resolve_org(conn, args.org)
+    totals: dict = {}
+    if args.totals:
+        totals = reconcile.load_authoritative(args.totals)
+    if args.provider is not None and args.amount is not None:
+        totals[args.provider] = args.amount
+    if not totals:
+        conn.close()
+        sys.exit("plutus: supply --totals FILE (provider->USD from the provider "
+                 "export) or --provider NAME --amount USD (the provider's own "
+                 "billed total for the period)")
+    start_ts = end_ts = None
+    if args.period:
+        start_ts, end_ts = reconcile.month_window(args.period)
+    rep = reconcile.reconcile(conn, org["id"], totals,
+                              period_label=args.period or "all",
+                              start_ts=start_ts, end_ts=end_ts, apply=args.apply)
+    if args.json:
+        print(json.dumps(rep.as_dict(), indent=2))
+        conn.close()
+        return
+    mode = "APPLIED" if args.apply else "DRY RUN (pass --apply to write)"
+    print(f"\n  reconcile {rep.period_label} for '{org['name']}' - {mode}\n")
+    print(f"    {'PROVIDER':<12} {'RECORDED':>12} {'AUTHORITATIVE':>14} {'ADJUST':>12}  NOTE")
+    print("    " + "-" * 74)
+    for i in rep.items:
+        print(f"    {i.provider:<12} ${i.recorded_usd:>10.4f} "
+              f"${i.authoritative_usd:>12.4f} ${i.delta_usd:>+10.4f}  {i.note}")
+    print("    " + "-" * 74)
+    label = "balance" if args.apply else "projected balance"
+    print(f"    net adjust ${rep.total_adjust_usd:+,.4f}  ->  {label} "
+          f"${rep.balance_after_usd:,.4f}")
+    if rep.unreconciled_providers:
+        print(f"\n  not reconciled (no authoritative total supplied): "
+              f"{', '.join(rep.unreconciled_providers)}")
+    _ok("adjust entries written" if args.apply else "no changes written (dry run)")
+    conn.close()
+
+
 def cmd_version(args):
     print(f"plutus v{__version__} — {__tagline__}")
 
@@ -477,6 +519,19 @@ def build_parser():
     pr.add_argument("--org"); pr.add_argument("--month", help="YYYY-MM (default: current)")
     pr.add_argument("--out", help="output path (.pdf or .html)")
     pr.set_defaults(func=cmd_report)
+
+    prc = sub.add_parser(
+        "reconcile",
+        help="true-up estimated cost to a provider's authoritative billing")
+    prc.add_argument("--org")
+    prc.add_argument("--period", help="YYYY-MM billing period (windows usage by ts)")
+    prc.add_argument("--totals", help="JSON/CSV of provider->USD from the provider export")
+    prc.add_argument("--provider", help="reconcile a single provider inline")
+    prc.add_argument("--amount", type=float, help="that provider's authoritative billed USD")
+    prc.add_argument("--apply", action="store_true",
+                     help="write adjust entries (default: dry run)")
+    prc.add_argument("--json", action="store_true")
+    prc.set_defaults(func=cmd_reconcile)
 
     pa = sub.add_parser("alerts", help="deliver pending alerts")
     pa.add_argument("--org")
