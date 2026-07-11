@@ -15,6 +15,12 @@ than importing them, so the two can ship and run independently.
 """
 
 __version__ = "1.0.1"
+# The frozen `/v1` HTTP API contract version (SemVer), tracked in `openapi.yaml`.
+# Intentionally INDEPENDENT of `__version__`: the package ships fixes/features on
+# its own cadence, but the wire contract only bumps on an actual `/v1` change
+# (additive = minor, breaking = major). `test_version_single_source.py` pins
+# `openapi.yaml` to this value so the two can never silently drift.
+__api_version__ = "1.0.0"
 __product__ = "Plutus"
 __tagline__ = "The billing layer for AI agents."
 __company__ = "Perseus Computing LLC"
@@ -23,6 +29,7 @@ __default_port__ = 8420
 
 __all__ = [
     "__version__",
+    "__api_version__",
     "__product__",
     "__tagline__",
     "__default_port__",

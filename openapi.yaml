@@ -1,6 +1,10 @@
 openapi: 3.1.0
 info:
   title: Plutus /v1 API
+  # Frozen `/v1` CONTRACT version (SemVer), pinned to plutus_agent.__api_version__.
+  # Intentionally independent of the package version: bump ONLY on a wire change
+  # (additive = minor, breaking = major), NOT on every package release.
+  # test_version_single_source.py asserts this equals __api_version__.
   version: "1.0.0"
   description: |
     The Plutus `/v1` HTTP API — usage ingest, spend export, and operator admin

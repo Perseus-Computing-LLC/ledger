@@ -19,7 +19,7 @@ budgets file (plutus.budgets.json) for providers without a balance API, so
 Plutus can show "remaining = budget - ledger_spend".
 """
 from __future__ import annotations
-import argparse, json, os, sqlite3, subprocess, sys, time, urllib.request, urllib.error
+import argparse, json, os, re, sqlite3, subprocess, sys, time, urllib.request, urllib.error
 from datetime import datetime, timezone, timedelta
 
 # ------------------------------------------------------------------ paths ---
@@ -862,7 +862,33 @@ def do_alert(dry_run, channel=None):
         print("No alert channels configured. Add 'alerts' to plutus.budgets.json.")
 
 # ----------------------------------------------------------------- main ----
-VERSION = "0.1.1"
+def _resolve_version():
+    """Single-source the version from ``plutus_agent.__version__``.
+
+    This standalone monitor ships in the same repo/release as the package, so it
+    reports the package version rather than a hand-maintained literal (which
+    drifted to 0.1.1 on a 1.0.x product). It must still run with no install, so:
+    (1) try the installed package; (2) else read the sibling
+    ``plutus_agent/__init__.py`` without importing it; (3) last resort a sentinel.
+    """
+    try:
+        from plutus_agent import __version__ as v
+        return v
+    except Exception:
+        pass
+    init = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "plutus_agent", "__init__.py")
+    try:
+        with open(init, encoding="utf-8") as f:
+            m = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return "0.0.0+unknown"
+
+
+VERSION = _resolve_version()
 
 def main():
     ap = argparse.ArgumentParser(description="Plutus — provider credit & spend monitor")

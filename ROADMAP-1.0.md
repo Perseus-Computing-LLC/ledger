@@ -1,17 +1,32 @@
 # Plutus — Roadmap to 1.0
 
-> Last updated: 2026-06-27 · Current: **1.0.0 (code-frozen; tag/publish pending)**
+> Last updated: 2026-07-11 · Current: **1.0.1 (shipped: tagged, on PyPI + GHCR)**
 > This is the **billing-engine** roadmap. The older `ROADMAP.md` is the long-term monitor/FinOps vision.
 
-> **2026-06-27 status:** the 1.0 blocker queue (#60–#66) plus the low-sev
-> follow-ups (#56–#59) and the pre-1.0 security-review fixes (#80) are all merged
-> to `main`; the `/v1` OpenAPI spec + DB forward-compat policy are published; the
-> version is bumped to 1.0.0. The authoritative changelog is the `[1.0.0]` section
-> of [`CHANGELOG.md`](CHANGELOG.md) and the roadmap issue
-> [#67](https://github.com/Perseus-Computing-LLC/plutus/issues/67). **Remaining
-> gates (human/outward):** push the `v1.0.0` tag (publishes to PyPI + GHCR) and an
-> external security-review pass before public launch. The milestone framing below
-> predates the issue-numbered queue and is kept for historical context.
+> ## Current state (2026-07-11) — 1.0 is shipped
+>
+> **v0.7.1 — Foundation hardening: COMPLETE.** Every carryover issue is closed
+> *in code* (not just in the tracker): #28 (prepaid hard-stop default-on and
+> enforced inside the debit transaction), #30 (atomic `balance_after` + quota
+> race under `BEGIN IMMEDIATE`), #32 (CSRF fail-closed + per-session token), #33
+> (DB-backed per-day org cap), #37 (500 error-leak / 404 XSS / OIDC test-bypass
+> gated). 1.0.0 then shipped (#67), followed by the **1.0.1 security-hardening
+> release** (#92–#96: OIDC login-CSRF, HTTP hardening, money-atomicity,
+> fail-closed public bind). v1.0.1 is tagged and live on PyPI (`plutus-agent`) +
+> GHCR. Independently verified in [`docs/HERMES-VERIFICATION-2026-07.md`] and
+> reviewed in [`docs/REVIEW-2026-07.md`].
+>
+> **Remaining gates (human/outward), not code:**
+> 1. **External security-review pass** on the public surface (scope includes the
+>    hand-rolled OIDC RS256 verifier — see `docs/REVIEW-2026-07.md` P5). This is
+>    the last gate before a public launch.
+> 2. Close the review punch-list (P1–P7) before the Perseus / Perseus-Vault
+>    convergence. As of 2026-07: P3/P4/P6 (version single-source) done; P2
+>    (concurrency proof) in progress.
+>
+> The milestone framing below predates the issue-numbered queue and is kept for
+> historical context; where it says "carried to v0.7.1 / pending", read the
+> current-state block above as authoritative.
 
 ## What 1.0 means
 
@@ -50,8 +65,8 @@ The deep-review findings that can corrupt billing data. Root cause for most: rea
 - *Status (verified 2026-06-26):* ✅ #31, #34, #35, #36 landed. ⚠️ #32 (CSRF fails open when `base_url` unset / auth off), #33 (no DB-backed per-day org cap; only an in-memory hourly limiter), #37 (500 error-leak + 404 reflected-XSS) partial — carried to **v0.7.1**.
 - *Exit:* an external security-review pass on the public surface.
 
-### v0.7.1 — Foundation hardening  *(carryover + hygiene; precondition to v0.8)*
-A 2026-06-26 foundation review verified v0.6/v0.7 against `main`. Most fixes landed; the items below were closed but only partially resolved, plus new hygiene gaps. Close these before the v0.8 feature work — 1.0 is the convergence gate for Perseus/Perseus Vault, so the contract must be honest and stable first.
+### v0.7.1 — Foundation hardening  *(COMPLETE — shipped in 1.0.0 / 1.0.1)*
+A 2026-06-26 foundation review verified v0.6/v0.7 against `main`. The items below were then fully closed in code (confirmed by reading the guards, not just the tracker) and shipped in 1.0.0 + the 1.0.1 security-hardening release; see the current-state block at the top and `docs/REVIEW-2026-07.md` §2–§3. Retained for historical context.
 - **#28** prepaid hard-stop: default-on for prepaid orgs + enforce *inside* the debit transaction (currently off-by-default and racy).
 - **#30** atomic `balance_after` + free-tier quota race: wrap the ledger read-modify-write in `BEGIN IMMEDIATE` (or one conditional `INSERT…SELECT`).
 - **#32** CSRF: fail closed in `_same_origin` when `base_url` is unset, and/or add a per-session token.
@@ -102,12 +117,16 @@ Already done: README reframed, `pip install plutus-agent`, GHCR image, hosted da
 ## Success metrics for 1.0
 | Metric | Now | 1.0 target |
 |---|---|---|
-| Money-correctness bugs (open) | 2 (#28, #30) | 0 |
-| Public-surface security findings (open) | 3 (#32, #33, #37) | 0 |
+| Money-correctness bugs (open) | 0 (#28, #30 closed) | 0 ✅ |
+| Public-surface security findings (open) | 0 (#32, #33, #37 closed) | 0 ✅ |
 | Paying orgs | 1 (us) | 10+ |
 | First-class integrations | adapters + hook | + LangChain, CrewAI, MCP |
 | API stability | unfrozen | frozen, semver |
 | Docs | README + 3 docs | full reference + guides |
 
 ## Sequencing note
-v0.6 and v0.7 **shipped** (0.6.0 / 0.7.0), but the 2026-06-26 review surfaced partial fixes + hygiene gaps now collected in **v0.7.1 — Foundation hardening**. Close v0.7.1 before any public push and before wiring Plutus into Perseus/Perseus Vault (the convergence-gated-on-1.0 decision). v0.8 (Team tier + integrations) is the revenue/distribution lever and can proceed in parallel, but the 1.0 tag waits on v0.7.1 + an external security-review pass + a frozen API/schema.
+v0.6/v0.7 shipped, the v0.7.1 foundation-hardening carryover is **closed**, and
+1.0.0 → 1.0.1 shipped with a frozen `/v1` API + DB schema. The one remaining gate
+before a public push is an **external security-review pass**; see the
+current-state block at the top. v0.8 (Team tier + integrations) is the
+revenue/distribution lever and proceeds in parallel.

@@ -22,7 +22,7 @@ Routing policy
 Model IDs below are verified live against each provider's /models endpoint.
 """
 from __future__ import annotations
-import json, os, shutil, subprocess, sys, time
+import json, os, re, shutil, subprocess, sys, time
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +31,27 @@ CONFIG = os.environ.get("PLUTUS_HERMES_CONFIG",
 PLUTUS = os.path.join(HERE, "plutus.py")
 ROUTE_LOG = os.path.join(HERE, "plutus.routing.jsonl")
 
-VERSION = "0.1.0"
+def _resolve_version():
+    """Single-source the version from ``plutus_agent.__version__`` (this router
+    ships in the same release as the package). Runs standalone with no install:
+    try the package, else read the sibling ``__init__.py``, else a sentinel."""
+    try:
+        from plutus_agent import __version__ as v
+        return v
+    except Exception:
+        pass
+    init = os.path.join(HERE, "plutus_agent", "__init__.py")
+    try:
+        with open(init, encoding="utf-8") as f:
+            m = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return "0.0.0+unknown"
+
+
+VERSION = _resolve_version()
 
 # Verified model catalogs (from live /models calls 2026-06-19).
 # Override any provider's model via plutus.budgets.json → models.flagship / models.subtask.
