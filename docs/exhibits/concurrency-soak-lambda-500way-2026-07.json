@@ -1,0 +1,35 @@
+[
+  {
+    "test": "ingest_soak",
+    "threads": 500,
+    "requests_per": 60,
+    "attempted_debits": 30000,
+    "recorded_debits": 19906,
+    "rate_limited": 0,
+    "busy_503": 9480,
+    "client_conn_errors": 614,
+    "errors": 0,
+    "topups": 0,
+    "refunds": 0,
+    "cost_usd": 0.01,
+    "grant_usd": 400.0,
+    "event_count": 19906,
+    "actual_balance_usd": 200.94,
+    "expected_balance_usd": 200.94,
+    "balance_exact_match": true,
+    "no_double_count": true,
+    "wall_ms": 172523,
+    "sample_errors": []
+  },
+  {
+    "test": "idempotency_race",
+    "threads": 256,
+    "recorded_events": 1,
+    "charged_once": true,
+    "balance_usd": 999.99,
+    "expected_balance_usd": 999.99,
+    "statuses": [
+      200
+    ]
+  }
+]

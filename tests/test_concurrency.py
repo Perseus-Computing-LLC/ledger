@@ -92,6 +92,45 @@ class TestLockReturns503(unittest.TestCase):
                 except OSError:
                     pass
 
+    def test_lock_outside_ingest_txn_is_503(self):
+        """A transient lock in the pre-transaction path (here the API-key auth
+        lookup, `_bearer_org`) hits the OUTER request handler, which must also
+        map OperationalError to a retryable 503 rather than a generic 500. The
+        cloud soak at 500-way contention produced 5/30k such 500s before this."""
+        import http.client
+        import tempfile
+        fd, dbpath = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        httpd = None
+        orig = app.Handler._bearer_org
+        try:
+            httpd, port, org_id, key = soak._boot(dbpath, grant_usd=100.0)
+
+            def _boom(self, conn):
+                raise sqlite3.OperationalError("database is locked")
+
+            app.Handler._bearer_org = _boom
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            conn.request("POST", "/v1/usage",
+                         body=b'{"provider":"anthropic","cost_usd":0.01}',
+                         headers={"Content-Type": "application/json",
+                                  "Authorization": f"Bearer {key}"})
+            resp = conn.getresponse()
+            resp.read()
+            self.assertEqual(resp.status, 503)
+            self.assertEqual(resp.getheader("Retry-After"), "1")
+            conn.close()
+        finally:
+            app.Handler._bearer_org = orig
+            if httpd is not None:
+                httpd.shutdown()
+                httpd.server_close()
+            for ext in ("", "-wal", "-shm"):
+                try:
+                    os.unlink(dbpath + ext)
+                except OSError:
+                    pass
+
 
 if __name__ == "__main__":
     unittest.main()
