@@ -172,9 +172,92 @@ LEDGER_ALIASES = {
 }
 
 # ----------------------------------------------------------- local ledger ---
+def _has_table(conn, name):
+    return conn.execute(
+        "select 1 from sqlite_master where type='table' and name=?", (name,)
+    ).fetchone() is not None
+
+
+def _allocate_cost(total, weights):
+    """Split ``total`` across buckets proportional to ``weights`` (>=0), summing
+    back to ``total``; even split when all weights are zero. Mirrors
+    ``plutus_agent.hermes.allocate_cost`` (kept inline so this standalone monitor
+    needs no install)."""
+    n = len(weights)
+    if n == 0:
+        return []
+    if not total:
+        return [0.0] * n
+    pos = [w if w and w > 0 else 0.0 for w in weights]
+    s = sum(pos)
+    if s <= 0:
+        return [float(total) / n] * n
+    return [float(total) * (w / s) for w in pos]
+
+
+def _read_ledger_events(conn):
+    """One (session, model, provider) spend event per row.
+
+    Prefers the v17 ``session_model_usage`` table so a mid-session model switch
+    is attributed to the provider that actually served each call, allocating the
+    session's authoritative cost across its per-model rows. Falls back to the
+    aggregate ``sessions`` row for pre-v17 / un-backfilled data so totals never
+    regress. Canonical copy: ``plutus_agent.hermes.read_spend_events``."""
+    cols = {r[1] for r in conn.execute("pragma table_info(sessions)").fetchall()}
+    # Real Hermes sessions have a TEXT ``id`` PK that session_model_usage joins
+    # on; a minimal/legacy table may not. Fall back to rowid for the key and
+    # skip the per-model join when there's no ``id`` to match on.
+    id_sel = "id" if "id" in cols else "rowid"
+    model_sel = "model" if "model" in cols else "NULL"
+    sess = {}
+    for r in conn.execute(f"""
+            select {id_sel} as id, started_at,
+                   coalesce(nullif(actual_cost_usd,0), estimated_cost_usd, 0) as cost,
+                   coalesce(nullif(billing_provider,''),'unknown') as prov,
+                   {model_sel} as model,
+                   coalesce(input_tokens,0), coalesce(output_tokens,0),
+                   coalesce(cache_read_tokens,0), coalesce(reasoning_tokens,0)
+            from sessions""").fetchall():
+        sess[r[0]] = r
+    events = []
+    covered = set()
+    if "id" in cols and _has_table(conn, "session_model_usage"):
+        by_session = {}
+        for u in conn.execute("""
+                select session_id, model,
+                       coalesce(nullif(billing_provider,''),'unknown') as prov,
+                       coalesce(input_tokens,0), coalesce(output_tokens,0),
+                       coalesce(cache_read_tokens,0), coalesce(reasoning_tokens,0),
+                       coalesce(estimated_cost_usd,0)
+                from session_model_usage""").fetchall():
+            by_session.setdefault(u[0], []).append(u)
+        for sid, urows in by_session.items():
+            s = sess.get(sid)
+            if s is None:
+                continue
+            covered.add(sid)
+            total = float(s[2] or 0)
+            weights = [float(u[7]) for u in urows]
+            if sum(w for w in weights if w > 0) <= 0:
+                weights = [u[3] + u[4] + u[5] + u[6] for u in urows]
+            for u, cost in zip(urows, _allocate_cost(total, weights)):
+                events.append((sid, s[1] or 0, u[2], u[3], u[4], cost))
+    for sid, s in sess.items():
+        if sid in covered:
+            continue
+        if not (s[5] or s[6] or s[7] or s[8]):
+            continue
+        events.append((sid, s[1] or 0, s[3], s[5], s[6], float(s[2] or 0)))
+    return events
+
+
 def ledger_spend(db_path):
-    """Aggregate per-session cost rows by billing_provider over several windows.
-    Prefers actual_cost_usd, falls back to estimated_cost_usd."""
+    """Aggregate per-provider spend over several windows.
+
+    Uses per-model attribution (Hermes schema v17 ``session_model_usage``) so a
+    mid-session model switch lands on the right provider; prefers actual over
+    estimated cost, and falls back to the aggregate ``sessions`` row on older
+    databases."""
     out = {}
     if not os.path.exists(db_path):
         return out, "(state.db not found)"
@@ -182,19 +265,14 @@ def ledger_spend(db_path):
     windows = {"today": now - DAY, "7d": now - 7 * DAY, "30d": now - 30 * DAY, "all": 0}
     try:
         c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        cur = c.execute("""
-            select coalesce(nullif(billing_provider,''),'unknown') as prov,
-                   started_at,
-                   coalesce(nullif(actual_cost_usd,0), estimated_cost_usd, 0) as cost,
-                   coalesce(input_tokens,0), coalesce(output_tokens,0),
-                   coalesce(cache_read_tokens,0), coalesce(reasoning_tokens,0)
-            from sessions
-        """)
-        rows = cur.fetchall()
-        c.close()
+        try:
+            events = _read_ledger_events(c)
+        finally:
+            c.close()
     except Exception as e:
         return out, f"(ledger error: {e})"
-    for prov, started, cost, itok, otok, ctok, rtok in rows:
+    seen = {}   # provider -> set of session ids (count distinct sessions)
+    for sid, started, prov, itok, otok, cost in events:
         d = out.setdefault(prov, {w: 0.0 for w in windows})
         d.setdefault("in_tok", 0); d.setdefault("out_tok", 0)
         d.setdefault("sessions", 0); d.setdefault("last_ts", 0)
@@ -203,9 +281,11 @@ def ledger_spend(db_path):
             if st >= floor:
                 d[w] += float(cost or 0)
         d["in_tok"] += int(itok); d["out_tok"] += int(otok)
-        d["sessions"] += 1
+        seen.setdefault(prov, set()).add(sid)
         if st > d["last_ts"]:
             d["last_ts"] = st
+    for prov, ids in seen.items():
+        out[prov]["sessions"] = len(ids)
     return out, None
 
 # ------------------------------------------------------------- assemble ----

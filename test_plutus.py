@@ -98,6 +98,56 @@ class TestLedgerSpend(unittest.TestCase):
         finally:
             os.unlink(db_path)
 
+    def test_per_model_split_on_midsession_switch(self):
+        """With the v17 session_model_usage table, a session that switched
+        models mid-flight splits its cost across the providers that served each
+        call instead of dumping it all on the initial provider."""
+        import sqlite3
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = f.name
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute("""
+                CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY, started_at REAL,
+                    actual_cost_usd REAL, estimated_cost_usd REAL,
+                    billing_provider TEXT, model TEXT,
+                    input_tokens INTEGER, output_tokens INTEGER,
+                    cache_read_tokens INTEGER, reasoning_tokens INTEGER)""")
+            conn.execute("""
+                CREATE TABLE session_model_usage (
+                    session_id TEXT, model TEXT, billing_provider TEXT,
+                    input_tokens INTEGER, output_tokens INTEGER,
+                    cache_read_tokens INTEGER, reasoning_tokens INTEGER,
+                    estimated_cost_usd REAL,
+                    PRIMARY KEY (session_id, model, billing_provider))""")
+            now = time.time()
+            # sessions row records only the INITIAL provider + whole $1.00 cost
+            conn.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?)",
+                         ("s1", now - 100, 1.00, 0.90, "anthropic",
+                          "claude-opus-4-8", 1000, 500, 0, 0))
+            conn.execute("INSERT INTO session_model_usage VALUES (?,?,?,?,?,?,?,?)",
+                         ("s1", "claude-opus-4-8", "anthropic", 700, 300, 0, 0, 0.60))
+            conn.execute("INSERT INTO session_model_usage VALUES (?,?,?,?,?,?,?,?)",
+                         ("s1", "gpt-5", "openai", 300, 200, 0, 0, 0.30))
+            conn.commit()
+            conn.close()
+
+            result, note = plutus.ledger_spend(db_path)
+            self.assertIsNone(note)
+            self.assertIn("openai", result)     # provider it switched TO shows up
+            self.assertIn("anthropic", result)
+            self.assertAlmostEqual(result["anthropic"]["all"], 1.00 * 0.60 / 0.90)
+            self.assertAlmostEqual(result["openai"]["all"], 1.00 * 0.30 / 0.90)
+            # authoritative $1.00 total preserved across providers
+            self.assertAlmostEqual(
+                result["anthropic"]["all"] + result["openai"]["all"], 1.00)
+            # tokens attributed exactly from the per-model rows
+            self.assertEqual(result["openai"]["in_tok"], 300)
+            self.assertEqual(result["anthropic"]["in_tok"], 700)
+        finally:
+            os.unlink(db_path)
+
 
 class TestCollect(unittest.TestCase):
     """Tests for collect() — the main data assembly function."""
