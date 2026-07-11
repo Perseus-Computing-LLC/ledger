@@ -49,6 +49,12 @@ This `Meter` is fully offline — its own SQLite database, no network — so it'
 in any agent hot path. Point it at a **hosted** Plutus instead by passing
 `remote=` + an API key (see [Send usage to a hosted instance](#send-usage-to-a-hosted-instance)).
 
+Prepaid credit is enforced on this embedded path too, not just the hosted API: if
+an org holds credit and a `track()` would push the balance below zero, the call is
+not recorded and the result has `over_balance=True` (set
+`pricing.block_over_balance=False` to opt out; orgs that never topped up are never
+blocked).
+
 ## What you get
 
 | Capability | Description |
