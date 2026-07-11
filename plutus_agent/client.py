@@ -100,7 +100,18 @@ class Meter:
               input_tokens: int = 0, output_tokens: int = 0,
               cache_read_tokens: int = 0, reasoning_tokens: int = 0,
               cost_usd: Optional[float] = None, source: str = "sdk"):
-        """Meter one call. Returns a :class:`metering.MeterResult`."""
+        """Meter one call. Returns a :class:`metering.MeterResult`.
+
+        Prepaid hard-stop (fix #28/P1): the embedded local path enforces the same
+        ``pricing.block_over_balance`` policy as the hosted ``/v1/usage`` API
+        (default on). If the org holds prepaid credit and this call would push the
+        balance negative, the call is **not recorded** and the result has
+        ``recorded=False`` and ``over_balance=True`` — check it the same way you
+        would a hosted 402. Orgs that never topped up, or that set
+        ``allow_negative_balance`` (trusted track-only mode), are never blocked
+        and keep full tracking. Set ``pricing.block_over_balance=False`` in config
+        to opt out.
+        """
         if self.remote:
             event = {
                 "provider": provider, "task_type": task_type, "source": source,
@@ -125,6 +136,10 @@ class Meter:
             pricing_overrides=self.cfg.get("pricing", {}).get("overrides"),
             alert_cfg=self.cfg.get("alerts", {}),
             block_over_limit=bool(self.cfg.get("pricing", {}).get("block_over_free_limit")),
+            # P1 fix: enforce the prepaid hard-stop on the embedded path too, not
+            # just the hosted API. Default on (matches DEFAULT_CONFIG); only bites
+            # orgs that actually hold prepaid credit.
+            block_over_balance=bool(self.cfg.get("pricing", {}).get("block_over_balance", True)),
         )
 
     def _track_remote(self, event: dict) -> "metering.MeterResult":
