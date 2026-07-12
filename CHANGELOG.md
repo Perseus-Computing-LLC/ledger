@@ -23,6 +23,16 @@ All notable changes to Plutus are documented here.
   opt-in savings-share). Schema v7 (additive: nullable `usage_events.baseline_micros`
   chained as an optional trailing field so pre-v7 chains verify unchanged, plus
   the `savings_invoices` table). See BILLING.md §6 and docs/savings-share.md. (#7)
+- **Automatic baselines from the Hermes bridge.** `examples/hermes_sync.py` now
+  tags each synced session with a `baseline_model` — the flagship the customer
+  would have run without Perseus routing — so hosted Plutus prices the
+  counterfactual from its published table and records the saving with no manual
+  step. Opt in with `PLUTUS_BASELINE=flagship` (or `PLUTUS_BASELINE_MODEL[S]`); a
+  baseline is attached only when the actual model differs from the flagship (so
+  un-routed traffic records nothing), and only the model name is sent — never a
+  dollar amount — keeping the figure reconstructable. `record_usage` and
+  `/v1/usage` accept `baseline_model` and price it via `pricing.resolve_price`;
+  `config.savings.baseline_models` is the operator-owned flagship map. (#7)
 - **Ledger tamper-evidence (`plutus verify`).** The usage ledger was
   integer-exact and re-queryable but append-only *by convention* only — an
   operator with database access could rewrite a debit undetectably, which the

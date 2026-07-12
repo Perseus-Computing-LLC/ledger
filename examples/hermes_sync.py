@@ -21,6 +21,19 @@ double-count and a mid-run failure resumes cleanly.
 Env: PLUTUS_REMOTE_URL, PLUTUS_API_KEY (required); PLUTUS_STATE_DB (default the
 Hermes path below); PLUTUS_SYNC_STATE (watermark file); PLUTUS_WORKSPACE
 (default "hermes").
+
+Savings-share (#7): tag each event with the baseline model — the flagship the
+customer would have run WITHOUT Perseus routing — so hosted Plutus prices the
+same tokens at that model and records the saving. Off unless you opt in:
+
+    PLUTUS_BASELINE=flagship          # use the built-in provider→flagship map
+    PLUTUS_BASELINE_MODEL=claude-opus-4-8            # one baseline for all providers
+    PLUTUS_BASELINE_MODELS='{"anthropic":"claude-opus-4-8","openai":"gpt-5"}'
+
+A baseline is attached only when the session's actual model differs from the
+baseline (i.e. routing actually happened), so un-routed traffic records no
+saving. The server prices it from its published table — this script never sends
+a dollar amount, only the model name — so the figure stays reconstructable.
 """
 from __future__ import annotations
 
@@ -34,6 +47,56 @@ import urllib.request
 
 DEFAULT_STATE_DB = "/opt/data/webui/minions-hermes-config/state.db"
 BATCH = 500
+
+# Provider -> the flagship a customer would run WITHOUT Perseus routing. Mirrors
+# config.py `savings.baseline_models`; used only when PLUTUS_BASELINE=flagship.
+# Kept inline so this script stays install-free on the Hermes box.
+FLAGSHIP_BASELINE = {
+    "anthropic": "claude-opus-4-8",
+    "openai": "gpt-5",
+    "google": "gemini-3.1-pro",
+    "xai": "grok-4",
+    "deepseek": "deepseek-v4-pro",
+    "mistral": "mistral-large-2",
+    "cohere": "command-a",
+    "meta": "llama-4-maverick",
+}
+
+
+def resolve_baseline_models(env) -> dict:
+    """Resolve the provider->baseline-model map from env (savings off => {}).
+
+    Precedence: explicit per-provider JSON (PLUTUS_BASELINE_MODELS) > a single
+    global model for every provider (PLUTUS_BASELINE_MODEL, stored under "*") >
+    the built-in flagship map when PLUTUS_BASELINE is truthy > {} (off).
+    """
+    raw = env.get("PLUTUS_BASELINE_MODELS")
+    if raw:
+        try:
+            m = json.loads(raw)
+            if not isinstance(m, dict):
+                raise ValueError
+        except Exception:
+            sys.exit("plutus: PLUTUS_BASELINE_MODELS must be JSON {provider: model}")
+        return {str(k).lower(): str(v) for k, v in m.items()}
+    one = env.get("PLUTUS_BASELINE_MODEL")
+    if one:
+        return {"*": one}
+    if (env.get("PLUTUS_BASELINE") or "").strip().lower() in ("flagship", "1", "true", "on", "yes"):
+        return dict(FLAGSHIP_BASELINE)
+    return {}
+
+
+def baseline_for(provider, actual_model, baseline_models) -> str | None:
+    """The baseline model to bill against for one event, or None to record no
+    saving. None when: savings are off, no baseline is configured for the
+    provider, or the actual model already IS the baseline (no routing happened)."""
+    if not baseline_models:
+        return None
+    bm = baseline_models.get((provider or "").lower()) or baseline_models.get("*")
+    if not bm or (actual_model and actual_model == bm):
+        return None
+    return bm
 
 
 def _session_columns(conn) -> set:
@@ -62,7 +125,8 @@ def _allocate_cost(total: float, weights: list) -> list:
     return [float(total) * (w / s) for w in pos]
 
 
-def _event(provider, model, task, workspace, itok, otok, ctok, rtok, cost) -> dict:
+def _event(provider, model, task, workspace, itok, otok, ctok, rtok, cost,
+           baseline_models=None) -> dict:
     ev = {
         "provider": provider,
         "task_type": task or "agent",
@@ -75,11 +139,16 @@ def _event(provider, model, task, workspace, itok, otok, ctok, rtok, cost) -> di
         ev["model"] = model
     if cost:
         ev["cost_usd"] = float(cost)   # Hermes' own cost beats a re-estimate
+    bm = baseline_for(provider, model, baseline_models)
+    if bm:
+        # Name the counterfactual model; the server prices the same tokens (#7).
+        ev["baseline_model"] = bm
     return ev
 
 
 def collect_sessions(state_db: str, last_rowid: int = 0,
-                     workspace: str = "hermes") -> list[tuple[int, dict]]:
+                     workspace: str = "hermes",
+                     baseline_models: dict = None) -> list[tuple[int, dict]]:
     """Return ``[(rowid, event_dict), …]`` for sessions newer than ``last_rowid``.
 
     When the Hermes DB has the v17 ``session_model_usage`` table (and an ``id``
@@ -137,12 +206,14 @@ def collect_sessions(state_db: str, last_rowid: int = 0,
                 weights = [u[3] + u[4] + u[5] + u[6] for u in urows]
             for u, c in zip(urows, _allocate_cost(total, weights)):
                 out.append((rowid, _event(u[2], u[1], task, workspace,
-                                          u[3], u[4], u[5], u[6], c)))
+                                          u[3], u[4], u[5], u[6], c,
+                                          baseline_models)))
         else:
             # No per-model rows for this session (pre-v17 / un-backfilled) — emit
             # the aggregate, exactly as before.
             out.append((rowid, _event(provider, model, task, workspace,
-                                      itok, otok, ctok, rtok, cost)))
+                                      itok, otok, ctok, rtok, cost,
+                                      baseline_models)))
     return out
 
 
@@ -207,12 +278,20 @@ def main(argv=None) -> int:
     if not os.path.exists(state_db):
         sys.exit(f"plutus: state.db not found: {state_db}")
 
+    baseline_models = resolve_baseline_models(os.environ)
+
     last = 0 if reset else _load_watermark(wm_path)
-    pairs = collect_sessions(state_db, last, workspace)
+    pairs = collect_sessions(state_db, last, workspace, baseline_models)
     if not pairs:
         print(f"plutus: nothing new (watermark rowid={last})")
         return 0
     print(f"plutus: {len(pairs)} new session(s), rowid {pairs[0][0]}..{pairs[-1][0]}")
+    if baseline_models:
+        n_base = sum(1 for _, e in pairs if e.get("baseline_model"))
+        print(f"plutus: savings-share ON — {n_base}/{len(pairs)} event(s) tagged "
+              f"with a baseline model")
+    else:
+        print("plutus: savings-share OFF (set PLUTUS_BASELINE=flagship to enable)")
 
     if dry:
         print(json.dumps([e for _, e in pairs[:3]], indent=2))
