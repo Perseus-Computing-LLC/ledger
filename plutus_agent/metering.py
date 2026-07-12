@@ -182,14 +182,9 @@ def record_usage(conn, org_id: str, provider: str,
     # net against a genuine saving elsewhere in the period.
     baseline_micros = None
     savings_usd = 0.0
-    # Prefer an explicit baseline USD; otherwise, if a baseline model was named,
-    # price the SAME token counts from the published table (recomputable baseline).
-    if baseline_cost_usd is None and baseline_model:
-        bp, _exact = pricing.resolve_price(provider, baseline_model, pricing_overrides)
-        baseline_cost_usd = round(bp.cost(int(input_tokens), int(output_tokens),
-                                          int(cache_read_tokens),
-                                          int(reasoning_tokens)), 6)
     if baseline_cost_usd is not None:
+        # Caller asserted an explicit baseline USD — use it as-is; the saving is
+        # baseline minus the recorded actual.
         baseline_cost_usd = round(float(baseline_cost_usd), 6)
         if baseline_cost_usd < 0:
             raise ValueError(
@@ -197,6 +192,28 @@ def record_usage(conn, org_id: str, provider: str,
             )
         baseline_micros = db.usd_to_micros(baseline_cost_usd)
         savings_usd = round(max(0.0, baseline_cost_usd - cost_usd), 6)
+    elif baseline_model:
+        # Token-derived saving, immune to a mis-recorded actual cost. Both the
+        # flagship baseline AND a floor for the actual are priced from the SAME
+        # token counts at published prices, so the saving is exactly
+        #   (flagship_price - actual_model_price) x tokens
+        # — the true routing benefit. Flooring the recorded cost at the actual
+        # model's list price means a broken/too-low cost field (Hermes has emitted
+        # $0.44 for a call worth $60) can't inflate the saving; a genuinely higher
+        # provider-billed cost still narrows it. Fully reconstructable from the
+        # chained tokens + the published table. (defensibility, #7)
+        fp, _ = pricing.resolve_price(provider, baseline_model, pricing_overrides)
+        ap, _ = pricing.resolve_price(provider, model, pricing_overrides)
+        toks = (int(input_tokens), int(output_tokens),
+                int(cache_read_tokens), int(reasoning_tokens))
+        flagship_est = fp.cost(*toks)
+        actual_floor = ap.cost(*toks)
+        effective_cost = max(cost_usd, actual_floor)
+        savings_usd = round(max(0.0, flagship_est - effective_cost), 6)
+        # Store baseline s.t. (baseline - cost) == the floored saving, since the
+        # period aggregation subtracts the recorded cost_micros.
+        baseline_cost_usd = round(cost_usd + savings_usd, 6)
+        baseline_micros = db.usd_to_micros(baseline_cost_usd)
 
     # Fix #28: prepaid credit hard-stop. Skipped for orgs explicitly flagged
     # allow_negative_balance (trusted/internal track-only mode) so they keep

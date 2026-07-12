@@ -528,6 +528,7 @@ def _print_savings_report(d, org_name, mode):
     print(f"\n  savings-share {d['period']} for '{org_name}' — {mode}\n")
     cov = "" if d["coverage_pct"] is None else f" ({d['coverage_pct']:.0f}% coverage)"
     print(f"    events with a baseline : {d['covered_events']}/{d['total_events']}{cov}")
+    print(f"    billable (cost > $0)   : {d.get('billable_events', d['covered_events'])}")
     print(f"    baseline cost          : ${d['baseline_usd']:,.4f}")
     print(f"    actual cost (covered)  : ${d['cost_on_covered_usd']:,.4f}")
     print(f"    verified savings       : ${d['gross_savings_usd']:,.4f}")

@@ -57,6 +57,20 @@ def test_baseline_model_priced_server_side(tmp_path):
     assert round(r.savings_usd, 2) == 49.00
 
 
+def test_underrecorded_cost_floored_at_actual_model_price(tmp_path):
+    # A broken (too-low) recorded cost must NOT inflate the saving: the actual is
+    # floored at the actual model's list price on the same tokens. sonnet routed,
+    # opus baseline, 1M in / 0.5M out, but a bogus $0.10 recorded cost.
+    conn, org = _org(tmp_path)
+    r = metering.record_usage(
+        conn, org, provider="anthropic", model="claude-sonnet-5",
+        input_tokens=1_000_000, output_tokens=500_000, cost_usd=0.10,
+        baseline_model="claude-opus-4-8", ts=_ts())
+    # opus est = 15 + 37.5 = 52.50 ; sonnet floor = 3 + 7.5 = 10.50
+    # saving = 52.50 - max(0.10, 10.50) = 42.00  (NOT 52.40 from the $0.10)
+    assert round(r.savings_usd, 2) == 42.00
+
+
 def test_explicit_baseline_cost_beats_model(tmp_path):
     # If both are given, the explicit USD figure wins (no server pricing).
     conn, org = _org(tmp_path)
@@ -71,6 +85,20 @@ def test_baseline_below_cost_clamps_to_zero(tmp_path):
     conn, org = _org(tmp_path)
     r = _meter(conn, org, cost=3.0, baseline=1.0)
     assert r.savings_usd == 0.0  # never negative
+
+
+def test_zero_cost_event_not_billable(tmp_path):
+    # A baseline-carrying event with no recorded cost ($0) must NOT bill its full
+    # baseline as savings — that's an unprovable/phantom saving (data gap or free
+    # model). It counts toward coverage but not billable gross.
+    conn, org = _org(tmp_path)
+    _meter(conn, org, cost=1.0, baseline=4.0, ts=_ts(1))   # billable: +3.00
+    _meter(conn, org, cost=0.0, baseline=9.0, ts=_ts(2))   # $0 cost: excluded
+    rep = savings.savings_share_report(conn, org, "2026-07").as_dict()
+    assert rep["gross_savings_usd"] == 3.0        # only the $1-cost event
+    assert rep["covered_events"] == 2             # both carried a baseline
+    assert rep["billable_events"] == 1            # only one is billable
+    assert any("excluded" in n for n in rep["notes"])
 
 
 def test_negative_baseline_rejected(tmp_path):
