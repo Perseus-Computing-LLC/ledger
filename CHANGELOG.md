@@ -5,6 +5,21 @@ All notable changes to Plutus are documented here.
 ## [Unreleased]
 
 ### Added
+- **Three-tier model: Free / Pro / Team (+ Enterprise).** One meter, three ways
+  to pay for it — the savings-share is a single lever set per tier
+  (`Tier.savings_share`): **suggested** on Free (an optional tip jar), **waived**
+  on Pro (the flat $20/mo replaces it), **mandatory** on Team (18% of provable
+  savings). New `Tier.per_seat_usd_month` ($10/seat on Team) and
+  `Tier.full_reporting`; `pricing.savings_mode()`. Free now meters **unlimited**
+  so the savings billboard keeps running (the paywall is reporting *depth*, not
+  volume). New **savings billboard** on the dashboard ("Plutus has saved you $X
+  this month · N× multiple") shown on every tier, with a Free-tier **tip jar**
+  (`POST /billing/checkout/donate` → one-time Stripe Checkout, recorded as a
+  distinct hash-chained `donation` ledger entry). Deep reporting (per-task,
+  leakage, export) is gated behind Pro. `plutus bill-savings --apply` now refuses
+  to invoice a waived (Pro) or suggested (Free) org without `--force`. `/pricing`
+  and the `plutus pricing` CLI show the four-tier ladder. See
+  [docs/three-tier-model.md](docs/three-tier-model.md).
 - **Efficiency leakage & policy adherence (#8).** The negative half of the
   efficiency story: turns that ran ABOVE the cheapest policy-passing option.
   Meter an event with `optimal_model` / `optimal_cost_usd` (the model the routing

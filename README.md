@@ -113,17 +113,22 @@ with no code change. Full reference: [docs/api.md](docs/api.md).
 
 ## Plans
 
-| Plan | Price | Limits |
-|---|---|---|
-| **Free** | $0 | Up to 5 team members, 10K tracked tokens / month, 1 workspace, live dashboard |
-| **Pro** | $20 / mo | Unlimited tracked tokens, up to 10 workspaces, prepaid credits, alerts, reports |
-| **Enterprise** | Custom | Unlimited workspaces & seats, SSO, custom budget policies, SLA, self-hosted or dedicated |
-| **Savings-share** | 18% of verified savings | Opt-in (Pro & Enterprise): a share of the money Perseus provably saved you |
+One meter underneath, three ways to pay for it — the **savings-share** is a
+single lever set differently per tier (suggested → waived → mandatory):
 
-Free-tier limits are enforced in the metering core: past the monthly token cap,
-events are still recorded but flagged `over_free_limit` (no billing data is ever
-dropped); set `pricing.block_over_free_limit` to hard-stop ingestion at the cap.
-The public `/pricing` page compares plans; over-cap orgs see an in-app upgrade nudge.
+| Plan | Price | For | Savings-share |
+|---|---|---|---|
+| **Free** | $0 | Individuals — unlimited metering + the live "we've saved you $X" number | **Suggested** — an optional tip jar |
+| **Pro** | $20 / mo | Power users — full reporting, leakage, verifiable receipts, export | **Waived** — the flat price replaces it |
+| **Team** | $10 / seat / mo | Companies — individual + aggregate attribution, admin | **Mandatory** — 18% of provable savings |
+| **Enterprise** | Custom | Org-wide FinOps — SSO, SLA, self-hosted | Negotiated |
+
+Free meters **unlimited** so the savings billboard keeps running; the paywall is
+reporting *depth*, not volume. The token-cap mechanism still exists for any
+capped/custom tier (past the cap, events are still recorded but flagged
+`over_free_limit` — no billing data is ever dropped; `pricing.block_over_free_limit`
+hard-stops ingestion). The public `/pricing` page compares plans. See
+[docs/three-tier-model.md](docs/three-tier-model.md).
 
 **Savings-share** is the value-based path: meter a call with a `baseline_cost_usd`
 (what it would have cost without Perseus) and Plutus bills the agreed share of the

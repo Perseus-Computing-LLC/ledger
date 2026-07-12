@@ -30,9 +30,24 @@ class Tier:
     features: tuple = field(default_factory=tuple)
     blurb: str = ""
     # Team seats included at this tier before the paid floor applies. None =
-    # unlimited. Free is capped at 5 (the hybrid model: free up to 5 users, then
-    # the $20/mo floor). See docs/pricing / cmd_pricing. (#7)
+    # unlimited. See docs/pricing / cmd_pricing.
     seats: Optional[int] = None
+    # Per-seat monthly price. Set only on the Team tier, whose bill is
+    # seats × per_seat_usd_month (a floor) plus the mandatory savings-share on
+    # top. None on flat-price tiers.
+    per_seat_usd_month: Optional[float] = None
+    # How the Perseus savings-share applies at this tier (the one lever, three
+    # settings — see docs/three-tier-model):
+    #   "suggested" — Free: shown as an optional tip ("chip in what we saved you")
+    #   "waived"    — Pro: the flat $20/mo replaces it; never billed
+    #   "mandatory" — Team: 18% of provable savings, invoiced
+    #   "custom"    — Enterprise: negotiated
+    #   "none"      — not applicable
+    savings_share: str = "none"
+    # Whether the deep reporting surfaces (per-model / per-task breakdowns,
+    # leakage & adherence, exports, verifiable savings receipts) are unlocked.
+    # Free sees the headline savings number only; paid tiers see everything.
+    full_reporting: bool = False
 
     @property
     def is_metered_limit(self) -> bool:
@@ -44,17 +59,20 @@ TIERS = {
         key="free",
         name="Free",
         price_usd_month=0.0,
-        tracked_tokens_month=10_000,
+        tracked_tokens_month=None,   # unlimited metering — the savings billboard
+                                     # has to keep running to be a reminder
         workspaces=1,
         seats=5,
+        savings_share="suggested",
+        full_reporting=False,
         features=(
-            "Up to 5 team members",
-            "10K tracked tokens / month",
-            "1 workspace",
-            "Live dashboard",
+            "Unlimited spend metering",
+            "Live \"we've saved you $X\" efficiency number",
+            "Up to 5 team members · 1 workspace",
+            "Optional savings-share tip jar",
             "Community support",
         ),
-        blurb="Track your agents' spend, free for teams up to 5. No card required.",
+        blurb="See what your AI stack is really worth. Free forever, no card.",
     ),
     "pro": Tier(
         key="pro",
@@ -62,16 +80,39 @@ TIERS = {
         price_usd_month=20.0,
         tracked_tokens_month=None,
         workspaces=10,
+        seats=1,
+        savings_share="waived",      # the flat $20 replaces the share
+        full_reporting=True,
         features=(
-            "Unlimited tracked tokens",
-            "Up to 10 workspaces",
-            "Prepaid credits + auto-deplete",
-            "Low-balance & budget-cap alerts",
-            "Monthly PDF spend reports",
-            "Stripe Checkout + Customer Portal",
-            "Perseus savings-share billing (opt-in)",
+            "Everything in Free, plus:",
+            "Full reporting — per-model, per-task, history",
+            "Efficiency leakage & policy-adherence",
+            "Verifiable, tamper-evident savings receipts",
+            "CSV / JSON export · monthly PDF",
+            "Prepaid credits + budget-cap alerts",
+            "Flat $20/mo — no savings-share, ever",
         ),
-        blurb="For solo builders and small teams running real agent workloads.",
+        blurb="Full depth for power users. One flat price, no variable bill.",
+    ),
+    "team": Tier(
+        key="team",
+        name="Team",
+        price_usd_month=0.0,         # priced per seat, not flat
+        per_seat_usd_month=10.0,
+        tracked_tokens_month=None,
+        workspaces=None,
+        seats=None,
+        savings_share="mandatory",   # 18% of provable savings, invoiced
+        full_reporting=True,
+        features=(
+            "Everything in Pro, per seat",
+            "Individual + aggregate spend attribution",
+            "Team roster, roles & admin controls",
+            "Unlimited workspaces & seats",
+            "$10/seat/mo + 18% of provable savings",
+            "Priority support",
+        ),
+        blurb="For companies tracking spend across a team. Pay a share of what we save you.",
     ),
     "enterprise": Tier(
         key="enterprise",
@@ -79,12 +120,15 @@ TIERS = {
         price_usd_month=0.0,  # custom / contact sales
         tracked_tokens_month=None,
         workspaces=None,
+        seats=None,
+        savings_share="custom",
+        full_reporting=True,
         features=(
-            "Everything in Pro",
-            "Unlimited workspaces & seats",
+            "Everything in Team",
             "SSO (SAML / OIDC)",
             "Custom budget policies & SLA",
             "Self-hosted or dedicated",
+            "Negotiated savings-share",
             "Priority support",
         ),
         blurb="Org-wide FinOps with custom limits, SSO, and an SLA.",
@@ -93,9 +137,18 @@ TIERS = {
 
 DEFAULT_TIER = "free"
 
+# The public plan ladder, in display order.
+TIER_ORDER = ("free", "pro", "team", "enterprise")
+
 
 def tier(key: str) -> Tier:
     return TIERS.get((key or DEFAULT_TIER).lower(), TIERS[DEFAULT_TIER])
+
+
+def savings_mode(tier_key: str) -> str:
+    """The savings-share setting for a tier: suggested | waived | mandatory |
+    custom | none. The single lever behind the whole model."""
+    return tier(tier_key).savings_share
 
 
 # ----------------------------------------------------- provider price tables ---

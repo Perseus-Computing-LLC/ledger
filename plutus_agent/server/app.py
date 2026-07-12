@@ -465,6 +465,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._checkout_credit(conn)
             if path == "/billing/checkout/pro":
                 return self._checkout_pro(conn)
+            if path == "/billing/checkout/donate":
+                return self._checkout_donate(conn)
             if path == "/billing/portal":
                 return self._portal(conn)
             if path == "/keys/create":
@@ -514,6 +516,23 @@ class Handler(BaseHTTPRequestHandler):
             ))
         from .. import metering
         summary = metering.org_summary(conn, org_id)
+        # Savings billboard (all tiers) + tip-jar amount (Free): current-month
+        # efficiency and the provable savings-share. Wrapped so a pricing/query
+        # hiccup can never take the dashboard down.
+        import time as _time
+        from .. import efficiency as _eff, savings as _sav
+        _lbl = _time.strftime("%Y-%m", _time.gmtime())
+        try:
+            summary["efficiency"] = _eff.org_efficiency(
+                conn, org_id, period_label=_lbl).as_dict()
+        except Exception:
+            summary["efficiency"] = None
+        try:
+            _rate = _sav.rate_bps_from_config(self.ctx.cfg)
+            summary["savings_share"] = _sav.savings_share_report(
+                conn, org_id, _lbl, rate_bps=_rate).as_dict()
+        except Exception:
+            summary["savings_share"] = None
         integrity = db.verify_chain(  # #108: tamper-evidence tile for this org
             conn, org_id=org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg))
         page = views.render_dashboard(
@@ -845,8 +864,8 @@ class Handler(BaseHTTPRequestHandler):
             if not name:
                 return self._json(400, {"error": "name is required"})
             tier = (payload.get("tier") or "free").strip().lower()
-            if tier not in ("free", "pro", "enterprise"):
-                return self._json(400, {"error": "tier must be free|pro|enterprise"})
+            if tier not in ("free", "pro", "team", "enterprise"):
+                return self._json(400, {"error": "tier must be free|pro|team|enterprise"})
             org = db.create_org(conn, name, tier=tier)
             return self._json(201, {"id": org["id"], "name": org["name"],
                                     "slug": org["slug"], "tier": org["tier"]})
@@ -919,6 +938,15 @@ class Handler(BaseHTTPRequestHandler):
         if not org_id:
             raise BillingError("no organization to bill")
         sess = self.ctx.stripe.pro_checkout(conn, org_id)
+        return self._redirect(sess["url"])
+
+    def _checkout_donate(self, conn):
+        f = self._form()
+        org_id = self._authz_org(conn, f.get("org"), strict=True)
+        if not org_id:
+            raise BillingError("no organization to bill")
+        amount = _parse_credit_amount(f.get("amount"))
+        sess = self.ctx.stripe.donate_checkout(conn, org_id, amount)
         return self._redirect(sess["url"])
 
     def _portal(self, conn):

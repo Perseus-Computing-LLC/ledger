@@ -562,6 +562,17 @@ def cmd_bill_savings(args):
     cfg = cfgmod.load()
     conn = _conn()
     org = _resolve_org(conn, args.org)
+    # Savings-share is mandatory only on Team; Pro is waived (flat $20) and Free
+    # is a voluntary tip. Guard --apply on non-mandatory tiers behind --force so a
+    # Pro/Free org is never invoiced by reflex.
+    mode = pricing.savings_mode(org["tier"])
+    if args.apply and mode in ("waived", "suggested", "none") and not getattr(args, "force", False):
+        conn.close()
+        why = {"waived": "Pro is a flat $20/mo — savings-share is waived",
+               "suggested": "Free treats savings-share as a voluntary tip",
+               "none": "this tier has no savings-share"}.get(mode, mode)
+        sys.exit(f"plutus: won't bill savings-share on a '{org['tier']}' org — {why}. "
+                 f"Mandatory billing is a Team feature. Pass --force to override.")
     period = args.period or savings_mod.previous_month_label()
     rate_bps = _savings_rate_bps(cfg, args)
     stripe_client = None
@@ -632,10 +643,14 @@ def cmd_version(args):
 
 def cmd_pricing(args):
     print(f"\n  Plutus plans — {__tagline__}\n")
-    for key in ("free", "pro", "enterprise"):
+    for key in pricing.TIER_ORDER:
         t = pricing.tier(key)
-        price = "custom" if key == "enterprise" else (
-            "free" if t.price_usd_month == 0 else f"${t.price_usd_month:.0f}/mo")
+        if key == "team":
+            price = f"${t.per_seat_usd_month:.0f}/seat/mo + savings-share"
+        elif key == "enterprise":
+            price = "custom"
+        else:
+            price = "free" if t.price_usd_month == 0 else f"${t.price_usd_month:.0f}/mo"
         seats = "unlimited seats" if t.seats is None else f"up to {t.seats} seats"
         print(f"  {t.name} ({price}, {seats})")
         for f in t.features:
@@ -661,7 +676,7 @@ def build_parser():
     pi = sub.add_parser("init", help="create config + database")
     pi.add_argument("--org", help="also create this organization")
     pi.add_argument("--email", help="owner email for the org")
-    pi.add_argument("--tier", default="free", choices=["free", "pro", "enterprise"])
+    pi.add_argument("--tier", default="free", choices=["free", "pro", "team", "enterprise"])
     pi.add_argument("--workspace", help="also create this workspace")
     pi.add_argument("--budget", type=float, help="workspace monthly budget USD")
     pi.set_defaults(func=cmd_init)
@@ -688,7 +703,7 @@ def build_parser():
     po.add_argument("action",
                     choices=["create", "list", "allow-negative", "enforce-balance"])
     po.add_argument("name", nargs="?")
-    po.add_argument("--tier", default="free", choices=["free", "pro", "enterprise"])
+    po.add_argument("--tier", default="free", choices=["free", "pro", "team", "enterprise"])
     po.add_argument("--email")
     po.set_defaults(func=cmd_org)
 
@@ -799,6 +814,9 @@ def build_parser():
                      help="savings-share percent (default: billing.savings_share_pct or 18)")
     pbs.add_argument("--apply", action="store_true",
                      help="record the invoice + raise it in Stripe (default: dry run)")
+    pbs.add_argument("--force", action="store_true",
+                     help="bill even on a tier where savings-share is waived (Pro) "
+                          "or a tip (Free)")
     pbs.add_argument("--json", action="store_true")
     pbs.set_defaults(func=cmd_bill_savings)
 

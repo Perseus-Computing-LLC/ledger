@@ -346,6 +346,69 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
           <span class="num">STRIPE_SECRET_KEY</span>. Everything else runs fully offline.</span>
         </div>"""
 
+    # savings billboard — the headline "what your stack is really worth" number,
+    # shown on every tier as the subtle constant reminder. On Free it carries the
+    # optional savings-share tip jar ("chip in what we saved you").
+    from .. import pricing as _pricing
+    tobj = _pricing.tier(tier["key"] if isinstance(tier, dict) else tier)
+    eff = summary.get("efficiency") or {}
+    share = summary.get("savings_share") or {}
+    billboard = ""
+    if eff.get("events"):
+        val = eff.get("flagship_value_usd") or 0.0
+        basis = eff.get("basis_usd") or 0.0
+        saved = eff.get("efficiency_usd") or 0.0
+        mult = eff.get("multiple")
+        mult_s = (f"{mult:g}×" if mult else "—")
+        tip_html = ""
+        if tobj.savings_share == "suggested" and can_checkout:
+            raw_tip = share.get("billable_share_usd") or 0.0
+            tip_amt = max(5, int(round(raw_tip))) if raw_tip > 0 else 5
+            note = (f"That's about {_usd(share.get('billable_share_usd') or 0.0)} at our "
+                    f"18% share of provable savings." if raw_tip > 0 else
+                    "Provable routing savings will show here as they accrue.")
+            tip_html = (
+                f"<form method='post' action='/billing/checkout/donate' "
+                f"style='display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap'>"
+                f"<input type='hidden' name='org' value='{_e(org['id'])}'>{csrf_field}"
+                f"<span class='muted' style='font-size:13px'>Earning its keep? {note} "
+                f"Chip in — totally optional.</span>"
+                f"<input class='amt' type='number' name='amount' value='{tip_amt}' min='5' step='5' style='width:80px'>"
+                f"<button class='btn ghost' type='submit'>Chip in →</button></form>")
+        elif tobj.savings_share == "waived":
+            tip_html = ("<div class='muted' style='font-size:13px;margin-top:10px'>"
+                        "You're on Pro — a flat $20/mo, no savings-share. Thank you for "
+                        "supporting Plutus.</div>")
+        billboard = (
+            f"<div class='panel' style='background:linear-gradient(180deg,var(--bg2),transparent);"
+            f"border-color:var(--amber-dim)'>"
+            f"<div style='display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px'>"
+            f"<div><div class='muted' style='font-size:13px;text-transform:uppercase;letter-spacing:.05em'>"
+            f"Plutus has saved you</div>"
+            f"<div class='amber' style='font-size:34px;font-weight:700;line-height:1.1'>{_usd(saved)}</div>"
+            f"<div class='muted' style='font-size:13px'>this month · {_e(mult_s)} efficiency multiple</div></div>"
+            f"<div style='text-align:right'>"
+            f"<div class='muted' style='font-size:12px'>flagship-equivalent value</div>"
+            f"<div style='font-size:20px;font-weight:600'>{_usd(val)}</div>"
+            f"<div class='muted' style='font-size:12px'>for {_usd(basis)} actual</div></div>"
+            f"</div>{tip_html}</div>")
+
+    # deep reporting is a paid feature — Free sees the headline number, paid
+    # tiers get the per-task ROI breakdown (and, later, leakage + export).
+    if tobj.full_reporting:
+        task_panel = (
+            '<div class="panel"><h2>Cost per task type <span class="hint">ROI lens</span></h2>'
+            '<table><thead><tr><th>Task type</th><th>Cost</th><th>Calls</th><th>$/task</th></tr></thead>'
+            f'<tbody>{task_table}</tbody></table></div>')
+    else:
+        task_panel = (
+            '<div class="panel"><h2>Cost per task type <span class="hint">Pro</span></h2>'
+            '<div class="empty" style="padding:24px 14px;text-align:center">'
+            '<div style="font-size:15px;margin-bottom:6px">🔒 Full reporting is a Pro feature</div>'
+            '<div class="muted" style="font-size:13px;margin-bottom:14px">Per-task &amp; per-model '
+            'breakdowns, efficiency leakage, history and CSV/PDF export.</div>'
+            '<a class="btn" href="/pricing">See Pro →</a></div></div>')
+
     # optional live runway panel (from the monitor bridge)
     runway_panel = ""
     if runway and runway.get("providers"):
@@ -419,6 +482,7 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
   </div>
   {banner}
   {upsell}
+  {billboard}
   {cards}
   <div class="grid cols">
     <div class="panel"><h2>Spend by workspace <span class="hint">budget caps</span></h2>
@@ -429,9 +493,7 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
       <tbody>{prov_table}</tbody></table></div>
   </div>
   <div class="grid cols" style="margin-top:16px">
-    <div class="panel"><h2>Cost per task type <span class="hint">ROI lens</span></h2>
-      <table><thead><tr><th>Task type</th><th>Cost</th><th>Calls</th><th>$/task</th></tr></thead>
-      <tbody>{task_table}</tbody></table></div>
+    {task_panel}
     <div class="panel"><h2>Live activity</h2><div class="feed">{feed_html}</div></div>
   </div>
   {runway_panel}
@@ -528,13 +590,30 @@ def pricing_page(*, stripe_status: dict, org_id: str | None = None,
     csrf_field = (f"<input type='hidden' name='_csrf' value='{_e(csrf)}'>"
                   if csrf else "")
 
+    # The savings-share lever, in one human line per tier.
+    share_line = {
+        "suggested": "Savings-share: optional tip",
+        "waived": "Savings-share: waived — flat price",
+        "mandatory": "Savings-share: 18% of provable savings",
+        "custom": "Savings-share: negotiated",
+        "none": "",
+    }
     cards = []
-    for key in ("free", "pro", "enterprise"):
+    for key in pricing.TIER_ORDER:
         t = pricing.TIERS[key]
-        price = ("$0" if key == "free" else
-                 ("Custom" if key == "enterprise" else f"${t.price_usd_month:,.0f}"))
-        per = "" if key == "enterprise" else "<span class='muted' style='font-size:13px'>/mo</span>"
+        if key == "team":
+            price = f"${t.per_seat_usd_month:,.0f}"
+            per = "<span class='muted' style='font-size:13px'>/seat/mo</span>"
+        elif key == "enterprise":
+            price, per = "Custom", ""
+        elif key == "free":
+            price = "$0"
+            per = "<span class='muted' style='font-size:13px'>/mo</span>"
+        else:
+            price = f"${t.price_usd_month:,.0f}"
+            per = "<span class='muted' style='font-size:13px'>/mo</span>"
         feats = "".join(f"<li>{_e(f)}</li>" for f in t.features)
+        featured = ""
         if key == "pro":
             if not signed_in:
                 cta = "<a class='btn' href='/auth/login'>Sign in to upgrade →</a>"
@@ -548,16 +627,22 @@ def pricing_page(*, stripe_status: dict, org_id: str | None = None,
         elif key == "free":
             cta = ("<a class='btn ghost' href='/'>Open dashboard</a>" if signed_in
                    else "<a class='btn ghost' href='/auth/login'>Start free →</a>")
-            featured = ""
+        elif key == "team":
+            cta = ("<a class='btn ghost' href='mailto:tcconnally@gmail.com?"
+                   "subject=Plutus%20Team'>Talk to us →</a>")
         else:
-            cta = "<a class='btn ghost' href='mailto:tcconnally@gmail.com?subject=Plutus%20Enterprise'>Contact sales</a>"
-            featured = ""
+            cta = ("<a class='btn ghost' href='mailto:tcconnally@gmail.com?"
+                   "subject=Plutus%20Enterprise'>Contact sales</a>")
+        sl = share_line.get(t.savings_share, "")
+        share_html = (f"<div class='muted' style='font-size:12px;margin:0 0 10px'>{_e(sl)}</div>"
+                      if sl else "")
         cards.append(
             f"<div class='card'{featured}>"
             f"<div class='l'>{_e(t.name)}</div>"
             f"<div class='v amber'>{price}{per}</div>"
             f"<div class='s' style='min-height:34px'>{_e(t.blurb)}</div>"
-            f"<ul style='list-style:none;padding:0;margin:12px 0 16px;font-size:13px;color:var(--dim)'>"
+            f"{share_html}"
+            f"<ul style='list-style:none;padding:0;margin:6px 0 16px;font-size:13px;color:var(--dim)'>"
             f"{feats}</ul>{cta}</div>")
     grid = "".join(cards)
 
