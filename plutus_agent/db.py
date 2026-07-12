@@ -32,7 +32,9 @@ from typing import Optional
 # so an older reader keeps working — see docs/schema.md for the forward-compat
 # contract. 5 = adds the ingest_idempotency table (#65).
 # 6 = adds the usage_events hash chain (prev_hash/row_hash) for tamper-evidence (#108).
-SCHEMA_VERSION = 6
+# 7 = adds usage_events.baseline_micros (savings-share counterfactual) + the
+#     savings_invoices table (per-org/period savings-share billing).
+SCHEMA_VERSION = 7
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -81,6 +83,16 @@ _CHAIN_FIELDS = (
     "cost_micros", "estimated", "source", "ts",
 )
 
+# Optional trailing chain fields, added after v6. Each is appended to the
+# canonical form ONLY when its value is present (not None). This keeps rows that
+# predate the field (baseline_micros IS NULL) byte-identical to the old v6
+# canonical form, so chains written before schema 7 still verify — while any row
+# that DOES carry a baseline hashes it, making a billed savings figure just as
+# tamper-evident as ``cost_micros``. (#7: savings-share.)
+_CHAIN_FIELDS_OPTIONAL = (
+    "baseline_micros",
+)
+
 
 def _chain_scalar(value) -> str:
     """Deterministic string form of a column value for hashing.
@@ -99,7 +111,14 @@ def _chain_scalar(value) -> str:
 def _canonical_event(fields: dict) -> str:
     # Unit separator between fields; the key name is included so a value can
     # never migrate across columns without changing the digest.
-    return "\x1f".join(f"{k}={_chain_scalar(fields.get(k))}" for k in _CHAIN_FIELDS)
+    parts = [f"{k}={_chain_scalar(fields.get(k))}" for k in _CHAIN_FIELDS]
+    # Optional trailing fields are appended only when present, so a NULL (an
+    # event with no recorded baseline) yields exactly the pre-v7 canonical form.
+    for k in _CHAIN_FIELDS_OPTIONAL:
+        v = fields.get(k)
+        if v is not None:
+            parts.append(f"{k}={_chain_scalar(v)}")
+    return "\x1f".join(parts)
 
 
 def compute_row_hash(prev_hash: Optional[str], fields: dict,
@@ -177,6 +196,13 @@ def verify_chain(conn, org_id: Optional[str] = None,
                 continue
             chain_started = True
             fields = {k: r[k] for k in _CHAIN_FIELDS}
+            # Include optional trailing fields when the column exists (it always
+            # does post-migration); _canonical_event ignores None so a pre-v7 row
+            # with a NULL baseline still hashes to the old canonical form.
+            row_keys = set(r.keys())
+            for k in _CHAIN_FIELDS_OPTIONAL:
+                if k in row_keys:
+                    fields[k] = r[k]
             expected = compute_row_hash(running_prev, fields, hmac_key=hmac_key)
             if r["prev_hash"] != running_prev:
                 divergence = {
@@ -257,6 +283,13 @@ CREATE TABLE IF NOT EXISTS usage_events (
     cache_read_tokens INTEGER NOT NULL DEFAULT 0,
     reasoning_tokens  INTEGER NOT NULL DEFAULT 0,
     cost_micros       INTEGER NOT NULL DEFAULT 0,
+    -- Counterfactual cost for savings-share billing (#7): what this same call
+    -- would have cost without Perseus (same token counts, the customer's
+    -- designated baseline model). NULL = no baseline recorded => this event
+    -- NEVER contributes to billable savings (the conservative default). When
+    -- present it is folded into the hash chain, so a billed saving is as
+    -- tamper-evident as the actual cost.
+    baseline_micros   INTEGER,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -336,6 +369,26 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Savings-share billing (#7). One row per org+period once a savings-share
+-- invoice is raised, so billing is idempotent (a re-run for the same period is a
+-- no-op) and the amount charged is auditable against the usage_events it was
+-- derived from. Money is integer micro-dollars, like every other money column.
+CREATE TABLE IF NOT EXISTS savings_invoices (
+    id                TEXT PRIMARY KEY,
+    org_id            TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    period_label      TEXT NOT NULL,          -- 'YYYY-MM'
+    gross_savings_micros INTEGER NOT NULL,    -- sum(max(0, baseline-cost)) over the period
+    rate_bps          INTEGER NOT NULL,       -- savings-share rate in basis points (1800 = 18%)
+    amount_micros     INTEGER NOT NULL,       -- billed = gross * rate (rounded to micros)
+    covered_events    INTEGER NOT NULL DEFAULT 0,  -- events that carried a baseline
+    total_events      INTEGER NOT NULL DEFAULT 0,  -- all metered events in the period
+    stripe_invoice_id TEXT,                   -- NULL until a Stripe invoice is raised
+    status            TEXT NOT NULL DEFAULT 'pending',  -- pending|invoiced|void
+    ts                REAL NOT NULL,
+    UNIQUE(org_id, period_label)
+);
+CREATE INDEX IF NOT EXISTS ix_savinv_org ON savings_invoices(org_id, period_label);
 """
 
 # Public prefix for ingest API keys. The secret is `plutus_sk_<random>`; only its
@@ -449,6 +502,10 @@ def _migrate_add_columns(conn) -> None:
         # (pre-chain)" rather than being back-filled with a hash we can't attest.
         ("usage_events", "prev_hash", "TEXT"),
         ("usage_events", "row_hash", "TEXT"),
+        # #7: savings-share counterfactual. Nullable (no default) so existing
+        # rows stay NULL = "no baseline" and never contribute to billable
+        # savings, and the hash chain over pre-v7 rows is unchanged.
+        ("usage_events", "baseline_micros", "INTEGER"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
@@ -881,7 +938,7 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
     sql = ("SELECT ue.id, ue.ts, ue.provider, ue.model, ue.task_type, "
            "w.name AS workspace, ue.input_tokens, ue.output_tokens, "
            "ue.cache_read_tokens, ue.reasoning_tokens, ue.cost_micros, "
-           "ue.estimated, ue.source FROM usage_events ue "
+           "ue.baseline_micros, ue.estimated, ue.source FROM usage_events ue "
            "LEFT JOIN workspaces w ON w.id=ue.workspace_id WHERE ue.org_id=?")
     args: list = [org_id]
     if since is not None:
@@ -896,6 +953,10 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
     for r in conn.execute(sql, args).fetchall():
         d = dict(r)
         d["cost_usd"] = micros_to_usd(int(d.pop("cost_micros")))
+        bm = d.pop("baseline_micros", None)
+        # baseline_usd is blank (not 0) when no baseline was recorded, so an
+        # auditor can tell "no counterfactual" apart from "counterfactual of $0".
+        d["baseline_usd"] = None if bm is None else micros_to_usd(int(bm))
         d["estimated"] = bool(d["estimated"])
         out.append(d)
     return out
@@ -933,6 +994,64 @@ def org_by_topup_ref(conn, stripe_ref: str) -> Optional[str]:
         (stripe_ref,),
     ).fetchone()
     return row["org_id"] if row else None
+
+
+# ---------------------------------------------------------- savings-share ---
+def get_savings_invoice(conn, org_id: str, period_label: str) -> Optional[dict]:
+    """The savings-share invoice row for an org+period, or None."""
+    row = conn.execute(
+        "SELECT * FROM savings_invoices WHERE org_id=? AND period_label=?",
+        (org_id, period_label),
+    ).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    d["gross_savings_usd"] = micros_to_usd(int(d["gross_savings_micros"]))
+    d["amount_usd"] = micros_to_usd(int(d["amount_micros"]))
+    d["rate_pct"] = d["rate_bps"] / 100.0
+    return d
+
+
+def record_savings_invoice(conn, org_id: str, period_label: str, *,
+                           gross_savings_micros: int, rate_bps: int,
+                           amount_micros: int, covered_events: int,
+                           total_events: int, stripe_invoice_id: Optional[str] = None,
+                           status: str = "pending", ts: Optional[float] = None,
+                           commit: bool = True) -> dict:
+    """Insert-or-update the savings-share invoice for an org+period.
+
+    Idempotent by the ``UNIQUE(org_id, period_label)`` constraint: the first call
+    inserts, a re-run for the same period updates the same row (e.g. to attach a
+    Stripe invoice id or restate the amount after more usage landed). Returns the
+    stored row via :func:`get_savings_invoice`.
+    """
+    ts = ts if ts is not None else time.time()
+    existing = conn.execute(
+        "SELECT id FROM savings_invoices WHERE org_id=? AND period_label=?",
+        (org_id, period_label),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE savings_invoices SET gross_savings_micros=?, rate_bps=?, "
+            "amount_micros=?, covered_events=?, total_events=?, "
+            "stripe_invoice_id=COALESCE(?, stripe_invoice_id), status=?, ts=? "
+            "WHERE org_id=? AND period_label=?",
+            (int(gross_savings_micros), int(rate_bps), int(amount_micros),
+             int(covered_events), int(total_events), stripe_invoice_id, status, ts,
+             org_id, period_label),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO savings_invoices(id,org_id,period_label,gross_savings_micros,"
+            "rate_bps,amount_micros,covered_events,total_events,stripe_invoice_id,status,ts)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (new_id("savinv"), org_id, period_label, int(gross_savings_micros),
+             int(rate_bps), int(amount_micros), int(covered_events),
+             int(total_events), stripe_invoice_id, status, ts),
+        )
+    if commit:
+        conn.commit()
+    return get_savings_invoice(conn, org_id, period_label)
 
 
 # ------------------------------------------------------------- stripe idemp ---

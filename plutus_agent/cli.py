@@ -26,7 +26,8 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, __tagline__, config as cfgmod, db, metering, pricing, reconcile
+from . import (__version__, __tagline__, config as cfgmod, db, metering,
+               pricing, reconcile, savings as savings_mod)
 
 
 # ----------------------------------------------------------------- helpers ---
@@ -175,7 +176,8 @@ def cmd_meter(args):
         conn, org["id"], provider=args.provider, model=args.model,
         task_type=args.task, input_tokens=args.input, output_tokens=args.output,
         cache_read_tokens=args.cache, reasoning_tokens=args.reasoning,
-        workspace=args.workspace, cost_usd=args.cost, source="cli",
+        workspace=args.workspace, cost_usd=args.cost,
+        baseline_cost_usd=getattr(args, "baseline", None), source="cli",
         pricing_overrides=cfg.get("pricing", {}).get("overrides"),
         alert_cfg=cfg.get("alerts", {}),
         block_over_limit=bool(cfg.get("pricing", {}).get("block_over_free_limit")),
@@ -512,6 +514,75 @@ def cmd_close(args):
         sys.exit(1)
 
 
+def _savings_rate_bps(cfg, args) -> int:
+    """Resolve the savings-share rate: --rate (percent) overrides config."""
+    if getattr(args, "rate", None) is not None:
+        pct = float(args.rate)
+        if not (0.0 <= pct <= 100.0):
+            sys.exit("plutus: --rate must be a percentage between 0 and 100")
+        return int(round(pct * 100))  # percent -> basis points
+    return savings_mod.rate_bps_from_config(cfg)
+
+
+def _print_savings_report(d, org_name, mode):
+    print(f"\n  savings-share {d['period']} for '{org_name}' — {mode}\n")
+    cov = "" if d["coverage_pct"] is None else f" ({d['coverage_pct']:.0f}% coverage)"
+    print(f"    events with a baseline : {d['covered_events']}/{d['total_events']}{cov}")
+    print(f"    baseline cost          : ${d['baseline_usd']:,.4f}")
+    print(f"    actual cost (covered)  : ${d['cost_on_covered_usd']:,.4f}")
+    print(f"    verified savings       : ${d['gross_savings_usd']:,.4f}")
+    print(f"    share rate             : {d['rate_pct']:.1f}%")
+    print(f"    ── billable share      : ${d['billable_share_usd']:,.4f}")
+    if d.get("already_invoiced"):
+        print(f"\n    already invoiced (Stripe {d.get('stripe_invoice_id')})")
+    for n in d.get("notes", []):
+        print(f"    · {n}")
+
+
+def cmd_savings(args):
+    """#7: dry-run savings-share figure for a period (reads only)."""
+    cfg = cfgmod.load()
+    conn = _conn()
+    org = _resolve_org(conn, args.org)
+    period = args.period or savings_mod.previous_month_label()
+    rate_bps = _savings_rate_bps(cfg, args)
+    rep = savings_mod.savings_share_report(conn, org["id"], period, rate_bps=rate_bps)
+    conn.close()
+    d = rep.as_dict()
+    if args.json:
+        print(json.dumps(d, indent=2))
+        return
+    _print_savings_report(d, org["name"], "REPORT")
+
+
+def cmd_bill_savings(args):
+    """#7: compute and (with --apply) raise a savings-share invoice."""
+    cfg = cfgmod.load()
+    conn = _conn()
+    org = _resolve_org(conn, args.org)
+    period = args.period or savings_mod.previous_month_label()
+    rate_bps = _savings_rate_bps(cfg, args)
+    stripe_client = None
+    if args.apply:
+        from .billing import StripeClient
+        stripe_client = StripeClient(cfg)
+    out = savings_mod.bill_savings_share(
+        conn, org["id"], period, rate_bps=rate_bps,
+        stripe_client=stripe_client, apply=args.apply,
+        min_charge_usd=cfg.get("billing", {}).get("savings_min_charge_usd", 0.50),
+    )
+    conn.close()
+    if args.json:
+        print(json.dumps(out, indent=2))
+        return
+    mode = "APPLIED" if args.apply else "DRY RUN (pass --apply to bill)"
+    _print_savings_report(out, org["name"], mode)
+    if args.apply:
+        _ok(f"savings-share recorded (status: {out['status']})"
+            + (f", Stripe invoice {out['stripe_invoice_id']}"
+               if out.get("stripe_invoice_id") else ""))
+
+
 def cmd_version(args):
     print(f"plutus v{__version__} — {__tagline__}")
 
@@ -522,10 +593,18 @@ def cmd_pricing(args):
         t = pricing.tier(key)
         price = "custom" if key == "enterprise" else (
             "free" if t.price_usd_month == 0 else f"${t.price_usd_month:.0f}/mo")
-        print(f"  {t.name} ({price})")
+        seats = "unlimited seats" if t.seats is None else f"up to {t.seats} seats"
+        print(f"  {t.name} ({price}, {seats})")
         for f in t.features:
             print(f"     · {f}")
         print()
+    cfg = cfgmod.load()
+    rate = savings_mod.rate_bps_from_config(cfg) / 100.0
+    print(f"  Savings-share (opt-in, Pro & Enterprise)")
+    print(f"     · {rate:.0f}% of independently-verified monthly savings")
+    print(f"     · billed only on savings you can reconstruct from a tamper-")
+    print(f"       evident usage chain — never a blanket percentage")
+    print()
 
 
 # -------------------------------------------------------------------- parser --
@@ -585,6 +664,9 @@ def build_parser():
     pm.add_argument("--cache", type=int, default=0)
     pm.add_argument("--reasoning", type=int, default=0)
     pm.add_argument("--cost", type=float, help="exact cost USD (else estimated)")
+    pm.add_argument("--baseline", type=float,
+                    help="counterfactual cost USD without Perseus (records "
+                         "savings for savings-share billing, #7)")
     pm.add_argument("--json", action="store_true")
     pm.set_defaults(func=cmd_meter)
 
@@ -640,6 +722,28 @@ def build_parser():
                      help="write adjust entries (default: dry run)")
     pcl.add_argument("--json", action="store_true")
     pcl.set_defaults(func=cmd_close)
+
+    psv = sub.add_parser(
+        "savings",
+        help="show verified savings + the savings-share due for a period (#7)")
+    psv.add_argument("--org")
+    psv.add_argument("--period", help="YYYY-MM (default: previous month)")
+    psv.add_argument("--rate", type=float,
+                     help="savings-share percent (default: billing.savings_share_pct or 18)")
+    psv.add_argument("--json", action="store_true")
+    psv.set_defaults(func=cmd_savings)
+
+    pbs = sub.add_parser(
+        "bill-savings",
+        help="raise a savings-share invoice for a period (dry run without --apply)")
+    pbs.add_argument("--org")
+    pbs.add_argument("--period", help="YYYY-MM (default: previous month)")
+    pbs.add_argument("--rate", type=float,
+                     help="savings-share percent (default: billing.savings_share_pct or 18)")
+    pbs.add_argument("--apply", action="store_true",
+                     help="record the invoice + raise it in Stripe (default: dry run)")
+    pbs.add_argument("--json", action="store_true")
+    pbs.set_defaults(func=cmd_bill_savings)
 
     pa = sub.add_parser("alerts", help="deliver pending alerts")
     pa.add_argument("--org")

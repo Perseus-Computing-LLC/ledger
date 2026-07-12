@@ -173,6 +173,48 @@ class StripeClient:
         )
         return {"id": session["id"], "url": session["url"]}
 
+    def create_savings_invoice(self, conn, org_id: str, amount_usd: float,
+                               period_label: str, description: str = "") -> dict:
+        """Raise a one-off Stripe invoice for the savings-share of a period (#7).
+
+        Adds a single invoice item to the org's customer and finalizes an
+        invoice for it. The ``idempotency_key`` is keyed on org+period so a retry
+        (or a double apply that slipped past the DB guard) never bills twice.
+        Returns ``{id, url, status}`` for the finalized invoice.
+        """
+        self._require()
+        if amount_usd <= 0:
+            raise BillingError("savings-share amount must be positive")
+        customer = self.ensure_customer(conn, org_id)
+        idem = f"savings:{org_id}:{period_label}"
+        # The invoice item is the amount owed; keying idempotency on org+period
+        # makes creating it safe to retry.
+        self._stripe.InvoiceItem.create(
+            customer=customer,
+            amount=int(round(amount_usd * 100)),
+            currency=self.currency,
+            description=description or f"Perseus savings-share {period_label}",
+            metadata={"plutus_org_id": org_id, "kind": "savings_share",
+                      "period": period_label},
+            idempotency_key=f"{idem}:item",
+        )
+        invoice = self._stripe.Invoice.create(
+            customer=customer,
+            collection_method="charge_automatically",
+            auto_advance=True,
+            description=f"Perseus savings-share — {period_label}",
+            metadata={"plutus_org_id": org_id, "kind": "savings_share",
+                      "period": period_label},
+            idempotency_key=f"{idem}:invoice",
+        )
+        # Finalize so it's issued (and, with charge_automatically, collected).
+        final = self._stripe.Invoice.finalize_invoice(invoice["id"])
+        return {
+            "id": final["id"],
+            "url": final.get("hosted_invoice_url") or final.get("invoice_pdf"),
+            "status": final.get("status"),
+        }
+
     def portal(self, conn, org_id: str, return_url: Optional[str] = None) -> dict:
         """Stripe Customer Portal session for self-serve billing management."""
         self._require()
