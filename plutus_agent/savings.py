@@ -68,12 +68,21 @@ def period_savings(conn, org_id: str, start_ts: Optional[float] = None,
     sum of the per-event clamp ``max(0, baseline-cost)`` over events that carry a
     baseline; events without one are counted only in ``total_events``.
     """
+    # Billable events: carry a baseline, the baseline exceeds the actual cost, and
+    # the actual cost is POSITIVE. The cost>0 guard is a defensibility rule: an
+    # event with no recorded cost (a data gap, or a free/local model) would
+    # otherwise book its entire baseline as "savings" — an indefensible bill. We
+    # under-count (a genuinely-free routed call records nothing) rather than bill a
+    # saving we can't stand behind. ``covered``/``base``/``cost_cov`` count all
+    # baseline-carrying events for coverage transparency, so a period where cost is
+    # missing shows up as a gap between coverage and billable gross.
+    billable = ("baseline_micros IS NOT NULL AND cost_micros > 0 "
+                "AND baseline_micros > cost_micros")
     sql = (
         "SELECT "
-        # per-event clamp at 0, summed — done in SQL over integer micros
-        "COALESCE(SUM(CASE WHEN baseline_micros IS NOT NULL "
-        "               AND baseline_micros > cost_micros "
+        f"COALESCE(SUM(CASE WHEN {billable} "
         "          THEN baseline_micros - cost_micros ELSE 0 END),0) AS gross, "
+        f"COALESCE(SUM(CASE WHEN {billable} THEN 1 ELSE 0 END),0) AS billable_events, "
         "COALESCE(SUM(CASE WHEN baseline_micros IS NOT NULL THEN 1 ELSE 0 END),0) AS covered, "
         "COUNT(*) AS total, "
         "COALESCE(SUM(CASE WHEN baseline_micros IS NOT NULL THEN baseline_micros ELSE 0 END),0) AS base, "
@@ -90,6 +99,7 @@ def period_savings(conn, org_id: str, start_ts: Optional[float] = None,
     r = conn.execute(sql, params).fetchone()
     return {
         "gross_savings_micros": int(r["gross"]),
+        "billable_events": int(r["billable_events"]),
         "covered_events": int(r["covered"]),
         "total_events": int(r["total"]),
         "baseline_micros": int(r["base"]),
@@ -115,6 +125,7 @@ class SavingsShareReport:
     rate_bps: int
     gross_savings_usd: float
     billable_share_usd: float
+    billable_events: int
     covered_events: int
     total_events: int
     baseline_usd: float
@@ -136,6 +147,7 @@ class SavingsShareReport:
             "rate_pct": self.rate_bps / 100.0,
             "gross_savings_usd": round(self.gross_savings_usd, 6),
             "billable_share_usd": round(self.billable_share_usd, 6),
+            "billable_events": self.billable_events,
             "covered_events": self.covered_events,
             "total_events": self.total_events,
             "coverage_pct": self.coverage_pct,
@@ -162,6 +174,7 @@ def savings_share_report(conn, org_id: str, period_label: str, *,
         rate_bps=rate_bps,
         gross_savings_usd=db.micros_to_usd(gross_micros),
         billable_share_usd=db.micros_to_usd(share_micros),
+        billable_events=agg["billable_events"],
         covered_events=agg["covered_events"],
         total_events=agg["total_events"],
         baseline_usd=db.micros_to_usd(agg["baseline_micros"]),
@@ -178,6 +191,13 @@ def savings_share_report(conn, org_id: str, period_label: str, *,
         report.notes.append(
             f"{agg['covered_events']}/{agg['total_events']} events carried a "
             "baseline; only those contribute to billable savings."
+        )
+    excluded = agg["covered_events"] - agg["billable_events"]
+    if excluded > 0:
+        report.notes.append(
+            f"{excluded} baseline-carrying event(s) excluded from billing "
+            "(no positive recorded cost — a free/local model or a data gap; "
+            "never billed on an unprovable saving)."
         )
     return report
 

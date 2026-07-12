@@ -62,6 +62,24 @@ class TestBaselineFor(unittest.TestCase):
         m = {"*": "gpt-5"}
         self.assertEqual(hs.baseline_for("openai", "gpt-5-mini", m), "gpt-5")
 
+    def test_family_inferred_from_model_not_mistagged_provider(self):
+        # An Opus call mis-tagged with billing_provider='deepseek' must resolve to
+        # the ANTHROPIC flagship (opus) via the model name → no spurious baseline,
+        # not a nonsensical opus→deepseek-v4-pro pairing.
+        m = dict(hs.FLAGSHIP_BASELINE)
+        self.assertIsNone(hs.baseline_for("deepseek", "claude-opus-4-8", m))
+        # A cheaper anthropic model mis-tagged 'deepseek' still bills vs opus.
+        self.assertEqual(hs.baseline_for("deepseek", "claude-haiku-4-5", m),
+                         "claude-opus-4-8")
+
+    def test_vendor_prefix_normalized(self):
+        m = dict(hs.FLAGSHIP_BASELINE)
+        # 'deepseek/deepseek-v4-pro' is the deepseek flagship → no saving.
+        self.assertIsNone(hs.baseline_for("", "deepseek/deepseek-v4-pro", m))
+        # 'models/gemini-2.5-pro' → google family → billed vs gemini-3.1-pro.
+        self.assertEqual(hs.baseline_for("", "models/gemini-2.5-pro", m),
+                         "gemini-3.1-pro")
+
 
 class TestCollectSessionsAttachesBaseline(unittest.TestCase):
     def _mk_db(self):

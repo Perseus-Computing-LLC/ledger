@@ -87,14 +87,42 @@ def resolve_baseline_models(env) -> dict:
     return {}
 
 
+def _norm_model(model) -> str:
+    """Strip a 'vendor/' prefix so 'deepseek/deepseek-v4-pro' == 'deepseek-v4-pro'."""
+    return (model or "").rsplit("/", 1)[-1].strip().lower()
+
+
+def _family(model) -> str | None:
+    """Infer the provider family from a model NAME. Deliberately does NOT trust a
+    session's billing_provider, which Hermes has historically mis-tagged (e.g. an
+    Opus call recorded under 'deepseek') — that would pick a nonsensical baseline
+    and produce an indefensible bill. Returns a FLAGSHIP_BASELINE key or None."""
+    m = _norm_model(model)
+    for pre, fam in (("claude", "anthropic"), ("gpt", "openai"), ("o4", "openai"),
+                     ("gemini", "google"), ("gemma", "google"),
+                     ("deepseek", "deepseek"), ("grok", "xai"),
+                     ("mistral", "mistral"), ("command", "cohere"),
+                     ("llama", "meta")):
+        if m.startswith(pre):
+            return fam
+    return None
+
+
 def baseline_for(provider, actual_model, baseline_models) -> str | None:
     """The baseline model to bill against for one event, or None to record no
-    saving. None when: savings are off, no baseline is configured for the
-    provider, or the actual model already IS the baseline (no routing happened)."""
+    saving.
+
+    Resolution prefers the family inferred from the MODEL NAME (reliable) over the
+    passed ``provider`` (often mis-tagged), then a global ``*``. Returns None when:
+    savings are off, no baseline is configured, or the actual model already IS the
+    flagship (no routing happened, so no saving to claim)."""
     if not baseline_models:
         return None
-    bm = baseline_models.get((provider or "").lower()) or baseline_models.get("*")
-    if not bm or (actual_model and actual_model == bm):
+    fam = _family(actual_model)
+    bm = ((baseline_models.get(fam) if fam else None)
+          or baseline_models.get((provider or "").lower())
+          or baseline_models.get("*"))
+    if not bm or _norm_model(actual_model) == _norm_model(bm):
         return None
     return bm
 
