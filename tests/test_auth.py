@@ -279,12 +279,14 @@ class TestServerEnforcement(unittest.TestCase):
         status, _ = self._req("/healthz")
         self.assertEqual(status, 200)
 
-    def test_unauthenticated_lands_on_login(self):
-        # GET / → 303 to /auth/login (followed) → login page, NOT the dashboard
+    def test_unauthenticated_lands_on_landing(self):
+        # GET / (logged out) → the public marketing landing, NOT the dashboard.
+        # It routes to Google sign-in via its CTA rather than a hard redirect.
         status, body = self._req("/")
         self.assertEqual(status, 200)
-        self.assertIn("Sign in with Google", body)
-        self.assertNotIn("Credit balance", body)
+        self.assertIn("/auth/login", body)          # sign-in CTA present
+        self.assertIn("really worth", body)          # landing hero copy
+        self.assertNotIn("Credit balance", body)     # not the dashboard
 
     def test_api_requires_auth(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:

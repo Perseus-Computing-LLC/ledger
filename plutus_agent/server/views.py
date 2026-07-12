@@ -444,6 +444,82 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
 </body></html>"""
 
 
+def landing_page(*, signed_in: bool = False, savings_share_pct: float = 18.0) -> str:
+    """Public marketing landing shown at ``/`` to logged-out visitors.
+
+    Leads with the efficiency value proposition (API-equivalent value vs. actual
+    cost) and a real, attributed proof point, then the on-ramps and a Google
+    sign-in CTA that provisions a free org (when ``auth.allow_signup`` is on)."""
+    cta = ('<a class="btn" href="/">Open dashboard →</a>' if signed_in
+           else '<a class="btn" href="/auth/login">Start free with Google →</a>')
+    step = ("border:1px solid var(--line2);border-radius:11px;padding:16px 18px;"
+            "background:var(--panel)")
+    onramp = ("display:inline-block;font-family:var(--mono);font-size:12px;"
+              "color:var(--amber);background:var(--bg2);border:1px solid var(--line2);"
+              "border-radius:7px;padding:2px 8px;margin:2px 4px 2px 0")
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Plutus — see what your AI stack is really worth</title>{FAVICON}
+<style>{CSS}
+.hero{{text-align:center;padding:34px 0 10px}}
+.hero h2{{font-size:34px;line-height:1.15;margin:8px 0 10px;letter-spacing:-.5px}}
+.hero p.sub{{color:var(--dim);font-size:16px;max-width:620px;margin:0 auto 22px}}
+.proof{{margin:26px auto;max-width:640px;text-align:center;padding:22px;border:1px solid var(--amber-dim);
+  border-radius:14px;background:rgba(245,182,63,.05)}}
+.proof .big{{font-size:40px;color:var(--amber);font-weight:600;letter-spacing:-1px}}
+.steps{{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin:28px 0}}
+.foot2{{color:var(--faint);font-size:12px;text-align:center;margin-top:30px;line-height:1.7}}</style>
+</head><body><div class="wrap" style="max-width:900px">
+<div class="top"><div class="brand"><div class="logo">◆</div>
+  <div><h1>Plutus</h1><div class="tag">the billing layer for AI agents</div></div></div>
+  <a class="pill" href="/pricing">Pricing</a></div>
+
+<div class="hero">
+  <div class="pill pro" style="display:inline-block">verifiable efficiency, not a marketing slide</div>
+  <h2>See what your AI&nbsp;stack is <span class="amber">really worth</span>.</h2>
+  <p class="sub">Plutus meters your token usage across every provider and shows you the number that
+  matters: how much your setup would cost at flagship API prices versus what you actually paid.
+  Routing, local models, and subscriptions make that gap huge — and every dollar is on a
+  tamper-evident chain you can recompute yourself.</p>
+  {cta}
+</div>
+
+<div class="proof">
+  <div class="muted" style="font-size:13px;margin-bottom:6px">Our own stack, measured (July, dogfooded)</div>
+  <div class="big">22×</div>
+  <div style="color:var(--dim);font-size:14px;margin-top:4px">
+    <b class="amber">$4,144</b> of flagship-equivalent value delivered for <b class="amber">~$185</b> actual —
+    token-derived, reconstructable, verifiable.</div>
+</div>
+
+<div class="steps">
+  <div style="{step}"><div class="l amber">1 · Connect</div>
+    <div class="s" style="color:var(--dim)">Drop in the on-ramp that fits — nothing to change in your stack.</div>
+    <div style="margin-top:10px">
+      <span style="{onramp}">Claude Code plugin</span>
+      <span style="{onramp}">POST /v1/usage</span>
+      <span style="{onramp}">provider adapters</span></div></div>
+  <div style="{step}"><div class="l amber">2 · Meter</div>
+    <div class="s" style="color:var(--dim)">Every call is recorded to an append-only, hash-chained ledger —
+    auditable, tamper-evident, yours.</div></div>
+  <div style="{step}"><div class="l amber">3 · See your efficiency</div>
+    <div class="s" style="color:var(--dim)">Live dashboard: spend by provider, and the value-vs-actual
+    multiple that shows what your routing actually saves.</div></div>
+</div>
+
+<div style="text-align:center;margin:26px 0 8px">
+  <div style="color:var(--dim);font-size:14px;margin-bottom:14px">
+    <b>Free for small teams.</b> $20/mo beyond that. Optional {savings_share_pct:.0f}% share of the
+    savings we can <i>prove</i> — never a blanket percentage, never an automatic charge.</div>
+  {cta}
+  &nbsp;<a class="btn ghost" href="/pricing">Compare plans</a>
+</div>
+
+<div class="foot2">Self-hostable · single binary · MCP-native · works offline.<br>
+  Perseus Computing LLC · <a href="https://perseus.observer/plutus/">perseus.observer/plutus</a></div>
+</div></body></html>"""
+
+
 def pricing_page(*, stripe_status: dict, org_id: str | None = None,
                  user=None, signed_in: bool = False, csrf: str = "") -> str:
     """Public plans page — the comparison surface the upgrade nudges point to."""

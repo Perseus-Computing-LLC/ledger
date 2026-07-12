@@ -25,7 +25,8 @@ from ..utils import strict_int
 from . import api, views, auth as authmod
 
 # Paths reachable without a session when auth is enabled.
-_PUBLIC_PATHS = {"/healthz", "/favicon.ico", "/webhook/stripe", "/pricing",
+_PUBLIC_PATHS = {"/", "/index.html",  # public landing for logged-out visitors
+                 "/healthz", "/favicon.ico", "/webhook/stripe", "/pricing",
                  "/v1/usage",  # authenticated by its own Bearer API key, not a session
                  "/v1/usage/export.csv", "/v1/usage/export.json",  # Bearer-auth (#66)
                  "/v1/admin/orgs", "/v1/admin/credits", "/v1/admin/keys",  # admin-token (#66)
@@ -410,6 +411,13 @@ class Handler(BaseHTTPRequestHandler):
                     "(via webhook). You can close this tab." if ok else
                     "No charge was made.", ok=ok))
             if path == "/" or path == "/index.html":
+                # Public landing for logged-out visitors (auth on, no session);
+                # the dashboard for signed-in users and local trusted mode.
+                if self.ctx.auth_on and self._user is None:
+                    from .. import savings as _sav
+                    pct = _sav.rate_bps_from_config(self.ctx.cfg) / 100.0
+                    return self._send(200, views.landing_page(
+                        signed_in=False, savings_share_pct=pct))
                 return self._dashboard(conn, q)
             return self._send(404, views.simple_page("Not found", "404",
                               f"No route for <span class='num'>{html.escape(path)}</span>.",
