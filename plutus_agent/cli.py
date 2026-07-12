@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 
 from . import (__version__, __tagline__, config as cfgmod, db, metering,
-               pricing, reconcile, savings as savings_mod)
+               pricing, reconcile, savings as savings_mod, efficiency as eff_mod)
 
 
 # ----------------------------------------------------------------- helpers ---
@@ -584,6 +584,41 @@ def cmd_bill_savings(args):
                if out.get("stripe_invoice_id") else ""))
 
 
+def cmd_efficiency(args):
+    """#8: value-vs-actual efficiency for an org+period."""
+    cfg = cfgmod.load()
+    conn = _conn()
+    org = _resolve_org(conn, args.org)
+    period = None if args.all else (args.period or eff_mod.previous_month_label())
+    rep = eff_mod.org_efficiency(
+        conn, org["id"], period_label=period,
+        baseline_models=eff_mod.baseline_models_from_config(cfg),
+        pricing_overrides=cfg.get("pricing", {}).get("overrides"),
+        actual_paid_usd=args.actual)
+    conn.close()
+    d = rep.as_dict()
+    if args.json:
+        print(json.dumps(d, indent=2))
+        return
+    print(f"\n  efficiency — '{org['name']}' ({d['period']})\n")
+    print(f"    events / tokens       : {d['events']:,} / {d['tokens']:,}")
+    print(f"    flagship-equiv value  : ${d['flagship_value_usd']:,.2f}   "
+          f"(same tokens on the best API model)")
+    print(f"    API-list value        : ${d['list_value_usd']:,.2f}   "
+          f"(the models you actually used, at API prices)")
+    basis_label = "actual paid (console)" if d['actual_paid_usd'] is not None \
+        else "metered cost (no console reconcile yet)"
+    print(f"    {basis_label:<22}: ${d['basis_usd']:,.2f}")
+    print(f"    ── efficiency         : ${d['efficiency_usd']:,.2f}"
+          + (f"   ({d['multiple']}x value-for-money)" if d['multiple'] else ""))
+    if d["by_family"]:
+        print("\n    by provider family:")
+        for fam, a in sorted(d["by_family"].items(),
+                             key=lambda x: -x[1]["flagship_value_usd"]):
+            print(f"      {fam:<12} {a['events']:>5} ev  "
+                  f"${a['flagship_value_usd']:>9,.2f} flagship-value")
+
+
 def cmd_version(args):
     print(f"plutus v{__version__} — {__tagline__}")
 
@@ -733,6 +768,17 @@ def build_parser():
                      help="savings-share percent (default: billing.savings_share_pct or 18)")
     psv.add_argument("--json", action="store_true")
     psv.set_defaults(func=cmd_savings)
+
+    pef = sub.add_parser(
+        "efficiency",
+        help="value-vs-actual efficiency: flagship-equivalent value, cost, multiple (#8)")
+    pef.add_argument("--org")
+    pef.add_argument("--period", help="YYYY-MM (default: previous month)")
+    pef.add_argument("--all", action="store_true", help="all-time, ignore period")
+    pef.add_argument("--actual", type=float,
+                     help="reconciled actual paid USD for the period (console truth)")
+    pef.add_argument("--json", action="store_true")
+    pef.set_defaults(func=cmd_efficiency)
 
     pbs = sub.add_parser(
         "bill-savings",
