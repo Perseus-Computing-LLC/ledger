@@ -1,0 +1,17 @@
+{
+  "description": "Meter each Claude Code turn's token usage to a self-hosted Plutus ledger at session end.",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/plutus-meter.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
