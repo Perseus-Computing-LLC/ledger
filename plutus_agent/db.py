@@ -40,7 +40,10 @@ from typing import Optional
 #     tamper-evidence chain is INDEPENDENTLY verifiable — a customer-held checkpoint
 #     pins a past head, catching a full-chain recompute the operator could otherwise
 #     hide. See _CHECKPOINT_FIELDS / checkpoint_chain / verify_checkpoints (#120).
-SCHEMA_VERSION = 9
+# 10 = adds usage_events.external_ref (per-task/per-question attribution id, e.g. an
+#     Invarium task_id) + ix_usage_extref. Nullable and hash-chained as an optional
+#     trailing field, so pre-v10 rows still verify byte-identically.
+SCHEMA_VERSION = 10
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -98,6 +101,11 @@ _CHAIN_FIELDS = (
 _CHAIN_FIELDS_OPTIONAL = (
     "baseline_micros",
     "optimal_micros",
+    # #20-arc shape A: per-task attribution ref. Appended last so rows without
+    # it (external_ref IS NULL) stay byte-identical to the pre-v10 canonical
+    # form; a row that carries it hashes it, so a billed saving can't be
+    # re-pointed to a different task undetected.
+    "external_ref",
 )
 
 
@@ -480,6 +488,13 @@ CREATE TABLE IF NOT EXISTS usage_events (
     -- policy target recorded => never counts toward leakage. Hash-chained, so the
     -- leakage figure is as tamper-evident as the cost and the baseline.
     optimal_micros    INTEGER,
+    -- Per-task / per-question attribution (#20-arc, shape A): an opaque
+    -- caller-supplied id (e.g. an Invarium task_id) linking this event back to
+    -- the task that produced it. NULL = none. Hash-chained (optional trailing
+    -- field) so a billed saving can't be re-pointed to a different task
+    -- undetected. Indexed via ix_usage_extref (created in _migrate_add_columns
+    -- so it applies to upgraded DBs too).
+    external_ref      TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -722,11 +737,23 @@ def _migrate_add_columns(conn) -> None:
         ("usage_events", "baseline_micros", "INTEGER"),
         # #8: efficiency-leakage counterfactual (cheapest policy-passing option).
         ("usage_events", "optimal_micros", "INTEGER"),
+        # #20-arc shape A: per-task/per-question attribution ref. Nullable so
+        # existing rows stay NULL and the hash chain over pre-v10 rows is
+        # unchanged (external_ref is an optional trailing chain field).
+        ("usage_events", "external_ref", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
         if cols and col not in cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
+    # Index on the attribution ref, created here (not in SCHEMA) so it runs after
+    # the ALTER above adds the column on an upgraded DB — a fresh DB already has
+    # the column from SCHEMA, so IF NOT EXISTS makes this a no-op there.
+    if "external_ref" in _table_columns(conn, "usage_events"):
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_usage_extref "
+            "ON usage_events(org_id, external_ref)"
+        )
 
 
 def _table_columns(conn, table: str) -> set:
@@ -1146,6 +1173,20 @@ def ledger_history(conn, org_id: str, limit: int = 50,
     return [_ledger_row_with_usd(r) for r in rows]
 
 
+def events_by_ref(conn, org_id: str, external_ref: str) -> list[sqlite3.Row]:
+    """All usage events an org recorded under one attribution ref (#20-arc, A).
+
+    The join from a billed saving back to the task that produced it: given an
+    Invarium ``task_id`` (stored as ``external_ref``), return its event rows
+    (newest first) so cost/baseline/savings can be tied to the exact task.
+    """
+    return conn.execute(
+        "SELECT * FROM usage_events WHERE org_id=? AND external_ref=? "
+        "ORDER BY rowid DESC",
+        (org_id, external_ref),
+    ).fetchall()
+
+
 def export_events(conn, org_id: str, since: Optional[float] = None,
                   until: Optional[float] = None, limit: int = 50_000) -> list[dict]:
     """Org-scoped usage events for CSV/JSON export (fix #66), newest first,
@@ -1154,7 +1195,8 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
     sql = ("SELECT ue.id, ue.ts, ue.provider, ue.model, ue.task_type, "
            "w.name AS workspace, ue.input_tokens, ue.output_tokens, "
            "ue.cache_read_tokens, ue.reasoning_tokens, ue.cost_micros, "
-           "ue.baseline_micros, ue.optimal_micros, ue.estimated, ue.source "
+           "ue.baseline_micros, ue.optimal_micros, ue.external_ref, "
+           "ue.estimated, ue.source "
            "FROM usage_events ue "
            "LEFT JOIN workspaces w ON w.id=ue.workspace_id WHERE ue.org_id=?")
     args: list = [org_id]

@@ -178,7 +178,8 @@ def cmd_meter(args):
         cache_read_tokens=args.cache, reasoning_tokens=args.reasoning,
         workspace=args.workspace, cost_usd=args.cost,
         baseline_cost_usd=getattr(args, "baseline", None),
-        optimal_cost_usd=getattr(args, "optimal", None), source="cli",
+        optimal_cost_usd=getattr(args, "optimal", None),
+        external_ref=getattr(args, "ref", None), source="cli",
         pricing_overrides=cfg.get("pricing", {}).get("overrides"),
         alert_cfg=cfg.get("alerts", {}),
         block_over_limit=bool(cfg.get("pricing", {}).get("block_over_free_limit")),
@@ -820,6 +821,9 @@ def build_parser():
     pm.add_argument("--optimal", type=float,
                     help="cheapest policy-passing cost USD; cost above it is "
                          "efficiency leakage / off-policy (#8)")
+    pm.add_argument("--ref", dest="ref",
+                    help="per-task/per-question attribution id (e.g. an Invarium "
+                         "task_id); links this event to the task that produced it")
     pm.add_argument("--json", action="store_true")
     pm.set_defaults(func=cmd_meter)
 
