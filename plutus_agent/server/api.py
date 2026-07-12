@@ -63,7 +63,8 @@ def events_json(conn, org_id: str, limit: int = 50, before=None) -> dict:
 
 _EXPORT_COLUMNS = ["id", "ts", "provider", "model", "task_type", "workspace",
                    "input_tokens", "output_tokens", "cache_read_tokens",
-                   "reasoning_tokens", "cost_usd", "estimated", "source"]
+                   "reasoning_tokens", "cost_usd", "baseline_usd", "estimated",
+                   "source"]
 
 
 def _csv_safe(value):

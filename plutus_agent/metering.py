@@ -39,6 +39,8 @@ class MeterResult:
     estimated: bool
     balance_after: float
     alerts: list  # list of dicts {kind, message}
+    baseline_usd: Optional[float] = None  # counterfactual cost, if supplied (#7)
+    savings_usd: float = 0.0              # max(0, baseline - cost); 0 when no baseline
     recorded: bool = True        # False when a hard free-tier cap dropped the event
     over_free_limit: bool = False  # org is on a limited tier and past its monthly quota
     over_balance: bool = False  # Fix #28: org hit prepaid credit hard-stop
@@ -83,7 +85,8 @@ def record_usage(conn, org_id: str, provider: str,
                  cache_read_tokens: int = 0, reasoning_tokens: int = 0,
                  model: Optional[str] = None, task_type: str = "general",
                  workspace: Optional[str] = None,
-                 cost_usd: Optional[float] = None, source: str = "api",
+                 cost_usd: Optional[float] = None,
+                 baseline_cost_usd: Optional[float] = None, source: str = "api",
                  pricing_overrides: Optional[dict] = None,
                  ts: Optional[float] = None,
                  alert_cfg: Optional[dict] = None,
@@ -101,6 +104,14 @@ def record_usage(conn, org_id: str, provider: str,
     Prepaid credit hard-stop (fix #28): with ``block_over_balance`` on, if the
     org has ever had credit and the event would push balance negative, it is
     rejected (not recorded).
+
+    Savings-share (#7): ``baseline_cost_usd`` is the counterfactual cost of this
+    same call *without* Perseus — the same token counts priced at the customer's
+    designated baseline model. When supplied it is stored (and hash-chained)
+    alongside the actual cost; the per-event saving is ``max(0, baseline - cost)``
+    and periodic savings-share billing sums it. Omit it (the default) and the
+    event simply never contributes to billable savings. It does NOT affect the
+    prepaid-credit debit, which always follows the actual ``cost_usd``.
     """
     ts = ts if ts is not None else time.time()
 
@@ -154,6 +165,22 @@ def record_usage(conn, org_id: str, provider: str,
             "must go through the adjust/grant/refund ledger path, not metering"
         )
 
+    # #7: savings-share counterfactual. A negative baseline is nonsensical and
+    # could only inflate savings, so reject it rather than clamp silently. None
+    # stays None (no baseline recorded). The per-event saving is clamped at 0 so
+    # a baseline *below* actual cost never produces "negative savings" that would
+    # net against a genuine saving elsewhere in the period.
+    baseline_micros = None
+    savings_usd = 0.0
+    if baseline_cost_usd is not None:
+        baseline_cost_usd = round(float(baseline_cost_usd), 6)
+        if baseline_cost_usd < 0:
+            raise ValueError(
+                f"baseline_cost_usd must be non-negative, got {baseline_cost_usd}"
+            )
+        baseline_micros = db.usd_to_micros(baseline_cost_usd)
+        savings_usd = round(max(0.0, baseline_cost_usd - cost_usd), 6)
+
     # Fix #28: prepaid credit hard-stop. Skipped for orgs explicitly flagged
     # allow_negative_balance (trusted/internal track-only mode) so they keep
     # full tracking even past zero.
@@ -193,17 +220,20 @@ def record_usage(conn, org_id: str, provider: str,
         "cache_read_tokens": int(cache_read_tokens),
         "reasoning_tokens": int(reasoning_tokens), "cost_micros": cost_micros,
         "estimated": int(estimated), "source": source, "ts": ts,
+        # Optional trailing chain field; None => omitted from the hash so pre-#7
+        # rows and no-baseline rows stay byte-identical to the v6 canonical form.
+        "baseline_micros": baseline_micros,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
         "INSERT INTO usage_events(id,org_id,workspace_id,provider,model,task_type,"
         "input_tokens,output_tokens,cache_read_tokens,reasoning_tokens,cost_micros,"
-        "estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "baseline_micros,estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
-         int(reasoning_tokens), cost_micros, int(estimated), source, ts,
-         prev_hash, row_hash),
+         int(reasoning_tokens), cost_micros, baseline_micros, int(estimated),
+         source, ts, prev_hash, row_hash),
     )
 
     # Deplete prepaid credit (only when there's credit to deplete; orgs on the
@@ -228,6 +258,7 @@ def record_usage(conn, org_id: str, provider: str,
         cost_usd=cost_usd, estimated=estimated,
         balance_after=balance_after, alerts=alerts,
         recorded=True, over_free_limit=over, unpriced=unpriced,
+        baseline_usd=baseline_cost_usd, savings_usd=savings_usd,
     )
 
 

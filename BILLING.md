@@ -61,3 +61,57 @@ against the live key to create the live price.
 - The credit balance is the **sum of an append-only ledger**, so it's auditable
   and can't silently drift.
 - No Stripe key → Checkout is simply disabled and everything else runs offline.
+
+---
+
+## 6. Savings-share billing (the Perseus value path)
+
+The Pro subscription and prepaid credit above are the *subscription* half of the
+model. The other half bills a share of the **money Perseus actually saved** a
+customer — the differentiated revenue path.
+
+**How savings are recorded.** Every metered event can carry a counterfactual:
+what the *same* call would have cost without Perseus (same token counts, priced
+at the customer's designated baseline model). Pass it at meter time:
+
+```bash
+# actual cost $1.00; would have been $4.00 without Perseus routing → $3.00 saved
+plutus meter --provider anthropic --model claude-haiku-4-5 \
+    --cost 1.00 --baseline 4.00
+```
+
+or over HTTP:
+
+```json
+POST /v1/usage
+{ "provider": "anthropic", "cost_usd": 1.00, "baseline_cost_usd": 4.00 }
+```
+
+The baseline is folded into the usage-event **hash chain**, so a billed saving
+is as tamper-evident as the actual cost, and it's exported alongside cost
+(`baseline_usd` column) so a customer can reconstruct every figure.
+
+**See what's owed (read-only):**
+```bash
+plutus savings --period 2026-07
+#   verified savings   : $3.5000
+#   share rate         : 18.0%
+#   ── billable share  : $0.6300
+```
+
+**Raise the invoice** (dry-run without `--apply`):
+```bash
+plutus bill-savings --period 2026-07 --apply
+```
+With `--apply` and a live Stripe key this creates a Stripe invoice for the share
+and records it in `savings_invoices` (idempotent per org+period — a re-run is a
+no-op). Without Stripe connected it records the period as `pending` so nothing is
+lost.
+
+**The rules that keep the number honest** (see `docs/savings-share.md`):
+- Only events with a baseline count — **never a blanket "you saved 40%"**.
+- A per-event saving is `max(0, baseline − cost)`; it can never go negative.
+- Coverage (how many events carried a baseline) is always shown, so a
+  thin-coverage period is visible, not hidden.
+- The rate is `billing.savings_share_pct` (default `0.18`); override per-run with
+  `--rate`.

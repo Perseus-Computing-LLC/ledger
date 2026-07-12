@@ -5,6 +5,24 @@ All notable changes to Plutus are documented here.
 ## [Unreleased]
 
 ### Added
+- **Savings-share billing (`plutus savings` / `plutus bill-savings`).** The
+  value-based revenue path: bill a share (default 18%, `billing.savings_share_pct`)
+  of the money Perseus provably saved a customer, not just the flat subscription.
+  Every metered event can carry a `baseline_cost_usd` counterfactual (what the
+  same call would have cost without Perseus); the per-event saving is
+  `max(0, baseline − cost)` and a period's billable share is the summed savings ×
+  the rate. Three properties keep the number defensible: only events with a
+  baseline count (never a blanket percentage), the baseline is folded into the
+  usage hash chain (so an inflated saving breaks `plutus verify`) and exported as
+  `baseline_usd` for independent reconstruction, and coverage is always disclosed.
+  `plutus savings` reports the figure read-only; `plutus bill-savings --apply`
+  raises a Stripe invoice and records an idempotent `savings_invoices` row (a
+  re-run for the same org+period is a no-op). `baseline_cost_usd` is accepted at
+  `plutus meter --baseline` and the `/v1/usage` boundary. Free tier now covers up
+  to 5 team members (the hybrid model: free to 5, then the $20/mo floor, then
+  opt-in savings-share). Schema v7 (additive: nullable `usage_events.baseline_micros`
+  chained as an optional trailing field so pre-v7 chains verify unchanged, plus
+  the `savings_invoices` table). See BILLING.md §6 and docs/savings-share.md. (#7)
 - **Ledger tamper-evidence (`plutus verify`).** The usage ledger was
   integer-exact and re-queryable but append-only *by convention* only — an
   operator with database access could rewrite a debit undetectably, which the

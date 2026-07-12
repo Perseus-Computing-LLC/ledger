@@ -115,14 +115,21 @@ with no code change. Full reference: [docs/api.md](docs/api.md).
 
 | Plan | Price | Limits |
 |---|---|---|
-| **Free** | $0 | 10K tracked tokens / month, 1 workspace, live dashboard |
+| **Free** | $0 | Up to 5 team members, 10K tracked tokens / month, 1 workspace, live dashboard |
 | **Pro** | $20 / mo | Unlimited tracked tokens, up to 10 workspaces, prepaid credits, alerts, reports |
 | **Enterprise** | Custom | Unlimited workspaces & seats, SSO, custom budget policies, SLA, self-hosted or dedicated |
+| **Savings-share** | 18% of verified savings | Opt-in (Pro & Enterprise): a share of the money Perseus provably saved you |
 
 Free-tier limits are enforced in the metering core: past the monthly token cap,
 events are still recorded but flagged `over_free_limit` (no billing data is ever
 dropped); set `pricing.block_over_free_limit` to hard-stop ingestion at the cap.
 The public `/pricing` page compares plans; over-cap orgs see an in-app upgrade nudge.
+
+**Savings-share** is the value-based path: meter a call with a `baseline_cost_usd`
+(what it would have cost without Perseus) and Plutus bills the agreed share of the
+provable, tamper-evident savings — never a blanket percentage. See
+[BILLING.md](BILLING.md#6-savings-share-billing-the-perseus-value-path) and
+[docs/savings-share.md](docs/savings-share.md).
 
 ## Integrations
 

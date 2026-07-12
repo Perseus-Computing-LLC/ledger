@@ -29,6 +29,10 @@ class Tier:
     workspaces: Optional[int]            # None = unlimited
     features: tuple = field(default_factory=tuple)
     blurb: str = ""
+    # Team seats included at this tier before the paid floor applies. None =
+    # unlimited. Free is capped at 5 (the hybrid model: free up to 5 users, then
+    # the $20/mo floor). See docs/pricing / cmd_pricing. (#7)
+    seats: Optional[int] = None
 
     @property
     def is_metered_limit(self) -> bool:
@@ -42,13 +46,15 @@ TIERS = {
         price_usd_month=0.0,
         tracked_tokens_month=10_000,
         workspaces=1,
+        seats=5,
         features=(
+            "Up to 5 team members",
             "10K tracked tokens / month",
             "1 workspace",
             "Live dashboard",
             "Community support",
         ),
-        blurb="Track a single agent's spend. No card required.",
+        blurb="Track your agents' spend, free for teams up to 5. No card required.",
     ),
     "pro": Tier(
         key="pro",
@@ -63,6 +69,7 @@ TIERS = {
             "Low-balance & budget-cap alerts",
             "Monthly PDF spend reports",
             "Stripe Checkout + Customer Portal",
+            "Perseus savings-share billing (opt-in)",
         ),
         blurb="For solo builders and small teams running real agent workloads.",
     ),
