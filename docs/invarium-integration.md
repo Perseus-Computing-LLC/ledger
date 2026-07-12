@@ -96,24 +96,40 @@ auditable rather than caller-enforced.
 
 ### C — Cost/latency assertions upstream + a meter-accuracy regression suite
 
-Invarium already declares `cost_exceeded` and `latency_exceeded` in
-`FAILURE_CATEGORIES` but **ships no assertion that emits them**. Contribute the
-primitives upstream (offer alongside issue #26, following the PR #27 pattern):
+**Upstream primitives (in review — invarium PR #28):** Invarium declared
+`cost_exceeded` and `latency_exceeded` in `FAILURE_CATEGORIES` but shipped no
+assertion that emits them. PR #28 adds them:
 
 ```python
 expect(result).cost_less_than(2.00)                 # -> cost_exceeded
-expect(result).cost_within(baseline, max_fraction=0.5)
 expect(result).latency_less_than(4.0)               # -> latency_exceeded
+# a two-sided cost_within(expected, tol) is the natural follow-on for regression pins
 ```
 
 These let a *cost* regression fail a test the same way a behavioral one does, and
-they are the natural precondition folded into shape B's `verified`.
+are the natural precondition folded into shape B's `verified`.
 
-Then a **golden regression suite**: `bless` a fixed task set with known cost, and
-`compare` on every change. Because Plutus is deterministic given fixed token counts
-and a pinned pricing table, a drift in Plutus's attribution (a pricing table edit, a
-baseline-derivation change) surfaces as a cost regression in CI — Invarium testing
-the meter, not just the agent.
+**Meter-accuracy regression suite ✅ implemented** (`examples/invarium_meter_regression.py`,
+`tests/test_meter_regression.py`). Plutus's cost attribution is deterministic given
+fixed token counts and a pinned price table, so a golden catalog of workloads is
+`bless`ed and re-`compare`d on every change: a drift in the pricing table or the
+baseline-derivation math surfaces as a **cost regression** on exactly the affected
+model — Invarium testing the meter, not just the agent.
+
+The mechanism is worth stating because it's non-obvious: `compare_reports` only
+flags a regression when a test's **success rate drops**. So cost drift must fail an
+assertion to be caught. Each golden workload therefore carries a two-sided cost pin
+(metered cost must equal its frozen value); a price change trips the pin →
+success 100%→0% → `compare` reports the regression *and* surfaces the `cost_delta`
+under the `cost_exceeded` category. That interlock is exactly why the assertion (C's
+upstream half) and the suite belong together. (The suite pins costs with a plain
+two-sided check so it runs on released invarium; it does not depend on PR #28.)
+
+```
+Re-meter, no change        -> No regression detected across 4 matched test(s).
+Re-meter after price bump  -> Regression detected in 1 of 4 matched test(s).
+  [REGRESSION] meter[anthropic/claude-haiku-4-5]  success 100% -> 0%  cost delta $+1.0000  {cost_exceeded: 1}
+```
 
 ### A — Per-task / per-question attribution
 
