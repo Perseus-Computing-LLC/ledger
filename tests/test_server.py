@@ -198,6 +198,12 @@ class TestIngestQuota(unittest.TestCase):
     def setUpClass(cls):
         fd, cls.dbpath = tempfile.mkstemp(suffix=".db")
         os.close(fd)
+        # Free ships unlimited now; pin a capped variant to exercise the 402 path.
+        import dataclasses
+        from plutus_agent import pricing
+        cls._orig_free = pricing.TIERS["free"]
+        pricing.TIERS["free"] = dataclasses.replace(
+            cls._orig_free, tracked_tokens_month=10_000, workspaces=1)
         conn = db.connect(cls.dbpath)
         db.init_schema(conn)
         cls.org_id = db.create_org(conn, "Free Co", tier="free")["id"]
@@ -218,6 +224,8 @@ class TestIngestQuota(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        from plutus_agent import pricing
+        pricing.TIERS["free"] = cls._orig_free
         cls.httpd.shutdown()
         cls.httpd.server_close()
         for ext in ("", "-wal", "-shm"):

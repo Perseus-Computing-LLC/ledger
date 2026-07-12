@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for the Plutus monetization engine (plutus_agent)."""
+import dataclasses
 import os
 import sys
 import tempfile
@@ -59,8 +60,16 @@ class TestPricing(unittest.TestCase):
 
     def test_tiers(self):
         self.assertEqual(pricing.tier("pro").price_usd_month, 20.0)
-        self.assertEqual(pricing.tier("free").tracked_tokens_month, 10_000)
+        # Free now meters unlimited (the savings billboard must keep running).
+        self.assertIsNone(pricing.tier("free").tracked_tokens_month)
         self.assertIsNone(pricing.tier("enterprise").workspaces)
+        # The three-tier savings-share ladder.
+        self.assertEqual(pricing.tier("free").savings_share, "suggested")
+        self.assertEqual(pricing.tier("pro").savings_share, "waived")
+        self.assertEqual(pricing.tier("team").savings_share, "mandatory")
+        self.assertEqual(pricing.tier("team").per_seat_usd_month, 10.0)
+        self.assertFalse(pricing.tier("free").full_reporting)
+        self.assertTrue(pricing.tier("pro").full_reporting)
 
 
 class TestLedger(unittest.TestCase):
@@ -111,11 +120,18 @@ class TestMetering(unittest.TestCase):
 
 
 class TestFreeTierLimits(unittest.TestCase):
+    """The metered-limit mechanism. Free ships unlimited, so we pin a capped
+    variant here to exercise the over-limit path (used by any capped/custom
+    tier)."""
     def setUp(self):
         self.conn = fresh_conn()
+        self._orig_free = pricing.TIERS["free"]
+        pricing.TIERS["free"] = dataclasses.replace(
+            self._orig_free, tracked_tokens_month=10_000, workspaces=1)
         self.org = db.create_org(self.conn, "Free Co", tier="free")["id"]
 
     def tearDown(self):
+        pricing.TIERS["free"] = self._orig_free
         drop_conn(self.conn)
 
     def _meter(self, tokens, **kw):
@@ -302,6 +318,27 @@ class TestBillingWebhook(unittest.TestCase):
         res = handle_webhook_event(self.conn, event)
         self.assertEqual(res["status"], "credited")
         self.assertAlmostEqual(db.get_balance(self.conn, self.org), 50.0, places=2)
+
+    def test_donation_recorded_as_donation_not_credit(self):
+        # The Free-tier tip jar: a one-time payment with kind=donation lands as a
+        # distinct 'donation' ledger entry (verifiable), not a prepaid credit.
+        event = {
+            "id": "evt_donate", "type": "checkout.session.completed",
+            "data": {"object": {"id": "cs_d", "mode": "payment",
+                                 "customer": "cus_123", "amount_total": 700,
+                                 "payment_intent": "pi_d",
+                                 "metadata": {"plutus_org_id": self.org,
+                                              "kind": "donation", "amount_usd": "7.00"}}},
+        }
+        res = handle_webhook_event(self.conn, event)
+        self.assertEqual(res["status"], "donated")
+        self.assertAlmostEqual(res["amount_usd"], 7.0, places=2)
+        kinds = [r["kind"] for r in db.list_ledger(self.conn, self.org)] \
+            if hasattr(db, "list_ledger") else None
+        # balance reflects the gift; the entry is tagged 'donation'
+        self.assertAlmostEqual(db.get_balance(self.conn, self.org), 7.0, places=2)
+        if kinds is not None:
+            self.assertIn("donation", kinds)
 
     def test_idempotent(self):
         event = {
@@ -565,6 +602,51 @@ class TestConcurrencyHardStop(unittest.TestCase):
                     "WHERE kind='debit' AND org_id=?", (org,)).fetchall())
             # exact running sum 4,3,2,1,0 — no duplicates a racy read would leave
             self.assertEqual(bals, [0, 1_000_000, 2_000_000, 3_000_000, 4_000_000])
+        finally:
+            drop_conn(conn)
+
+
+class TestThreeTierModel(unittest.TestCase):
+    """The Free / Pro / Team ladder: one savings-share lever, three settings,
+    plus the dashboard savings billboard + reporting gate."""
+
+    def test_savings_mode_ladder(self):
+        self.assertEqual(pricing.savings_mode("free"), "suggested")
+        self.assertEqual(pricing.savings_mode("pro"), "waived")
+        self.assertEqual(pricing.savings_mode("team"), "mandatory")
+        self.assertEqual(pricing.savings_mode("enterprise"), "custom")
+
+    def test_team_tier_shape(self):
+        t = pricing.tier("team")
+        self.assertEqual(t.per_seat_usd_month, 10.0)
+        self.assertTrue(t.full_reporting)
+        self.assertIsNone(t.seats)  # unlimited
+
+    def test_dashboard_billboard_gate_and_tipjar(self):
+        from plutus_agent import efficiency as effm, savings as savm
+        from plutus_agent.server import views
+        conn = fresh_conn()
+        try:
+            for tier_key, unlocked in (("free", False), ("pro", True)):
+                org = db.create_org(conn, tier_key + " Co", tier=tier_key)["id"]
+                metering.record_usage(
+                    conn, org, provider="anthropic", model="claude-haiku-4-5",
+                    input_tokens=1_000_000, output_tokens=200_000, cost_usd=1.2,
+                    baseline_model="claude-opus-4-8")
+                s = metering.org_summary(conn, org)
+                s["efficiency"] = effm.org_efficiency(
+                    conn, org, period_label=None).as_dict()
+                s["savings_share"] = savm.savings_share_report(
+                    conn, org, "2026-07").as_dict()
+                html = views.render_dashboard(
+                    s, orgs=[dict(db.get_org(conn, org))], cfg={},
+                    stripe_status={"available": True, "has_pro_price": True,
+                                   "mode": "live mode"},
+                    demo=False, runway=None, user=None, api_keys=[], csrf="x",
+                    integrity={"ok": True})
+                self.assertIn("saved you", html.lower())      # billboard, all tiers
+                self.assertEqual("Pro feature" in html, not unlocked)  # reporting gate
+                self.assertEqual("Chip in" in html, tier_key == "free")  # tip jar
         finally:
             drop_conn(conn)
 

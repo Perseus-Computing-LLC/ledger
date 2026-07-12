@@ -153,6 +153,36 @@ class StripeClient:
         )
         return {"id": session["id"], "url": session["url"]}
 
+    def donate_checkout(self, conn, org_id: str, amount_usd: float) -> dict:
+        """One-time Checkout Session for a *voluntary* savings-share donation —
+        the Free tier's tip jar ("chip in what we've saved you"). Distinct from a
+        credit top-up so it lands in the ledger as its own ``donation`` entry."""
+        self._require()
+        if amount_usd <= 0:
+            raise BillingError("amount must be positive")
+        customer = self.ensure_customer(conn, org_id)
+        session = self._stripe.checkout.Session.create(
+            mode="payment",
+            customer=customer,
+            line_items=[{
+                "price_data": {
+                    "currency": self.currency,
+                    "unit_amount": int(round(amount_usd * 100)),
+                    "product_data": {
+                        "name": "Plutus savings-share (voluntary)",
+                        "description": "Thank you for supporting Plutus — a share "
+                                       "of the spend we've saved you.",
+                    },
+                },
+                "quantity": 1,
+            }],
+            success_url=self.billing.get("success_url", ""),
+            cancel_url=self.billing.get("cancel_url", ""),
+            metadata={"plutus_org_id": org_id, "kind": "donation",
+                      "amount_usd": f"{amount_usd:.2f}"},
+        )
+        return {"id": session["id"], "url": session["url"]}
+
     def pro_checkout(self, conn, org_id: str) -> dict:
         """Subscription Checkout Session for the $20/mo Pro plan."""
         self._require()
@@ -298,6 +328,17 @@ def _apply_checkout_completed(conn, obj) -> dict:
         return {"status": "no_org", "detail": "could not map checkout to an org"}
     meta = obj.get("metadata") or {}
     kind = meta.get("kind")
+    if kind == "donation":
+        # Voluntary Free-tier tip. Recorded as its own hash-chained ledger entry
+        # so it's verifiable and never confused with prepaid credit or savings.
+        amount_total = obj.get("amount_total")
+        usd = (float(amount_total) / 100.0 if amount_total is not None
+               else float(meta.get("amount_usd") or 0.0))
+        ref = obj.get("payment_intent") or obj.get("id")
+        db.add_ledger(conn, org_id, usd, "donation",
+                      reason="Voluntary savings-share — thank you!",
+                      stripe_ref=ref, commit=False)
+        return {"status": "donated", "org_id": org_id, "amount_usd": usd}
     if kind == "credit" or obj.get("mode") == "payment":
         # Fix #29: prefer Stripe's collected amount_total over client-supplied metadata
         amount_total = obj.get("amount_total")
