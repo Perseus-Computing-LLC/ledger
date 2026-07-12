@@ -85,12 +85,25 @@ class EfficiencyReport:
     metered_cost_usd: float
     actual_paid_usd: Optional[float] = None  # from console reconcile, if known
     by_family: dict = field(default_factory=dict)
+    # Efficiency leakage (#8): the negative half — turns that ran ABOVE the
+    # cheapest policy-passing option. Only events carrying an ``optimal`` count.
+    leaked_usd: float = 0.0          # Σ max(0, cost - optimal) over policy events
+    policy_events: int = 0           # events that carried an optimal target
+    on_policy_events: int = 0        # of those, ones where cost <= optimal
 
     @property
     def basis_usd(self) -> float:
         """Actual paid when known, else the metered cost as a fallback basis."""
         return self.actual_paid_usd if self.actual_paid_usd is not None \
             else self.metered_cost_usd
+
+    @property
+    def adherence_pct(self) -> Optional[float]:
+        """Share of policy-covered events that ran on-policy (no leak). None when
+        no event carried a policy target (nothing to judge adherence against)."""
+        if not self.policy_events:
+            return None
+        return round(self.on_policy_events / self.policy_events * 100.0, 1)
 
     @property
     def efficiency_usd(self) -> float:
@@ -116,6 +129,10 @@ class EfficiencyReport:
             "basis_usd": round(self.basis_usd, 4),
             "efficiency_usd": self.efficiency_usd,
             "multiple": self.multiple,
+            "leaked_usd": round(self.leaked_usd, 4),
+            "policy_events": self.policy_events,
+            "on_policy_events": self.on_policy_events,
+            "adherence_pct": self.adherence_pct,
             "by_family": self.by_family,
         }
 
@@ -138,7 +155,7 @@ def org_efficiency(conn, org_id: str, *, period_label: Optional[str] = None,
           (baseline_models or DEFAULT_BASELINE_MODELS).items()}
 
     sql = ("SELECT provider, model, input_tokens, output_tokens, "
-           "cache_read_tokens, reasoning_tokens, cost_micros "
+           "cache_read_tokens, reasoning_tokens, cost_micros, optimal_micros "
            "FROM usage_events WHERE org_id=?")
     params: list = [org_id]
     if start_ts is not None:
@@ -149,14 +166,26 @@ def org_efficiency(conn, org_id: str, *, period_label: Optional[str] = None,
         params.append(float(end_ts))
 
     events = tokens = 0
-    flag_micros = list_micros = metered_micros = 0
+    flag_micros = list_micros = metered_micros = leaked_micros = 0
+    policy_events = on_policy_events = 0
     by_family: dict = {}
     for r in conn.execute(sql, params):
         events += 1
         toks = (int(r["input_tokens"]) + int(r["output_tokens"])
                 + int(r["cache_read_tokens"]) + int(r["reasoning_tokens"]))
         tokens += toks
-        metered_micros += int(r["cost_micros"] or 0)
+        cost_micros_r = int(r["cost_micros"] or 0)
+        metered_micros += cost_micros_r
+        # leakage: events carrying a policy target (optimal). on-policy = ran at
+        # or below the cheapest policy-passing option; leak = cost above it.
+        opt = r["optimal_micros"]
+        if opt is not None:
+            policy_events += 1
+            opt = int(opt)
+            if cost_micros_r <= opt:
+                on_policy_events += 1
+            elif cost_micros_r > 0:
+                leaked_micros += cost_micros_r - opt
 
         fam = family_of(r["provider"], r["model"])
         # list value: the model actually used, at its published price
@@ -194,6 +223,9 @@ def org_efficiency(conn, org_id: str, *, period_label: Optional[str] = None,
         metered_cost_usd=db.micros_to_usd(metered_micros),
         actual_paid_usd=actual_paid_usd,
         by_family=by_family,
+        leaked_usd=db.micros_to_usd(leaked_micros),
+        policy_events=policy_events,
+        on_policy_events=on_policy_events,
     )
 
 

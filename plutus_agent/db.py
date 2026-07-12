@@ -34,7 +34,9 @@ from typing import Optional
 # 6 = adds the usage_events hash chain (prev_hash/row_hash) for tamper-evidence (#108).
 # 7 = adds usage_events.baseline_micros (savings-share counterfactual) + the
 #     savings_invoices table (per-org/period savings-share billing).
-SCHEMA_VERSION = 7
+# 8 = adds usage_events.optimal_micros (efficiency-leakage counterfactual: the
+#     cheapest policy-passing option; actual > optimal = missed savings / off-policy).
+SCHEMA_VERSION = 8
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -91,6 +93,7 @@ _CHAIN_FIELDS = (
 # tamper-evident as ``cost_micros``. (#7: savings-share.)
 _CHAIN_FIELDS_OPTIONAL = (
     "baseline_micros",
+    "optimal_micros",
 )
 
 
@@ -290,6 +293,12 @@ CREATE TABLE IF NOT EXISTS usage_events (
     -- present it is folded into the hash chain, so a billed saving is as
     -- tamper-evident as the actual cost.
     baseline_micros   INTEGER,
+    -- Efficiency-leakage counterfactual (#8): the cheapest option the configured
+    -- routing policy WOULD have chosen (and that still passed the quality bar).
+    -- actual cost above this = missed savings / an off-policy turn. NULL = no
+    -- policy target recorded => never counts toward leakage. Hash-chained, so the
+    -- leakage figure is as tamper-evident as the cost and the baseline.
+    optimal_micros    INTEGER,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -506,6 +515,8 @@ def _migrate_add_columns(conn) -> None:
         # rows stay NULL = "no baseline" and never contribute to billable
         # savings, and the hash chain over pre-v7 rows is unchanged.
         ("usage_events", "baseline_micros", "INTEGER"),
+        # #8: efficiency-leakage counterfactual (cheapest policy-passing option).
+        ("usage_events", "optimal_micros", "INTEGER"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
@@ -938,7 +949,8 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
     sql = ("SELECT ue.id, ue.ts, ue.provider, ue.model, ue.task_type, "
            "w.name AS workspace, ue.input_tokens, ue.output_tokens, "
            "ue.cache_read_tokens, ue.reasoning_tokens, ue.cost_micros, "
-           "ue.baseline_micros, ue.estimated, ue.source FROM usage_events ue "
+           "ue.baseline_micros, ue.optimal_micros, ue.estimated, ue.source "
+           "FROM usage_events ue "
            "LEFT JOIN workspaces w ON w.id=ue.workspace_id WHERE ue.org_id=?")
     args: list = [org_id]
     if since is not None:
@@ -957,6 +969,8 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
         # baseline_usd is blank (not 0) when no baseline was recorded, so an
         # auditor can tell "no counterfactual" apart from "counterfactual of $0".
         d["baseline_usd"] = None if bm is None else micros_to_usd(int(bm))
+        om = d.pop("optimal_micros", None)
+        d["optimal_usd"] = None if om is None else micros_to_usd(int(om))
         d["estimated"] = bool(d["estimated"])
         out.append(d)
     return out
