@@ -706,6 +706,10 @@ class Handler(BaseHTTPRequestHandler):
             omodel = ev.get("optimal_model")
             if omodel is not None and not isinstance(omodel, str):
                 return self._json(400, {"error": "optimal_model must be a string"})
+            # #20-arc shape A: per-task attribution ref (e.g. an Invarium task_id).
+            xref = ev.get("external_ref")
+            if xref is not None and not isinstance(xref, str):
+                return self._json(400, {"error": "external_ref must be a string"})
 
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
@@ -742,6 +746,7 @@ class Handler(BaseHTTPRequestHandler):
                             baseline_model=ev.get("baseline_model"),
                             optimal_cost_usd=ev.get("optimal_cost_usd"),
                             optimal_model=ev.get("optimal_model"),
+                            external_ref=ev.get("external_ref"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
                             alert_cfg=cfg.get("alerts", {}),

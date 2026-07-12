@@ -69,6 +69,10 @@ def meter_agent_result(
     metadata = getattr(result, "metadata", None) or {}
     baseline_cost_usd = metadata.get(BASELINE_KEY) if verified else None
     baseline_model = metadata.get(BASELINE_MODEL_KEY) if verified else None
+    # Attribution is recorded for EVERY event regardless of the verdict — only the
+    # savings baseline is gated. So a failed task still shows up under its task_id
+    # (metered spend), it just books $0 savings. record_kwargs may override.
+    record_kwargs.setdefault("external_ref", metadata.get(TASK_ID_KEY))
 
     return metering.record_usage(
         conn,

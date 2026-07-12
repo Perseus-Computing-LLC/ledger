@@ -334,6 +334,7 @@ components:
         cache_read_tokens: { type: integer, default: 0 }
         reasoning_tokens: { type: integer, default: 0 }
         cost_usd: { type: number, nullable: true, description: "Exact cost; omit to estimate from tokens. Must be >= 0." }
+        external_ref: { type: string, nullable: true, description: "Per-task/per-question attribution id (e.g. an Invarium task_id) linking this event to the task that produced it." }
         source: { type: string, default: api }
     EventResult:
       type: object
@@ -382,6 +383,8 @@ components:
         cache_read_tokens: { type: integer }
         reasoning_tokens: { type: integer }
         cost_usd: { type: number }
+        baseline_usd: { type: number, nullable: true, description: "Counterfactual cost recorded for savings-share; null when none." }
+        external_ref: { type: string, nullable: true, description: "Per-task attribution id (e.g. an Invarium task_id)." }
         estimated: { type: boolean }
         source: { type: string }
     Org:

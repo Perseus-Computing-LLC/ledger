@@ -43,6 +43,7 @@ class MeterResult:
     savings_usd: float = 0.0              # max(0, baseline - cost); 0 when no baseline
     optimal_usd: Optional[float] = None   # cheapest policy-passing cost, if supplied (#8)
     leaked_usd: float = 0.0               # max(0, cost - optimal); 0 when on-policy / none
+    external_ref: Optional[str] = None    # per-task attribution id, if supplied (#20-arc, A)
     recorded: bool = True        # False when a hard free-tier cap dropped the event
     over_free_limit: bool = False  # org is on a limited tier and past its monthly quota
     over_balance: bool = False  # Fix #28: org hit prepaid credit hard-stop
@@ -91,7 +92,8 @@ def record_usage(conn, org_id: str, provider: str,
                  baseline_cost_usd: Optional[float] = None,
                  baseline_model: Optional[str] = None,
                  optimal_cost_usd: Optional[float] = None,
-                 optimal_model: Optional[str] = None, source: str = "api",
+                 optimal_model: Optional[str] = None,
+                 external_ref: Optional[str] = None, source: str = "api",
                  pricing_overrides: Optional[dict] = None,
                  ts: Optional[float] = None,
                  alert_cfg: Optional[dict] = None,
@@ -284,17 +286,18 @@ def record_usage(conn, org_id: str, provider: str,
         # form (pre-#7 for baseline, pre-#8 for optimal), preserving prior chains.
         "baseline_micros": baseline_micros,
         "optimal_micros": optimal_micros,
+        "external_ref": external_ref,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
         "INSERT INTO usage_events(id,org_id,workspace_id,provider,model,task_type,"
         "input_tokens,output_tokens,cache_read_tokens,reasoning_tokens,cost_micros,"
-        "baseline_micros,optimal_micros,estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "baseline_micros,optimal_micros,external_ref,estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          int(reasoning_tokens), cost_micros, baseline_micros, optimal_micros,
-         int(estimated), source, ts, prev_hash, row_hash),
+         external_ref, int(estimated), source, ts, prev_hash, row_hash),
     )
 
     # Deplete prepaid credit (only when there's credit to deplete; orgs on the
@@ -321,6 +324,7 @@ def record_usage(conn, org_id: str, provider: str,
         recorded=True, over_free_limit=over, unpriced=unpriced,
         baseline_usd=baseline_cost_usd, savings_usd=savings_usd,
         optimal_usd=optimal_cost_usd, leaked_usd=leaked_usd,
+        external_ref=external_ref,
     )
 
 

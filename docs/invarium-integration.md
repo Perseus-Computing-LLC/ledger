@@ -29,7 +29,7 @@ This doc specifies the convergence as one arc, plus the pieces already prototype
 | `cost: float` | `cost_usd` → `cost_micros` |
 | `latency: float` | *(no column today — see shape C)* |
 | `metadata["baseline_cost_usd"]` | `baseline_cost_usd` → `baseline_micros` (hash-chained, #7) |
-| `metadata["task_id"]` (per question) | *(no column today — see shape A)* |
+| `metadata["task_id"]` (per question) | `external_ref` (schema v10 — shape A, done) |
 | pass/fail verdict | *(caller-enforced gate — see shape B)* |
 | test name / category | `task_type` (a bucket, e.g. `code_review`) |
 
@@ -115,30 +115,40 @@ and a pinned pricing table, a drift in Plutus's attribution (a pricing table edi
 baseline-derivation change) surfaces as a cost regression in CI — Invarium testing
 the meter, not just the agent.
 
-### A — Per-task / per-question attribution
+### A — Per-task / per-question attribution ✅ implemented (schema v10)
 
-Today Plutus attributes by `task_type` (a category) and `workspace` (an org grouping);
-there is no per-question identifier. The bridge already carries `metadata["task_id"]`
-end-to-end. First-class it with a nullable column (schema v7):
+Previously Plutus attributed by `task_type` (a category) and `workspace` (an org
+grouping), with no per-question identifier. `usage_events` now carries a nullable
+`external_ref` column (schema **v10**) — an opaque caller-supplied id such as an
+Invarium `task_id`:
 
 ```sql
-ALTER TABLE usage_events ADD COLUMN external_ref TEXT;   -- e.g. Invarium task_id
-CREATE INDEX ix_usage_extref ON usage_events(org_id, external_ref);
+-- added additively in _migrate_add_columns; index created there too so it applies
+-- to upgraded DBs (a fresh DB gets the column from SCHEMA).
+ALTER TABLE usage_events ADD COLUMN external_ref TEXT;
+CREATE INDEX IF NOT EXISTS ix_usage_extref ON usage_events(org_id, external_ref);
 ```
 
-`record_usage(..., external_ref=result.metadata["task_id"])`, surfaced in exports and
-`/v1/usage`. This makes "what did *this question* cost, and did it save?" a first-class
-query and lets a Plutus savings row join back to the exact Invarium trace that
-justified it — closing the loop from *billed saving* → *verified behavior*.
+`external_ref` is an **optional trailing chain field** (`_CHAIN_FIELDS_OPTIONAL`),
+so a NULL value reproduces the pre-v10 canonical form byte-for-byte — existing
+chains still verify — while a set value is folded into the hash, so a billed
+saving can't be silently re-pointed to a different task (see
+`test_external_ref.py::test_tampering_with_external_ref_breaks_the_chain`).
+
+It's threaded through `record_usage(..., external_ref=...)`, the `/v1/usage` body,
+`plutus meter --ref`, and the CSV/JSON export, and the bridge sets it from
+`metadata["task_id"]` for **every** event (attribution isn't gated — only the
+savings baseline is). `db.events_by_ref(org, task_id)` is the join that closes the
+loop from *billed saving* → the exact task that justified it.
 
 ## Recommended sequence
 
-1. **B (the bridge)** — already prototyped and green; smallest change, biggest payoff.
-   Land `integrations/invarium.py` + tests + example.
-2. **C (assertions + suite)** — upstream contribution to Invarium, then a Plutus-side
-   golden suite that guards attribution.
-3. **A (`external_ref`)** — schema v7 for native per-task queries and the
-   billed-saving → verified-trace join.
+1. ✅ **B (the bridge)** — merged (#124): accuracy-gated savings, zero schema change.
+2. **C (assertions + suite)** — upstream `cost_less_than`/`latency_less_than` in
+   Invarium (PR #28), then a Plutus-side golden `bless`/`compare` suite that guards
+   attribution.
+3. ✅ **A (`external_ref`)** — schema v10 for native per-task queries and the
+   billed-saving → verified-trace join (this change).
 
 ## Honest limits
 
