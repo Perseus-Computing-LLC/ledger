@@ -5,6 +5,10 @@ All notable changes to Plutus are documented here.
 ## [Unreleased]
 
 ### Changed
+- **Savings-share default is now 10%** (was 18%). `billing.savings_share_pct`
+  defaults to `0.10` and `savings.DEFAULT_RATE_BPS` to `1000`; per-run `--rate`
+  and the config key still override. This is the published rate for the
+  value-based path; the underlying share math is unchanged.
 - **Attribution: Plutus measures, it doesn't save.** Corrected the dashboard
   billboard and all copy to reflect that **Perseus** (routing) + **Vault** (memory)
   are what reduce spend; Plutus meters it and *proves* the savings. The billboard

@@ -376,7 +376,7 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                 f"style='display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap'>"
                 f"<input type='hidden' name='org' value='{_e(org['id'])}'>{csrf_field}"
                 f"<span class='muted' style='font-size:13px'>That's ~{_usd(share.get('billable_share_usd') or 0.0)} "
-                f"at 18% of the {_usd(gross)} Perseus saved you. Chip in — totally optional.</span>"
+                f"at 10% of the {_usd(gross)} Perseus saved you. Chip in — totally optional.</span>"
                 f"<input class='amt' type='number' name='amount' value='{tip_amt}' min='5' step='5' style='width:80px'>"
                 f"<button class='btn ghost' type='submit'>Chip in →</button></form>")
         elif tobj.savings_share == "waived":
@@ -522,7 +522,7 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
 </body></html>"""
 
 
-def landing_page(*, signed_in: bool = False, savings_share_pct: float = 18.0) -> str:
+def landing_page(*, signed_in: bool = False, savings_share_pct: float = 10.0) -> str:
     """Public marketing landing shown at ``/`` to logged-out visitors.
 
     Leads with the efficiency value proposition (API-equivalent value vs. actual
@@ -611,7 +611,7 @@ def pricing_page(*, stripe_status: dict, org_id: str | None = None,
     share_line = {
         "suggested": "Savings-share: optional tip",
         "waived": "Savings-share: waived — flat price",
-        "mandatory": "Savings-share: 18% of provable savings",
+        "mandatory": "Savings-share: 10% of provable savings",
         "custom": "Savings-share: negotiated",
         "none": "",
     }

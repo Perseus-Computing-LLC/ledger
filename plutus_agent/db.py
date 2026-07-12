@@ -584,7 +584,7 @@ CREATE TABLE IF NOT EXISTS savings_invoices (
     org_id            TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     period_label      TEXT NOT NULL,          -- 'YYYY-MM'
     gross_savings_micros INTEGER NOT NULL,    -- sum(max(0, baseline-cost)) over the period
-    rate_bps          INTEGER NOT NULL,       -- savings-share rate in basis points (1800 = 18%)
+    rate_bps          INTEGER NOT NULL,       -- savings-share rate in basis points (1000 = 10%)
     amount_micros     INTEGER NOT NULL,       -- billed = gross * rate (rounded to micros)
     covered_events    INTEGER NOT NULL DEFAULT 0,  -- events that carried a baseline
     total_events      INTEGER NOT NULL DEFAULT 0,  -- all metered events in the period

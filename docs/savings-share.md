@@ -12,10 +12,10 @@ Two-part pricing — the *hybrid*:
 | Part | What | Where it lives |
 |------|------|----------------|
 | Subscription floor | Free up to 5 users, then **$20/mo** Pro | `pricing.py` tiers, existing Stripe sub |
-| Savings-share | **18%** of independently-verified monthly savings (Pro & Enterprise, opt-in) | `savings.py`, `savings_invoices` table |
+| Savings-share | **10%** of independently-verified monthly savings (Pro & Enterprise, opt-in) | `savings.py`, `savings_invoices` table |
 
 The floor covers infrastructure even in a thin month; the share captures value
-where Perseus is actually reducing spend. `18%` is `billing.savings_share_pct`
+where Perseus is actually reducing spend. `10%` is `billing.savings_share_pct`
 (override per-run with `--rate`).
 
 ## Why the number is defensible
@@ -121,7 +121,7 @@ Steps only the account owner can do (Plutus can't hold your Stripe credentials):
 - [ ] `plutus stripe-setup` once against the live key (creates the $20/mo price).
 - [ ] Deploy `plutus serve` behind HTTPS; register the production webhook at
       `https://your-host/webhook/stripe`; set `STRIPE_WEBHOOK_SECRET`.
-- [ ] Set `billing.savings_share_pct` if not 0.18, and `auth.base_url` for the
+- [ ] Set `billing.savings_share_pct` if not 0.10, and `auth.base_url` for the
       pricing/upgrade links.
 - [ ] Turn on baselines in the Hermes sync: set `PLUTUS_BASELINE=flagship` (or a
       `PLUTUS_BASELINE_MODEL[S]` override) on the Hermes box, then
