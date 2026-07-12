@@ -622,31 +622,51 @@ class TestThreeTierModel(unittest.TestCase):
         self.assertTrue(t.full_reporting)
         self.assertIsNone(t.seats)  # unlimited
 
-    def test_dashboard_billboard_gate_and_tipjar(self):
+    def _render(self, conn, org):
         from plutus_agent import efficiency as effm, savings as savm
         from plutus_agent.server import views
+        s = metering.org_summary(conn, org)
+        s["efficiency"] = effm.org_efficiency(conn, org, period_label=None).as_dict()
+        s["savings_share"] = savm.savings_share_report(conn, org, "2026-07").as_dict()
+        return views.render_dashboard(
+            s, orgs=[dict(db.get_org(conn, org))], cfg={},
+            stripe_status={"available": True, "has_pro_price": True,
+                           "mode": "live mode"},
+            demo=False, runway=None, user=None, api_keys=[], csrf="x",
+            integrity={"ok": True})
+
+    def test_dashboard_billboard_gate_and_tipjar(self):
         conn = fresh_conn()
         try:
             for tier_key, unlocked in (("free", False), ("pro", True)):
                 org = db.create_org(conn, tier_key + " Co", tier=tier_key)["id"]
+                # WITH a Perseus baseline -> attributed savings billboard
                 metering.record_usage(
                     conn, org, provider="anthropic", model="claude-haiku-4-5",
                     input_tokens=1_000_000, output_tokens=200_000, cost_usd=1.2,
                     baseline_model="claude-opus-4-8")
-                s = metering.org_summary(conn, org)
-                s["efficiency"] = effm.org_efficiency(
-                    conn, org, period_label=None).as_dict()
-                s["savings_share"] = savm.savings_share_report(
-                    conn, org, "2026-07").as_dict()
-                html = views.render_dashboard(
-                    s, orgs=[dict(db.get_org(conn, org))], cfg={},
-                    stripe_status={"available": True, "has_pro_price": True,
-                                   "mode": "live mode"},
-                    demo=False, runway=None, user=None, api_keys=[], csrf="x",
-                    integrity={"ok": True})
-                self.assertIn("saved you", html.lower())      # billboard, all tiers
+                html = self._render(conn, org)
+                self.assertIn("Perseus saved you", html)              # attributed
+                self.assertIn("verified by Plutus", html)
                 self.assertEqual("Pro feature" in html, not unlocked)  # reporting gate
                 self.assertEqual("Chip in" in html, tier_key == "free")  # tip jar
+        finally:
+            drop_conn(conn)
+
+    def test_standalone_billboard_makes_no_savings_claim(self):
+        # No Perseus baseline -> Plutus measures only. Never claim "saved you";
+        # show spend + a flagship-equivalent efficiency stat + a verify nudge.
+        conn = fresh_conn()
+        try:
+            org = db.create_org(conn, "Solo", tier="free")["id"]
+            metering.record_usage(
+                conn, org, provider="anthropic", model="claude-haiku-4-5",
+                input_tokens=1_000_000, output_tokens=200_000, cost_usd=1.2)
+            html = self._render(conn, org)
+            self.assertIn("Your AI spend", html)
+            self.assertNotIn("saved you", html.lower())   # no mis-attribution
+            self.assertNotIn("Chip in", html)             # nothing to share
+            self.assertIn("provider console", html)       # verification nudge
         finally:
             drop_conn(conn)
 

@@ -4,6 +4,23 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Attribution: Plutus measures, it doesn't save.** Corrected the dashboard
+  billboard and all copy to reflect that **Perseus** (routing) + **Vault** (memory)
+  are what reduce spend; Plutus meters it and *proves* the savings. The billboard
+  now branches on whether a Perseus baseline is present: with one it reads
+  *"Perseus saved you $X — verified by Plutus"*; standalone it reads *"Your AI
+  spend … flagship-equivalent … N× efficient"* (a tracking/verification stat, no
+  "saved" claim), plus a "reconcile against your provider console" nudge. The Free
+  tip jar only appears when there are provable ecosystem savings to share. Tier
+  copy re-grounded on **verification** (Pro) and **attribution by user/provider**
+  (Team). See [docs/three-tier-model.md](docs/three-tier-model.md).
+
+### Fixed
+- **303 redirects now carry `Content-Length: 0`** so proxies / in-app webviews
+  reliably follow the `Location` (billing checkout / portal buttons no longer
+  appear "dead" behind a tunnel).
+
 ### Added
 - **Three-tier model: Free / Pro / Team (+ Enterprise).** One meter, three ways
   to pay for it — the savings-share is a single lever set per tier
@@ -12,8 +29,8 @@ All notable changes to Plutus are documented here.
   savings). New `Tier.per_seat_usd_month` ($10/seat on Team) and
   `Tier.full_reporting`; `pricing.savings_mode()`. Free now meters **unlimited**
   so the savings billboard keeps running (the paywall is reporting *depth*, not
-  volume). New **savings billboard** on the dashboard ("Plutus has saved you $X
-  this month · N× multiple") shown on every tier, with a Free-tier **tip jar**
+  volume). New **efficiency billboard** on the dashboard (attributed — see
+  Changed above) shown on every tier, with a Free-tier **tip jar**
   (`POST /billing/checkout/donate` → one-time Stripe Checkout, recorded as a
   distinct hash-chained `donation` ledger entry). Deep reporting (per-task,
   leakage, export) is gated behind Pro. `plutus bill-savings --apply` now refuses

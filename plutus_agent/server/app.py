@@ -189,6 +189,9 @@ class Handler(BaseHTTPRequestHandler):
     def _redirect(self, url):
         self.send_response(303)
         self.send_header("Location", url)
+        # Explicit zero-length body: without it some proxies / in-app webviews
+        # won't treat the 303 as complete and never follow the Location.
+        self.send_header("Content-Length", "0")
         self.end_headers()
 
     def _body(self, max_bytes=MAX_BODY_BYTES) -> bytes:

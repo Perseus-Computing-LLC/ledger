@@ -22,6 +22,16 @@
 Plutus *bills*, it doesn't proxy your calls — it complements gateways (LiteLLM,
 OpenRouter) and observability (Langfuse, Helicone) rather than replacing them.
 
+### Plutus measures — Perseus saves
+
+Plutus is one of three independent tools in the Perseus ecosystem. **Perseus**
+(routing / resolve-before-context) and **Perseus Vault** (agent memory) are what
+*reduce* your spend; **Plutus** *meters* it and *proves* the savings on a
+tamper-evident chain. Each runs standalone — on its own, Plutus is a "track my own
+spend, verify I'm getting the tokens I pay for" meter. Run them together for the
+biggest win. The savings-share applies only when Perseus is in the loop producing
+(and Plutus proving) real savings — never for standalone metering.
+
 ```bash
 pip install plutus-agent          # stdlib + PyYAML; Stripe optional
 plutus demo                       # zero-setup tour with a month of sample data
@@ -118,7 +128,7 @@ single lever set differently per tier (suggested → waived → mandatory):
 
 | Plan | Price | For | Savings-share |
 |---|---|---|---|
-| **Free** | $0 | Individuals — unlimited metering + the live "we've saved you $X" number | **Suggested** — an optional tip jar |
+| **Free** | $0 | Individuals — unlimited metering + verify you're getting your tokens | **Suggested** — an optional tip jar |
 | **Pro** | $20 / mo | Power users — full reporting, leakage, verifiable receipts, export | **Waived** — the flat price replaces it |
 | **Team** | $10 / seat / mo | Companies — individual + aggregate attribution, admin | **Mandatory** — 18% of provable savings |
 | **Enterprise** | Custom | Org-wide FinOps — SSO, SLA, self-hosted | Negotiated |
