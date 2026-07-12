@@ -468,6 +468,98 @@ def cmd_verify(args):
         sys.exit(2)
 
 
+def cmd_checkpoint(args):
+    """#120: escrow a signed tamper-evidence checkpoint the customer retains.
+
+    Prints the checkpoint as a JSON line — the operator hands (or the customer
+    fetches) this and stores it OUT OF BAND (git, email, S3 object-lock). Later,
+    ``plutus verify-checkpoints`` replays it against the live DB; an operator who
+    rewrote history cannot reproduce a head the customer already holds.
+    """
+    conn = _conn()
+    if args.hmac_key is not None:
+        hmac_key = args.hmac_key.encode("utf-8") if args.hmac_key else None
+    else:
+        hmac_key = cfgmod.chain_hmac_key(cfgmod.load())
+    if args.org:
+        orgs = [_resolve_org(conn, args.org)["id"]]
+    else:
+        orgs = [r["id"] for r in db.list_orgs(conn)]
+    out = []
+    for oid in orgs:
+        cp = db.checkpoint_chain(conn, oid, hmac_key=hmac_key)
+        if cp is not None:
+            out.append(cp)
+    conn.close()
+    if args.json:
+        print(json.dumps(out, indent=2))
+        sys.exit(0)
+    if not out:
+        _ok("no chained events yet — nothing to checkpoint")
+        sys.exit(0)
+    mode = "keyed HMAC-SHA256" if hmac_key else "SHA-256"
+    print(f"\n  tamper-evidence checkpoints ({mode}) — RETAIN THESE OUT OF BAND\n")
+    for cp in out:
+        print(f"    {cp['org_id']:<28} rowid {cp['through_rowid']:>7}  "
+              f"{cp['event_count']:>6} events  head {cp['head_hash'][:16]}…")
+        print(f"      {json.dumps(cp)}")
+    print()
+    _ok(f"{len(out)} checkpoint(s) recorded — save the JSON line(s) above")
+    sys.exit(0)
+
+
+def cmd_verify_checkpoints(args):
+    """#120: replay customer-retained checkpoints against the live chain."""
+    conn = _conn()
+    if args.hmac_key is not None:
+        hmac_key = args.hmac_key.encode("utf-8") if args.hmac_key else None
+    else:
+        hmac_key = cfgmod.chain_hmac_key(cfgmod.load())
+
+    checkpoints = []
+    if args.file:
+        raw = sys.stdin.read() if args.file == "-" else open(args.file).read()
+        raw = raw.strip()
+        if raw.startswith("["):
+            checkpoints = json.loads(raw)
+        else:
+            checkpoints = [json.loads(ln) for ln in raw.splitlines() if ln.strip()]
+    else:
+        # No retained file supplied: fall back to the checkpoints stored in this
+        # DB. Weaker (an operator could rewrite these too) but still catches
+        # accidental corruption; the strong guarantee needs --file with an
+        # out-of-band copy.
+        if args.org:
+            checkpoints = db.list_checkpoints(conn, _resolve_org(conn, args.org)["id"])
+        else:
+            for r in db.list_orgs(conn):
+                checkpoints += db.list_checkpoints(conn, r["id"])
+
+    report = db.verify_checkpoints(conn, checkpoints, hmac_key=hmac_key)
+    conn.close()
+
+    if args.json:
+        print(json.dumps(report, indent=2))
+        sys.exit(0 if report["ok"] else 2)
+
+    src = args.file or "(checkpoints stored in this DB — supply --file for the strong guarantee)"
+    print(f"\n  checkpoint verification — source: {src}\n")
+    print(f"    {'ORG':<28} {'ROWID':>7} {'EVENTS':>7}  STATUS")
+    print("    " + "-" * 66)
+    for c in report["checkpoints"]:
+        mark = "✓" if c["status"] == "ok" else "✗"
+        print(f"    {c['org_id']:<28} {c['through_rowid']:>7} "
+              f"{str(c['event_count']):>7}  {mark} {c['status']}")
+        if c["detail"]:
+            print(f"        ↳ {c['detail']}")
+    print("    " + "-" * 66)
+    if report["ok"]:
+        _ok("all checkpoints reproduce — history is intact and independently confirmed")
+        sys.exit(0)
+    print("  ✗ checkpoint(s) FAILED — the live ledger no longer matches a retained anchor")
+    sys.exit(2)
+
+
 def cmd_close(args):
     """#109: fetch provider authoritative totals and reconcile — the cron close."""
     conn = _conn()
@@ -770,6 +862,29 @@ def build_parser():
                          "pass empty string to force plain SHA-256)")
     pv.add_argument("--json", action="store_true")
     pv.set_defaults(func=cmd_verify)
+
+    pck = sub.add_parser(
+        "checkpoint",
+        help="escrow a signed tamper-evidence checkpoint to retain out-of-band (#120)")
+    pck.add_argument("--org", help="checkpoint a single org (default: all)")
+    pck.add_argument("--hmac-key", dest="hmac_key", default=None,
+                     help="keyed-MAC secret (default: config/PLUTUS_CHAIN_HMAC_KEY; "
+                          "pass empty string to force plain SHA-256)")
+    pck.add_argument("--json", action="store_true")
+    pck.set_defaults(func=cmd_checkpoint)
+
+    pvc = sub.add_parser(
+        "verify-checkpoints",
+        help="replay customer-retained checkpoints against the live chain (#120)")
+    pvc.add_argument("--org", help="verify a single org (default: all)")
+    pvc.add_argument("--file", help="path to retained checkpoint JSON (one object, "
+                                    "a JSON array, or one JSON object per line); "
+                                    "'-' reads stdin. Omit to use DB-stored anchors "
+                                    "(weaker — supply --file for the strong guarantee)")
+    pvc.add_argument("--hmac-key", dest="hmac_key", default=None,
+                     help="keyed-MAC secret (default: config/PLUTUS_CHAIN_HMAC_KEY)")
+    pvc.add_argument("--json", action="store_true")
+    pvc.set_defaults(func=cmd_verify_checkpoints)
 
     pcl = sub.add_parser(
         "close",

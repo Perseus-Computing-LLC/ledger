@@ -36,7 +36,11 @@ from typing import Optional
 #     savings_invoices table (per-org/period savings-share billing).
 # 8 = adds usage_events.optimal_micros (efficiency-leakage counterfactual: the
 #     cheapest policy-passing option; actual > optimal = missed savings / off-policy).
-SCHEMA_VERSION = 8
+# 9 = adds the chain_checkpoints table (externally-retained signed anchors) so the
+#     tamper-evidence chain is INDEPENDENTLY verifiable — a customer-held checkpoint
+#     pins a past head, catching a full-chain recompute the operator could otherwise
+#     hide. See _CHECKPOINT_FIELDS / checkpoint_chain / verify_checkpoints (#120).
+SCHEMA_VERSION = 9
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -240,6 +244,183 @@ def verify_chain(conn, org_id: Optional[str] = None,
     return {"ok": all_ok, "orgs": orgs}
 
 
+# ---- externally-retained checkpoints (#120) ---------------------------------
+# verify_chain proves internal consistency, but a chain is only as trustworthy as
+# its head: recomputed from genesis, a rewritten history is internally consistent
+# too. A checkpoint escrows a head the chain PROVABLY reached — the customer keeps
+# a copy out-of-band — so a later recompute is caught the moment the live head no
+# longer reproduces the anchored one. The anchor is small and portable (a JSON
+# line); where it is stored (git commit, emailed receipt, S3 object-lock bucket,
+# a countersignature) is the customer's call and is what makes it INDEPENDENT.
+_CHECKPOINT_FIELDS = ("org_id", "through_rowid", "head_hash", "event_count", "mode")
+
+
+def _canonical_checkpoint(cp: dict) -> str:
+    """Deterministic string form of a checkpoint for signing/verification.
+
+    Mirrors ``_canonical_event``: unit-separated ``key=value`` pairs in a fixed
+    order, keys included so a value can never migrate columns unnoticed. The
+    ``sig`` and ``ts`` are deliberately excluded — the signature covers identity
+    (which head, which count, which mode), not its own value or wall-clock time.
+    """
+    return "\x1f".join(f"{k}={_chain_scalar(cp.get(k))}" for k in _CHECKPOINT_FIELDS)
+
+
+def sign_checkpoint(cp: dict, hmac_key: Optional[bytes]) -> Optional[str]:
+    """HMAC-SHA256 of a checkpoint's canonical form, or ``None`` without a key.
+
+    A checkpoint with a signature can be handed to the customer and later shown
+    to be authentic (unforged, unaltered) by anyone holding the key — closing the
+    single-party gap where the operator is also the only signer.
+    """
+    if not hmac_key:
+        return None
+    import hmac as _hmac
+    return _hmac.new(hmac_key, _canonical_checkpoint(cp).encode("utf-8"),
+                     hashlib.sha256).hexdigest()
+
+
+def checkpoint_chain(conn, org_id: str, hmac_key: Optional[bytes] = None,
+                     through_rowid: Optional[int] = None,
+                     ts: Optional[float] = None, commit: bool = True) -> Optional[dict]:
+    """Record a tamper-evidence checkpoint for an org's current chain head.
+
+    Captures the org's highest-rowid chained event (or the head at/below
+    ``through_rowid`` when pinning a historical point) plus the count of chained
+    events it covers, signs it if ``hmac_key`` is set, and stores it in
+    ``chain_checkpoints``. Returns the checkpoint dict (the thing the customer
+    retains) or ``None`` if the org has no chained events yet.
+
+    Re-checkpointing the SAME ``through_rowid`` is idempotent — the row is
+    replaced with a fresh timestamp/signature rather than erroring — so a periodic
+    cron never trips the UNIQUE(org_id, through_rowid) constraint.
+    """
+    where = "org_id=? AND row_hash IS NOT NULL"
+    params: list = [org_id]
+    if through_rowid is not None:
+        where += " AND rowid<=?"
+        params.append(int(through_rowid))
+    head = conn.execute(
+        f"SELECT rowid AS _rowid, row_hash FROM usage_events WHERE {where} "
+        "ORDER BY rowid DESC LIMIT 1", params).fetchone()
+    if head is None:
+        return None
+    count = conn.execute(
+        f"SELECT COUNT(*) n FROM usage_events WHERE {where} AND rowid<=?",
+        params + [head["_rowid"]]).fetchone()["n"]
+    cp = {
+        "org_id": org_id,
+        "through_rowid": int(head["_rowid"]),
+        "head_hash": head["row_hash"],
+        "event_count": int(count),
+        "mode": "hmac-sha256" if hmac_key else "sha256",
+    }
+    cp["sig"] = sign_checkpoint(cp, hmac_key)
+    cp["ts"] = ts if ts is not None else time.time()
+    cp["id"] = new_id("ckpt")
+    conn.execute(
+        "INSERT INTO chain_checkpoints(id,org_id,through_rowid,head_hash,"
+        "event_count,mode,sig,ts) VALUES(?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(org_id,through_rowid) DO UPDATE SET "
+        "id=excluded.id, head_hash=excluded.head_hash, "
+        "event_count=excluded.event_count, mode=excluded.mode, "
+        "sig=excluded.sig, ts=excluded.ts",
+        (cp["id"], cp["org_id"], cp["through_rowid"], cp["head_hash"],
+         cp["event_count"], cp["mode"], cp["sig"], cp["ts"]))
+    if commit:
+        conn.commit()
+    return cp
+
+
+def list_checkpoints(conn, org_id: str) -> list:
+    """All retained checkpoints for an org, oldest anchor first."""
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM chain_checkpoints WHERE org_id=? ORDER BY through_rowid",
+        (org_id,)).fetchall()]
+
+
+def verify_checkpoints(conn, checkpoints, hmac_key: Optional[bytes] = None) -> dict:
+    """Check retained checkpoints against the live chain — the independent gate.
+
+    ``checkpoints`` is an iterable of checkpoint dicts the CUSTOMER retained (as
+    returned by :func:`checkpoint_chain`), typically loaded from an out-of-band
+    store rather than this DB — that is the whole point. For each one:
+
+    * the live event at ``through_rowid`` must still carry ``head_hash`` and its
+      chain must ``verify_chain`` clean through that rowid, AND
+    * the number of chained events at/below ``through_rowid`` must equal the
+      anchored ``event_count`` (so history cannot be silently shortened or
+      padded below the anchor), AND
+    * if the checkpoint carries a ``sig`` and a key is supplied, the signature
+      must recompute — proving the anchor itself was not forged.
+
+    Any mismatch is a divergence: the operator rewrote history the customer had
+    already anchored. Returns ``{"ok": bool, "checkpoints": [ {..., status} ]}``
+    where ``status`` is ``"ok"``, ``"head_mismatch"``, ``"count_mismatch"``,
+    ``"missing"`` (the anchored rowid no longer exists / lost its hash),
+    ``"bad_signature"``, or ``"chain_broken"`` (the chain up to the anchor does
+    not even self-verify).
+    """
+    results = []
+    all_ok = True
+    for cp in checkpoints:
+        cp = dict(cp)
+        org_id = cp.get("org_id")
+        rowid = int(cp.get("through_rowid"))
+        status = "ok"
+        detail = None
+
+        # 1) signature (identity authenticity) — only when both a sig and key exist.
+        if cp.get("sig") and hmac_key:
+            expected_sig = sign_checkpoint(cp, hmac_key)
+            if expected_sig != cp["sig"]:
+                status, detail = "bad_signature", "checkpoint signature does not recompute"
+
+        # 2) the live head at the anchored rowid.
+        if status == "ok":
+            row = conn.execute(
+                "SELECT rowid AS _rowid, row_hash FROM usage_events "
+                "WHERE org_id=? AND rowid=?", (org_id, rowid)).fetchone()
+            if row is None or row["row_hash"] is None:
+                status, detail = "missing", (
+                    "no chained event at the anchored rowid "
+                    "(deleted or hash stripped)")
+            elif row["row_hash"] != cp.get("head_hash"):
+                status, detail = "head_mismatch", (
+                    "live head_hash at the anchored rowid differs from the "
+                    "retained checkpoint (history was rewritten)")
+
+        # 3) the chain must self-verify at least up to the anchor, and the
+        #    covered event count must match (no silent shorten/pad below it).
+        if status == "ok":
+            sub = verify_chain(conn, org_id=org_id, hmac_key=hmac_key)
+            org_rep = next((o for o in sub["orgs"] if o["org_id"] == org_id), None)
+            if org_rep and org_rep["status"] == "broken":
+                d = org_rep.get("first_divergence") or {}
+                if d.get("rowid", rowid + 1) <= rowid:
+                    status, detail = "chain_broken", (
+                        "chain diverges at or before the anchored rowid: "
+                        + d.get("reason", "unknown"))
+            if status == "ok":
+                live_count = conn.execute(
+                    "SELECT COUNT(*) n FROM usage_events WHERE org_id=? "
+                    "AND row_hash IS NOT NULL AND rowid<=?",
+                    (org_id, rowid)).fetchone()["n"]
+                if int(live_count) != int(cp.get("event_count")):
+                    status, detail = "count_mismatch", (
+                        f"live chained-event count at/below the anchor "
+                        f"({live_count}) != retained ({cp.get('event_count')})")
+
+        if status != "ok":
+            all_ok = False
+        results.append({
+            "org_id": org_id, "through_rowid": rowid,
+            "event_count": cp.get("event_count"), "status": status,
+            "detail": detail,
+        })
+    return {"ok": all_ok, "checkpoints": results}
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS organizations (
     id                 TEXT PRIMARY KEY,
@@ -398,6 +579,30 @@ CREATE TABLE IF NOT EXISTS savings_invoices (
     UNIQUE(org_id, period_label)
 );
 CREATE INDEX IF NOT EXISTS ix_savinv_org ON savings_invoices(org_id, period_label);
+
+-- Externally-retained tamper-evidence anchors (#120). The usage_events hash
+-- chain is tamper-evident GIVEN a trusted head, but nothing pins the head: an
+-- operator with DB access (and, in the single-party self-hosted case, the only
+-- HMAC key) could rewrite history and recompute the whole chain from genesis,
+-- and verify_chain would still pass. A checkpoint records a head the chain
+-- reached at a point in time; the customer keeps a copy out-of-band (git, email,
+-- S3 object-lock, a countersignature). verify_checkpoints then requires the live
+-- DB to REPRODUCE that exact head_hash + event_count at through_rowid — which an
+-- operator who rewrote earlier history cannot do. Signature is optional: with a
+-- key set, sig = HMAC-SHA256(key, canonical(checkpoint)) so a holder of the key
+-- (the customer) can confirm a retained anchor is authentic and unforged.
+CREATE TABLE IF NOT EXISTS chain_checkpoints (
+    id            TEXT PRIMARY KEY,           -- ckpt_...
+    org_id        TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    through_rowid INTEGER NOT NULL,           -- usage_events.rowid this head covers
+    head_hash     TEXT NOT NULL,              -- row_hash of the event at through_rowid
+    event_count   INTEGER NOT NULL,           -- chained events at/below through_rowid
+    mode          TEXT NOT NULL,              -- 'sha256' | 'hmac-sha256'
+    sig           TEXT,                       -- HMAC-SHA256 over the checkpoint, if keyed
+    ts            REAL NOT NULL,
+    UNIQUE(org_id, through_rowid)
+);
+CREATE INDEX IF NOT EXISTS ix_ckpt_org ON chain_checkpoints(org_id, through_rowid);
 """
 
 # Public prefix for ingest API keys. The secret is `plutus_sk_<random>`; only its

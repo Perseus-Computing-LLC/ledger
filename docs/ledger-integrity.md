@@ -74,6 +74,54 @@ history. `plutus verify --hmac-key <secret>` accepts the key explicitly (e.g.
 for a customer-side audit). This is the property behind any "auditable by both
 parties" statement.
 
+## Independent verification — externally-retained checkpoints (#120)
+
+The keyed MAC closes re-chaining *only* when the operator does not hold the key.
+In the common single-party, self-hosted deployment the operator holds it, so an
+operator with database access can still edit a row and recompute the whole chain
+from genesis — `plutus verify` reports **intact**. The internal chain is
+tamper-evident only relative to a *trusted head*, and nothing pins the head.
+
+A checkpoint pins one. It escrows a head the chain provably reached:
+
+| field           | meaning                                                     |
+|-----------------|-------------------------------------------------------------|
+| `org_id`        | the org this anchor belongs to                              |
+| `through_rowid` | the `usage_events.rowid` the head covers                    |
+| `head_hash`     | the `row_hash` of the event at `through_rowid`              |
+| `event_count`   | chained events at or below `through_rowid`                  |
+| `mode`          | `sha256` or `hmac-sha256`                                   |
+| `sig`           | `HMAC-SHA256(key, canonical(org_id,through_rowid,head_hash,event_count,mode))`, when a key is set |
+| `ts`, `id`      | capture time and a unique id                                |
+
+The point is *where the anchor lives*: the customer retains it **out of band**
+(a git commit, an emailed receipt, an S3 object-lock bucket, a countersignature)
+where the operator cannot rewrite it. Verification then requires the live DB to
+*reproduce* that exact `head_hash` and covered `event_count` at `through_rowid`.
+An operator who rewrote earlier history cannot reproduce a head the customer
+already holds, so the recompute that fools `plutus verify` is caught.
+
+```bash
+plutus checkpoint                      # record an anchor per org; prints JSON to retain
+plutus checkpoint --org <id> --json    # a single org, machine-readable
+
+plutus verify-checkpoints --file anchor.json   # replay a retained anchor; exit 2 on divergence
+plutus verify-checkpoints --file -             # read anchors from stdin
+plutus verify-checkpoints                      # fall back to DB-stored anchors (weaker; see below)
+```
+
+`verify-checkpoints` reports a per-anchor `status`: `ok`, `head_mismatch`
+(history rewritten), `count_mismatch` (events added/removed below the anchor),
+`missing` (the anchored row was deleted or lost its hash), `chain_broken` (the
+chain does not self-verify up to the anchor), or `bad_signature` (the anchor
+itself was altered). Exit is `0` when every anchor reproduces, `2` otherwise.
+
+Signing is optional but recommended for the two-party case: with a key set, a
+key-holder can confirm the retained anchor was not itself forged. Omitting
+`--file` verifies the anchors stored in the same database — this catches
+accidental corruption but is **weaker**, since an operator could rewrite those
+rows too. The strong guarantee requires a `--file` copy held out of band.
+
 ## Migration & scope
 
 - **Schema v6, additive.** `prev_hash`/`row_hash` are nullable and added by the
@@ -81,6 +129,10 @@ parties" statement.
   `verify` counts them as a `pre_chain` prefix and reports them as
   **unverifiable (pre-upgrade)** rather than back-filling a hash it can't attest.
   The chain starts fresh at the upgrade.
+- **Schema v9, additive.** The `chain_checkpoints` table (#120) is created by the
+  standard migration; `UNIQUE(org_id, through_rowid)` makes re-checkpointing the
+  same head idempotent, so a periodic capture never errors. Existing databases
+  gain the table on next open with no effect on prior rows.
 - **Scope.** The chain covers `usage_events` — the source of the savings
   dollars. The `credit_ledger` (top-ups/adjusts) is a separate integrity surface
   and is not chained here.
