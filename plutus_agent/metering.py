@@ -41,6 +41,8 @@ class MeterResult:
     alerts: list  # list of dicts {kind, message}
     baseline_usd: Optional[float] = None  # counterfactual cost, if supplied (#7)
     savings_usd: float = 0.0              # max(0, baseline - cost); 0 when no baseline
+    optimal_usd: Optional[float] = None   # cheapest policy-passing cost, if supplied (#8)
+    leaked_usd: float = 0.0               # max(0, cost - optimal); 0 when on-policy / none
     recorded: bool = True        # False when a hard free-tier cap dropped the event
     over_free_limit: bool = False  # org is on a limited tier and past its monthly quota
     over_balance: bool = False  # Fix #28: org hit prepaid credit hard-stop
@@ -87,7 +89,9 @@ def record_usage(conn, org_id: str, provider: str,
                  workspace: Optional[str] = None,
                  cost_usd: Optional[float] = None,
                  baseline_cost_usd: Optional[float] = None,
-                 baseline_model: Optional[str] = None, source: str = "api",
+                 baseline_model: Optional[str] = None,
+                 optimal_cost_usd: Optional[float] = None,
+                 optimal_model: Optional[str] = None, source: str = "api",
                  pricing_overrides: Optional[dict] = None,
                  ts: Optional[float] = None,
                  alert_cfg: Optional[dict] = None,
@@ -215,6 +219,27 @@ def record_usage(conn, org_id: str, provider: str,
         baseline_cost_usd = round(cost_usd + savings_usd, 6)
         baseline_micros = db.usd_to_micros(baseline_cost_usd)
 
+    # #8: efficiency-leakage counterfactual — the cheapest option the configured
+    # routing policy WOULD have picked (and that passed the quality bar). Same
+    # shape as the baseline: an explicit ``optimal_cost_usd``, or an
+    # ``optimal_model`` priced from the token counts. leaked = max(0, cost -
+    # optimal): what this turn cost ABOVE the on-policy ideal. A None optimal
+    # (the default) never counts as leakage.
+    optimal_micros = None
+    leaked_usd = 0.0
+    if optimal_cost_usd is None and optimal_model:
+        op, _ = pricing.resolve_price(provider, optimal_model, pricing_overrides)
+        optimal_cost_usd = round(op.cost(int(input_tokens), int(output_tokens),
+                                         int(cache_read_tokens),
+                                         int(reasoning_tokens)), 6)
+    if optimal_cost_usd is not None:
+        optimal_cost_usd = round(float(optimal_cost_usd), 6)
+        if optimal_cost_usd < 0:
+            raise ValueError(
+                f"optimal_cost_usd must be non-negative, got {optimal_cost_usd}")
+        optimal_micros = db.usd_to_micros(optimal_cost_usd)
+        leaked_usd = round(max(0.0, cost_usd - optimal_cost_usd), 6)
+
     # Fix #28: prepaid credit hard-stop. Skipped for orgs explicitly flagged
     # allow_negative_balance (trusted/internal track-only mode) so they keep
     # full tracking even past zero.
@@ -254,20 +279,22 @@ def record_usage(conn, org_id: str, provider: str,
         "cache_read_tokens": int(cache_read_tokens),
         "reasoning_tokens": int(reasoning_tokens), "cost_micros": cost_micros,
         "estimated": int(estimated), "source": source, "ts": ts,
-        # Optional trailing chain field; None => omitted from the hash so pre-#7
-        # rows and no-baseline rows stay byte-identical to the v6 canonical form.
+        # Optional trailing chain fields; None => omitted from the hash so rows
+        # without these counterfactuals stay byte-identical to the older canonical
+        # form (pre-#7 for baseline, pre-#8 for optimal), preserving prior chains.
         "baseline_micros": baseline_micros,
+        "optimal_micros": optimal_micros,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
         "INSERT INTO usage_events(id,org_id,workspace_id,provider,model,task_type,"
         "input_tokens,output_tokens,cache_read_tokens,reasoning_tokens,cost_micros,"
-        "baseline_micros,estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "baseline_micros,optimal_micros,estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
-         int(reasoning_tokens), cost_micros, baseline_micros, int(estimated),
-         source, ts, prev_hash, row_hash),
+         int(reasoning_tokens), cost_micros, baseline_micros, optimal_micros,
+         int(estimated), source, ts, prev_hash, row_hash),
     )
 
     # Deplete prepaid credit (only when there's credit to deplete; orgs on the
@@ -293,6 +320,7 @@ def record_usage(conn, org_id: str, provider: str,
         balance_after=balance_after, alerts=alerts,
         recorded=True, over_free_limit=over, unpriced=unpriced,
         baseline_usd=baseline_cost_usd, savings_usd=savings_usd,
+        optimal_usd=optimal_cost_usd, leaked_usd=leaked_usd,
     )
 
 

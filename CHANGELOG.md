@@ -5,6 +5,19 @@ All notable changes to Plutus are documented here.
 ## [Unreleased]
 
 ### Added
+- **Efficiency leakage & policy adherence (#8).** The negative half of the
+  efficiency story: turns that ran ABOVE the cheapest policy-passing option.
+  Meter an event with `optimal_model` / `optimal_cost_usd` (the model the routing
+  policy *would* have chosen); the server prices it like the baseline. `plutus
+  efficiency` now reports **leaked $** (`Σ max(0, cost − optimal)`) and an
+  **adherence rate** (share of policy-covered turns that ran on-policy) alongside
+  achieved efficiency — so "you saved $X" is paired with "and left $Y on the
+  table on these off-policy turns." Schema v8 (additive: nullable
+  `usage_events.optimal_micros`, hash-chained as another optional trailing field
+  so pre-v8 chains verify unchanged); `optimal_micros` exported as `optimal_usd`
+  for audit; `/v1/usage` and `plutus meter --optimal` accept it. Only events that
+  carry an optimal count toward leakage/adherence — the negative signal is never
+  fabricated. Roadmap for tiers 2–3 in docs/roadmap-efficiency-leakage.md.
 - **Savings-share billing (`plutus savings` / `plutus bill-savings`).** The
   value-based revenue path: bill a share (default 18%, `billing.savings_share_pct`)
   of the money Perseus provably saved a customer, not just the flat subscription.

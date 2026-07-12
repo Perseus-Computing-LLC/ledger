@@ -74,3 +74,50 @@ def test_empty_period(tmp_path):
     assert rep["events"] == 0
     assert rep["flagship_value_usd"] == 0.0
     assert rep["multiple"] is None
+    assert rep["adherence_pct"] is None
+    assert rep["leaked_usd"] == 0.0
+
+
+def test_leakage_and_adherence(tmp_path):
+    # optimal = the cheapest policy-passing option. cost above it = a leak /
+    # off-policy turn; cost at-or-below = on-policy.
+    conn, org = _org(tmp_path)
+    # on-policy: ran exactly at the optimal ($1.00)
+    metering.record_usage(conn, org, provider="anthropic", model="claude-haiku-4-5",
+                          cost_usd=1.0, optimal_cost_usd=1.0, ts=_ts(1))
+    # off-policy: ran the flagship ($5.00) when policy optimal was $1.00 -> leak 4
+    metering.record_usage(conn, org, provider="anthropic", model="claude-opus-4-8",
+                          cost_usd=5.0, optimal_cost_usd=1.0, ts=_ts(2))
+    # no policy target -> not judged for adherence
+    metering.record_usage(conn, org, provider="openai", model="gpt-5",
+                          cost_usd=2.0, ts=_ts(3))
+    d = efficiency.org_efficiency(conn, org, period_label="2026-07").as_dict()
+    assert d["policy_events"] == 2
+    assert d["on_policy_events"] == 1
+    assert d["adherence_pct"] == 50.0
+    assert d["leaked_usd"] == 4.0
+
+
+def test_optimal_model_priced_server_side(tmp_path):
+    # Name the policy-optimal model; the server prices the same tokens. Ran opus
+    # (cost 52.50 est) when policy-optimal was haiku (3.50) -> leak 49.
+    conn, org = _org(tmp_path)
+    metering.record_usage(conn, org, provider="anthropic", model="claude-opus-4-8",
+                          input_tokens=1_000_000, output_tokens=500_000,
+                          cost_usd=None, optimal_model="claude-haiku-4-5", ts=_ts())
+    d = efficiency.org_efficiency(conn, org, period_label="2026-07").as_dict()
+    # opus est = 15 + 37.5 = 52.50 ; haiku optimal = 1 + 2.5 = 3.50
+    assert d["policy_events"] == 1
+    assert d["on_policy_events"] == 0
+    assert round(d["leaked_usd"], 2) == 49.00
+
+
+def test_optimal_chained_and_negative_rejected(tmp_path):
+    conn, org = _org(tmp_path)
+    metering.record_usage(conn, org, provider="anthropic", model="claude-opus-4-8",
+                          cost_usd=5.0, optimal_cost_usd=1.0, ts=_ts())
+    assert db.verify_chain(conn)["ok"] is True
+    import pytest
+    with pytest.raises(ValueError):
+        metering.record_usage(conn, org, provider="anthropic", model="x",
+                              cost_usd=1.0, optimal_cost_usd=-1.0, ts=_ts())

@@ -177,7 +177,8 @@ def cmd_meter(args):
         task_type=args.task, input_tokens=args.input, output_tokens=args.output,
         cache_read_tokens=args.cache, reasoning_tokens=args.reasoning,
         workspace=args.workspace, cost_usd=args.cost,
-        baseline_cost_usd=getattr(args, "baseline", None), source="cli",
+        baseline_cost_usd=getattr(args, "baseline", None),
+        optimal_cost_usd=getattr(args, "optimal", None), source="cli",
         pricing_overrides=cfg.get("pricing", {}).get("overrides"),
         alert_cfg=cfg.get("alerts", {}),
         block_over_limit=bool(cfg.get("pricing", {}).get("block_over_free_limit")),
@@ -611,6 +612,12 @@ def cmd_efficiency(args):
     print(f"    {basis_label:<22}: ${d['basis_usd']:,.2f}")
     print(f"    ── efficiency         : ${d['efficiency_usd']:,.2f}"
           + (f"   ({d['multiple']}x value-for-money)" if d['multiple'] else ""))
+    if d.get("policy_events"):
+        adh = d.get("adherence_pct")
+        print(f"\n    policy adherence      : {d['on_policy_events']}/{d['policy_events']}"
+              + (f" ({adh:.0f}% on-policy)" if adh is not None else ""))
+        print(f"    ── leaked (off-policy): ${d['leaked_usd']:,.2f}   "
+              f"(missed savings from turns above the policy-optimal)")
     if d["by_family"]:
         print("\n    by provider family:")
         for fam, a in sorted(d["by_family"].items(),
@@ -703,6 +710,9 @@ def build_parser():
     pm.add_argument("--baseline", type=float,
                     help="counterfactual cost USD without Perseus (records "
                          "savings for savings-share billing, #7)")
+    pm.add_argument("--optimal", type=float,
+                    help="cheapest policy-passing cost USD; cost above it is "
+                         "efficiency leakage / off-policy (#8)")
     pm.add_argument("--json", action="store_true")
     pm.set_defaults(func=cmd_meter)
 

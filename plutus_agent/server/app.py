@@ -673,6 +673,17 @@ class Handler(BaseHTTPRequestHandler):
             bmodel = ev.get("baseline_model")
             if bmodel is not None and not isinstance(bmodel, str):
                 return self._json(400, {"error": "baseline_model must be a string"})
+            # #8: efficiency-leakage counterfactual — same guard as the baseline.
+            optimal = ev.get("optimal_cost_usd")
+            if optimal is not None:
+                try:
+                    if float(optimal) < 0:
+                        return self._json(400, {"error": "optimal_cost_usd must be non-negative"})
+                except (TypeError, ValueError):
+                    return self._json(400, {"error": "optimal_cost_usd must be a number"})
+            omodel = ev.get("optimal_model")
+            if omodel is not None and not isinstance(omodel, str):
+                return self._json(400, {"error": "optimal_model must be a string"})
 
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
@@ -707,6 +718,8 @@ class Handler(BaseHTTPRequestHandler):
                             cost_usd=ev.get("cost_usd"),
                             baseline_cost_usd=ev.get("baseline_cost_usd"),
                             baseline_model=ev.get("baseline_model"),
+                            optimal_cost_usd=ev.get("optimal_cost_usd"),
+                            optimal_model=ev.get("optimal_model"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
                             alert_cfg=cfg.get("alerts", {}),
@@ -730,6 +743,7 @@ class Handler(BaseHTTPRequestHandler):
                             "over_balance": res.over_balance,
                             "unpriced": res.unpriced,
                             "savings_usd": res.savings_usd,
+                            "leaked_usd": res.leaked_usd,
                         })
                     code, body = self._usage_response(
                         conn, org_id, out, n_blocked, n_over_balance, cfg)
