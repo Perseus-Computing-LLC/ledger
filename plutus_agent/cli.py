@@ -909,7 +909,7 @@ def build_parser():
     psv.add_argument("--org")
     psv.add_argument("--period", help="YYYY-MM (default: previous month)")
     psv.add_argument("--rate", type=float,
-                     help="savings-share percent (default: billing.savings_share_pct or 18)")
+                     help="savings-share percent (default: billing.savings_share_pct or 10)")
     psv.add_argument("--json", action="store_true")
     psv.set_defaults(func=cmd_savings)
 
@@ -930,7 +930,7 @@ def build_parser():
     pbs.add_argument("--org")
     pbs.add_argument("--period", help="YYYY-MM (default: previous month)")
     pbs.add_argument("--rate", type=float,
-                     help="savings-share percent (default: billing.savings_share_pct or 18)")
+                     help="savings-share percent (default: billing.savings_share_pct or 10)")
     pbs.add_argument("--apply", action="store_true",
                      help="record the invoice + raise it in Stripe (default: dry run)")
     pbs.add_argument("--force", action="store_true",

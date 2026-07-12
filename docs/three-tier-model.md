@@ -17,7 +17,7 @@ set to a different position per tier.**
 |---|---|---|---|---|
 | **Free** | Individual devs | $0, unlimited metering | Headline savings number only | **Suggested** — optional tip jar |
 | **Pro** | Power users / prosumers | $20/mo flat | Full depth + verifiable receipts | **Waived** — the flat fee replaces it |
-| **Team** | Companies | $10/seat/mo | Full depth + team attribution | **Mandatory** — 18% of provable savings |
+| **Team** | Companies | $10/seat/mo | Full depth + team attribution | **Mandatory** — 10% of provable savings |
 | **Enterprise** | Large orgs | Custom | Everything + SSO/SLA/self-host | Negotiated |
 
 ## Why three tiers and not one price
@@ -39,7 +39,7 @@ They map to willingness-to-pay **and** to how *provable* the value is:
 
 3. **Savings-share is a business instrument.** Companies expect outcome-based
    pricing and their savings numbers are large enough to justify a %. Team pays a
-   per-seat floor (covers attribution + admin) plus a *mandatory* 18% of the
+   per-seat floor (covers attribution + admin) plus a *mandatory* 10% of the
    provable savings. This is the only tier where the share is billed by default.
 
 ## Where the lever lives in the code

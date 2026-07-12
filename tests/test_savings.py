@@ -117,7 +117,7 @@ def test_period_gross_sums_only_events_with_a_baseline(tmp_path):
 
     rep = savings.savings_share_report(conn, org, "2026-07").as_dict()
     assert rep["gross_savings_usd"] == 3.5
-    assert rep["billable_share_usd"] == round(3.5 * 0.18, 6)  # 0.63
+    assert rep["billable_share_usd"] == round(3.5 * 0.10, 6)  # 0.35
     assert rep["covered_events"] == 3
     assert rep["total_events"] == 4
     assert rep["coverage_pct"] == 75.0
@@ -168,7 +168,7 @@ def test_share_math_integer_exact():
 
 
 def test_rate_from_config():
-    assert savings.rate_bps_from_config({}) == 1800
+    assert savings.rate_bps_from_config({}) == 1000
     assert savings.rate_bps_from_config({"billing": {"savings_share_pct": 0.25}}) == 2500
     with pytest.raises(ValueError):
         savings.rate_bps_from_config({"billing": {"savings_share_pct": 1.5}})
@@ -197,7 +197,7 @@ def test_dry_run_writes_nothing(tmp_path):
 
 def test_apply_records_and_invoices(tmp_path):
     conn, org = _org(tmp_path)
-    _meter(conn, org, cost=1.0, baseline=4.0)  # $3 saved -> $0.54 share
+    _meter(conn, org, cost=1.0, baseline=11.0)  # $10 saved -> $1.00 share (clears min_charge)
     fake = _FakeStripe()
     out = savings.bill_savings_share(conn, org, "2026-07", apply=True,
                                      stripe_client=fake)
@@ -206,12 +206,12 @@ def test_apply_records_and_invoices(tmp_path):
     assert len(fake.calls) == 1
     row = db.get_savings_invoice(conn, org, "2026-07")
     assert row["status"] == "invoiced"
-    assert row["amount_usd"] == round(3.0 * 0.18, 6)
+    assert row["amount_usd"] == round(10.0 * 0.10, 6)
 
 
 def test_apply_is_idempotent(tmp_path):
     conn, org = _org(tmp_path)
-    _meter(conn, org, cost=1.0, baseline=4.0)
+    _meter(conn, org, cost=1.0, baseline=11.0)  # $10 saved -> $1.00 share (clears min_charge)
     fake = _FakeStripe()
     savings.bill_savings_share(conn, org, "2026-07", apply=True, stripe_client=fake)
     again = savings.bill_savings_share(conn, org, "2026-07", apply=True, stripe_client=fake)

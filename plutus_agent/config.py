@@ -90,10 +90,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cancel_url": "http://localhost:8420/billing/cancel",
         # Savings-share (#7): the opt-in value-based path. `savings_share_pct` is
         # the fraction of independently-verified monthly savings billed to a
-        # Perseus-bundle customer (0.18 = 18%). `plutus bill-savings` skips
+        # Perseus-bundle customer (0.10 = 10%). `plutus bill-savings` skips
         # raising a Stripe invoice below `savings_min_charge_usd` (still records
         # the period). Only events metered WITH a baseline count.
-        "savings_share_pct": 0.18,
+        "savings_share_pct": 0.10,
         "savings_min_charge_usd": 0.50,
     },
     # Savings-share baseline policy (#7). `baseline_models` maps a provider to the

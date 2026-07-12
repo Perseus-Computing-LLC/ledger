@@ -8,7 +8,7 @@ customer's designated baseline model), the difference is a *provable* saving:
     saving(event) = max(0, baseline_micros - cost_micros)
 
 This module aggregates that per-period and turns the agreed share of it (default
-18%) into a bill. Three deliberate properties make the number defensible enough
+10%) into a bill. Three deliberate properties make the number defensible enough
 to put on an invoice:
 
 * **Only provable savings count.** Events with no baseline (``baseline_micros IS
@@ -35,15 +35,15 @@ from typing import Optional
 from . import db
 from .reconcile import month_window, previous_month_label  # reuse the period math
 
-# Savings-share rate as basis points. 1800 bps = 18%. The operator can override
+# Savings-share rate as basis points. 1000 bps = 10%. The operator can override
 # via billing.savings_share_pct in config; this is the shipped default.
-DEFAULT_RATE_BPS = 1800
+DEFAULT_RATE_BPS = 1000
 
 
 def rate_bps_from_config(cfg: Optional[dict]) -> int:
     """Resolve the savings-share rate (basis points) from config, or the default.
 
-    ``billing.savings_share_pct`` is a fraction (0.18 = 18%). Rejects values
+    ``billing.savings_share_pct`` is a fraction (0.10 = 10%). Rejects values
     outside [0, 1] rather than silently billing a nonsensical share.
     """
     billing = (cfg or {}).get("billing", {}) if cfg else {}

@@ -40,7 +40,7 @@ class Tier:
     # settings — see docs/three-tier-model):
     #   "suggested" — Free: optional tip ("chip in a share of what Perseus saved you")
     #   "waived"    — Pro: the flat $20/mo replaces it; never billed
-    #   "mandatory" — Team: 18% of provable savings, invoiced
+    #   "mandatory" — Team: 10% of provable savings, invoiced
     #   "custom"    — Enterprise: negotiated
     #   "none"      — not applicable
     savings_share: str = "none"
@@ -102,7 +102,7 @@ TIERS = {
         tracked_tokens_month=None,
         workspaces=None,
         seats=None,
-        savings_share="mandatory",   # 18% of provable savings, invoiced
+        savings_share="mandatory",   # 10% of provable savings, invoiced
         full_reporting=True,
         features=(
             "Everything in Pro, per seat",
@@ -110,7 +110,7 @@ TIERS = {
             "Individual + aggregate spend rollups",
             "Team roster, roles & admin controls",
             "Unlimited workspaces & seats",
-            "$10/seat/mo + 18% of savings (with Perseus)",
+            "$10/seat/mo + 10% of savings (with Perseus)",
         ),
         blurb="Track and attribute spend across your team — by user and by provider.",
     ),

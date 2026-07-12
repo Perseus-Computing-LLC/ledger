@@ -113,5 +113,5 @@ lost.
 - A per-event saving is `max(0, baseline − cost)`; it can never go negative.
 - Coverage (how many events carried a baseline) is always shown, so a
   thin-coverage period is visible, not hidden.
-- The rate is `billing.savings_share_pct` (default `0.18`); override per-run with
+- The rate is `billing.savings_share_pct` (default `0.10`); override per-run with
   `--rate`.
