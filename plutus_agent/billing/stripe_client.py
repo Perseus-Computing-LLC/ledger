@@ -155,8 +155,9 @@ class StripeClient:
 
     def donate_checkout(self, conn, org_id: str, amount_usd: float) -> dict:
         """One-time Checkout Session for a *voluntary* savings-share donation —
-        the Free tier's tip jar ("chip in what we've saved you"). Distinct from a
-        credit top-up so it lands in the ledger as its own ``donation`` entry."""
+        the Free tier's tip jar ("chip in a share of what Perseus saved you").
+        Distinct from a credit top-up so it lands in the ledger as its own
+        ``donation`` entry."""
         self._require()
         if amount_usd <= 0:
             raise BillingError("amount must be positive")
@@ -170,8 +171,8 @@ class StripeClient:
                     "unit_amount": int(round(amount_usd * 100)),
                     "product_data": {
                         "name": "Plutus savings-share (voluntary)",
-                        "description": "Thank you for supporting Plutus — a share "
-                                       "of the spend we've saved you.",
+                        "description": "Thank you for supporting Perseus — a share "
+                                       "of the spend the ecosystem saved you.",
                     },
                 },
                 "quantity": 1,

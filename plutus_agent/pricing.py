@@ -38,7 +38,7 @@ class Tier:
     per_seat_usd_month: Optional[float] = None
     # How the Perseus savings-share applies at this tier (the one lever, three
     # settings — see docs/three-tier-model):
-    #   "suggested" — Free: shown as an optional tip ("chip in what we saved you")
+    #   "suggested" — Free: optional tip ("chip in a share of what Perseus saved you")
     #   "waived"    — Pro: the flat $20/mo replaces it; never billed
     #   "mandatory" — Team: 18% of provable savings, invoiced
     #   "custom"    — Enterprise: negotiated
@@ -67,12 +67,12 @@ TIERS = {
         full_reporting=False,
         features=(
             "Unlimited spend metering",
-            "Live \"we've saved you $X\" efficiency number",
+            "Verify you're getting the tokens you pay for",
+            "Live efficiency number (flagship-equivalent)",
             "Up to 5 team members · 1 workspace",
-            "Optional savings-share tip jar",
-            "Community support",
+            "Optional tip jar when Perseus saves you money",
         ),
-        blurb="See what your AI stack is really worth. Free forever, no card.",
+        blurb="Track your own AI spend and verify you're getting your tokens. Free, no card.",
     ),
     "pro": Tier(
         key="pro",
@@ -85,11 +85,11 @@ TIERS = {
         full_reporting=True,
         features=(
             "Everything in Free, plus:",
-            "Full reporting — per-model, per-task, history",
+            "Full reporting — by model, task & workspace",
+            "Reconcile metered spend vs your provider bills",
             "Efficiency leakage & policy-adherence",
-            "Verifiable, tamper-evident savings receipts",
+            "Tamper-evident savings receipts (with Perseus)",
             "CSV / JSON export · monthly PDF",
-            "Prepaid credits + budget-cap alerts",
             "Flat $20/mo — no savings-share, ever",
         ),
         blurb="Full depth for power users. One flat price, no variable bill.",
@@ -106,13 +106,13 @@ TIERS = {
         full_reporting=True,
         features=(
             "Everything in Pro, per seat",
-            "Individual + aggregate spend attribution",
+            "Attribution by user, provider & workspace",
+            "Individual + aggregate spend rollups",
             "Team roster, roles & admin controls",
             "Unlimited workspaces & seats",
-            "$10/seat/mo + 18% of provable savings",
-            "Priority support",
+            "$10/seat/mo + 18% of savings (with Perseus)",
         ),
-        blurb="For companies tracking spend across a team. Pay a share of what we save you.",
+        blurb="Track and attribute spend across your team — by user and by provider.",
     ),
     "enterprise": Tier(
         key="enterprise",

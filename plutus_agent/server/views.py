@@ -346,9 +346,12 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
           <span class="num">STRIPE_SECRET_KEY</span>. Everything else runs fully offline.</span>
         </div>"""
 
-    # savings billboard — the headline "what your stack is really worth" number,
-    # shown on every tier as the subtle constant reminder. On Free it carries the
-    # optional savings-share tip jar ("chip in what we saved you").
+    # Efficiency billboard — the headline stat, on every tier.
+    # ATTRIBUTION: Plutus MEASURES; it does not save. Perseus (routing) + Vault
+    # (memory) are what reduce spend. When the ecosystem has tagged events with a
+    # baseline we can attribute *provable* savings ("Perseus saved you $X —
+    # verified by Plutus"). Standalone (no baseline) we show spend + a flagship-
+    # equivalent efficiency ratio as a tracking/verification stat — no "saved" claim.
     from .. import pricing as _pricing
     tobj = _pricing.tier(tier["key"] if isinstance(tier, dict) else tier)
     eff = summary.get("efficiency") or {}
@@ -357,40 +360,53 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
     if eff.get("events"):
         val = eff.get("flagship_value_usd") or 0.0
         basis = eff.get("basis_usd") or 0.0
-        saved = eff.get("efficiency_usd") or 0.0
         mult = eff.get("multiple")
         mult_s = (f"{mult:g}×" if mult else "—")
+        covered = int(share.get("covered_events") or 0)
+        gross = share.get("gross_savings_usd") or 0.0
+        has_savings = covered > 0 and gross > 0   # Perseus baseline present
+
+        # tip jar (Free only) — only when the ecosystem actually produced provable
+        # savings to share; you can't ask for a cut of savings that don't exist.
         tip_html = ""
-        if tobj.savings_share == "suggested" and can_checkout:
-            raw_tip = share.get("billable_share_usd") or 0.0
-            tip_amt = max(5, int(round(raw_tip))) if raw_tip > 0 else 5
-            note = (f"That's about {_usd(share.get('billable_share_usd') or 0.0)} at our "
-                    f"18% share of provable savings." if raw_tip > 0 else
-                    "Provable routing savings will show here as they accrue.")
+        if tobj.savings_share == "suggested" and can_checkout and has_savings:
+            tip_amt = max(5, int(round(share.get("billable_share_usd") or 0.0)))
             tip_html = (
                 f"<form method='post' action='/billing/checkout/donate' "
                 f"style='display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap'>"
                 f"<input type='hidden' name='org' value='{_e(org['id'])}'>{csrf_field}"
-                f"<span class='muted' style='font-size:13px'>Earning its keep? {note} "
-                f"Chip in — totally optional.</span>"
+                f"<span class='muted' style='font-size:13px'>That's ~{_usd(share.get('billable_share_usd') or 0.0)} "
+                f"at 18% of the {_usd(gross)} Perseus saved you. Chip in — totally optional.</span>"
                 f"<input class='amt' type='number' name='amount' value='{tip_amt}' min='5' step='5' style='width:80px'>"
                 f"<button class='btn ghost' type='submit'>Chip in →</button></form>")
         elif tobj.savings_share == "waived":
             tip_html = ("<div class='muted' style='font-size:13px;margin-top:10px'>"
-                        "You're on Pro — a flat $20/mo, no savings-share. Thank you for "
-                        "supporting Plutus.</div>")
+                        "You're on Pro — a flat $20/mo, no savings-share.</div>")
+
+        if has_savings:
+            label = "Perseus saved you"
+            num = _usd(gross)
+            sub = f"this month · {_e(mult_s)} efficiency · verified by Plutus"
+            aside = (f"<div class='muted' style='font-size:12px'>flagship-equivalent value</div>"
+                     f"<div style='font-size:20px;font-weight:600'>{_usd(val)}</div>"
+                     f"<div class='muted' style='font-size:12px'>for {_usd(basis)} actual</div>")
+        else:
+            label = "Your AI spend"
+            num = _usd(basis)
+            sub = f"this month · flagship-equivalent {_usd(val)} · {_e(mult_s)} efficient"
+            aside = ("<div class='muted' style='font-size:12px'>tracking &amp; verification</div>"
+                     "<div class='muted' style='font-size:13px;max-width:230px;margin-top:2px'>"
+                     "Getting the tokens you pay for? Reconcile metered spend against your "
+                     "provider console. Add Perseus to route spend down.</div>")
         billboard = (
             f"<div class='panel' style='background:linear-gradient(180deg,var(--bg2),transparent);"
             f"border-color:var(--amber-dim)'>"
             f"<div style='display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px'>"
             f"<div><div class='muted' style='font-size:13px;text-transform:uppercase;letter-spacing:.05em'>"
-            f"Plutus has saved you</div>"
-            f"<div class='amber' style='font-size:34px;font-weight:700;line-height:1.1'>{_usd(saved)}</div>"
-            f"<div class='muted' style='font-size:13px'>this month · {_e(mult_s)} efficiency multiple</div></div>"
-            f"<div style='text-align:right'>"
-            f"<div class='muted' style='font-size:12px'>flagship-equivalent value</div>"
-            f"<div style='font-size:20px;font-weight:600'>{_usd(val)}</div>"
-            f"<div class='muted' style='font-size:12px'>for {_usd(basis)} actual</div></div>"
+            f"{_e(label)}</div>"
+            f"<div class='amber' style='font-size:34px;font-weight:700;line-height:1.1'>{num}</div>"
+            f"<div class='muted' style='font-size:13px'>{sub}</div></div>"
+            f"<div style='text-align:right'>{aside}</div>"
             f"</div>{tip_html}</div>")
 
     # deep reporting is a paid feature — Free sees the headline number, paid
@@ -565,14 +581,15 @@ def landing_page(*, signed_in: bool = False, savings_share_pct: float = 18.0) ->
     <div class="s" style="color:var(--dim)">Every call is recorded to an append-only, hash-chained ledger —
     auditable, tamper-evident, yours.</div></div>
   <div style="{step}"><div class="l amber">3 · See your efficiency</div>
-    <div class="s" style="color:var(--dim)">Live dashboard: spend by provider, and the value-vs-actual
-    multiple that shows what your routing actually saves.</div></div>
+    <div class="s" style="color:var(--dim)">Live dashboard: spend by provider — verify you're getting
+    the tokens you pay for, and see what Perseus routing saves once it's in the loop.</div></div>
 </div>
 
 <div style="text-align:center;margin:26px 0 8px">
   <div style="color:var(--dim);font-size:14px;margin-bottom:14px">
     <b>Free for small teams.</b> $20/mo beyond that. Optional {savings_share_pct:.0f}% share of the
-    savings we can <i>prove</i> — never a blanket percentage, never an automatic charge.</div>
+    savings <b>Perseus</b> provably delivers — verified by Plutus, never a blanket percentage,
+    never an automatic charge.</div>
   {cta}
   &nbsp;<a class="btn ghost" href="/pricing">Compare plans</a>
 </div>

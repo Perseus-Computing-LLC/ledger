@@ -1,5 +1,12 @@
 # The three-tier model — one meter, three ways to pay
 
+> **Attribution first.** Plutus *measures*; it does **not** save money. **Perseus**
+> (routing / resolve-before-context) and **Perseus Vault** (memory) are what reduce
+> spend. Plutus meters the spend and *proves* the savings. So the savings-share is
+> an **ecosystem** monetization — it only applies when Perseus is in the loop
+> producing (and Plutus proving) real savings. Standalone, Plutus is a "track my
+> own spend, verify I'm getting my tokens" meter, and there's nothing to share.
+
 Plutus has one primitive: a **verifiable efficiency meter** that records what your
 AI stack *would* have cost on a flagship model versus what it actually cost, on a
 tamper-evident hash chain. Everything below is a way to monetize that one number
@@ -18,11 +25,13 @@ set to a different position per tier.**
 They map to willingness-to-pay **and** to how *provable* the value is:
 
 1. **Free is the growth engine, not the revenue.** Metering is unlimited so the
-   "Plutus has saved you $X" billboard keeps running for real workloads — every
-   free user is a walking advertisement for their own savings number. The tip jar
-   ("chip in what we saved you") earns little directly; its job is virality +
-   goodwill + a funnel into Pro/Team. The number is honest because it's
-   tamper-evident and reconstructable — that's the moat.
+   efficiency billboard keeps running for real workloads. Standalone it reads
+   *"Your AI spend: $X · flagship-equivalent $Y · N× efficient"* (a tracking /
+   verification stat); with Perseus in the loop it becomes *"Perseus saved you $X
+   — verified by Plutus"* — every free user a walking advertisement for their own
+   number. The tip jar ("chip in a share of what Perseus saved you") earns little
+   directly; its job is virality + goodwill + a funnel into Pro/Team. The number
+   is honest because it's tamper-evident and reconstructable — that's the moat.
 
 2. **Don't double-dip on individuals.** Charging a solo user $20/mo *and* a % of
    their savings feels predatory and kills conversion. On Pro the flat $20 **is**
@@ -40,8 +49,11 @@ They map to willingness-to-pay **and** to how *provable* the value is:
   and `pricing.savings_mode(tier_key)`.
 * **Dashboard billboard** — `server/app._dashboard` injects the current-month
   `efficiency` + `savings_share` into the summary; `server/views.render_dashboard`
-  renders the "saved you $X" hero on every tier and the Free tip jar
-  (`POST /billing/checkout/donate`).
+  branches on whether a Perseus baseline is present (`savings_share.covered_events
+  > 0`): ecosystem → "Perseus saved you $X — verified by Plutus"; standalone →
+  "Your AI spend … flagship-equivalent … N× efficient" (no "saved" claim). The
+  Free tip jar (`POST /billing/checkout/donate`) shows only when there are provable
+  savings to share.
 * **Reporting gate** — `Tier.full_reporting` hides the per-task / leakage / export
   panels on Free behind a "Pro feature" card.
 * **Billing guard** — `plutus bill-savings --apply` refuses to invoice a `pro`
