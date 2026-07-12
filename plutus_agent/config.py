@@ -92,9 +92,26 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # the fraction of independently-verified monthly savings billed to a
         # Perseus-bundle customer (0.18 = 18%). `plutus bill-savings` skips
         # raising a Stripe invoice below `savings_min_charge_usd` (still records
-        # the period). Only events metered WITH a baseline_cost_usd count.
+        # the period). Only events metered WITH a baseline count.
         "savings_share_pct": 0.18,
         "savings_min_charge_usd": 0.50,
+    },
+    # Savings-share baseline policy (#7). `baseline_models` maps a provider to the
+    # flagship model the customer would have run WITHOUT Perseus routing — the
+    # counterfactual. When the Hermes sync (or any integration) tags an event with
+    # a `baseline_model`, the server prices the SAME token counts at that model
+    # from the published table; the saving is the difference. Empty = savings off.
+    "savings": {
+        "baseline_models": {
+            "anthropic": "claude-opus-4-8",
+            "openai": "gpt-5",
+            "google": "gemini-3.1-pro",
+            "xai": "grok-4",
+            "deepseek": "deepseek-v4-pro",
+            "mistral": "mistral-large-2",
+            "cohere": "command-a",
+            "meta": "llama-4-maverick",
+        },
     },
     "alerts": {
         "enabled": False,

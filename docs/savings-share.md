@@ -68,13 +68,48 @@ as `pending` without raising a sub-dollar Stripe invoice.
 
 ## Producing baselines in production
 
+### The Hermes bridge (automatic)
+
 The honest baseline comes from the component that already knows both the routed
-model and the counterfactual — the Perseus/Hermes bridge. When it meters a call
-it should also pass `baseline_cost_usd = tokens × baseline_model_price`. Until
-that wiring lands, `plutus meter --baseline` and the `/v1/usage`
-`baseline_cost_usd` field let any integration record it directly. **No baseline →
-no billable savings** (the safe default), so partial rollout under-bills rather
-than over-bills.
+model and the counterfactual — the Hermes sync (`examples/hermes_sync.py`). It
+tags each session event with a **`baseline_model`** — the flagship the customer
+would have run without Perseus routing — and hosted Plutus prices the *same*
+token counts at that model. The sync never sends a dollar figure, only the model
+name, so the amount is derived from the published price table and stays
+reconstructable.
+
+Turn it on with one env var on the Hermes box:
+
+```bash
+PLUTUS_BASELINE=flagship            # built-in provider→flagship map
+# or pin one baseline for every provider:
+PLUTUS_BASELINE_MODEL=claude-opus-4-8
+# or per-provider:
+PLUTUS_BASELINE_MODELS='{"anthropic":"claude-opus-4-8","openai":"gpt-5"}'
+```
+
+Rules that keep it honest:
+
+- A baseline is attached **only when the session's actual model differs from the
+  baseline** — i.e. routing actually happened. Un-routed traffic records no
+  saving.
+- The flagship map mirrors `config.py` `savings.baseline_models` (the operator
+  owns both). The counterfactual assumption — "without Perseus you'd run the
+  flagship" — is stated on the invoice/contract, not inferred silently.
+- `hermes_sync.py --dry-run` prints how many events were tagged
+  (`savings-share ON — 2/2 event(s) tagged`) so coverage is visible before
+  anything is sent.
+
+Server-side, `record_usage(baseline_model=…)` (and the `/v1/usage`
+`baseline_model` field) resolve the price from `pricing.resolve_price`, honoring
+`pricing.overrides`.
+
+### Manual / other integrations
+
+`plutus meter --baseline <usd>` and the `/v1/usage` `baseline_cost_usd` field let
+any integration record an explicit baseline directly. When both a model and a
+cost are supplied, the explicit cost wins. **No baseline → no billable savings**
+(the safe default), so partial rollout under-bills rather than over-bills.
 
 ## Operator go-live checklist
 
@@ -88,8 +123,10 @@ Steps only the account owner can do (Plutus can't hold your Stripe credentials):
       `https://your-host/webhook/stripe`; set `STRIPE_WEBHOOK_SECRET`.
 - [ ] Set `billing.savings_share_pct` if not 0.18, and `auth.base_url` for the
       pricing/upgrade links.
-- [ ] Confirm the metering path is sending `baseline_cost_usd` for Perseus
-      traffic (`plutus savings` coverage should be > 0%).
+- [ ] Turn on baselines in the Hermes sync: set `PLUTUS_BASELINE=flagship` (or a
+      `PLUTUS_BASELINE_MODEL[S]` override) on the Hermes box, then
+      `hermes_sync.py --dry-run` and confirm events are tagged. `plutus savings`
+      coverage should climb above 0% after the next sync.
 - [ ] Dry-run `plutus bill-savings --period <last-month>`, eyeball the figure and
       coverage, then re-run with `--apply`. Schedule it monthly (cron, after
       month end) alongside `plutus close`.

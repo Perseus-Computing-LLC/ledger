@@ -44,6 +44,29 @@ def test_no_baseline_means_zero_saving(tmp_path):
     assert r.savings_usd == 0.0
 
 
+def test_baseline_model_priced_server_side(tmp_path):
+    # Name a baseline model instead of a dollar amount: the server prices the
+    # same tokens from the published table. haiku routed, opus baseline.
+    conn, org = _org(tmp_path)
+    r = metering.record_usage(
+        conn, org, provider="anthropic", model="claude-haiku-4-5",
+        input_tokens=1_000_000, output_tokens=500_000, cost_usd=None,
+        baseline_model="claude-opus-4-8", ts=_ts())
+    assert round(r.cost_usd, 2) == 3.50       # haiku: 1*1.0 + 0.5*5.0
+    assert round(r.baseline_usd, 2) == 52.50  # opus:  1*15 + 0.5*75
+    assert round(r.savings_usd, 2) == 49.00
+
+
+def test_explicit_baseline_cost_beats_model(tmp_path):
+    # If both are given, the explicit USD figure wins (no server pricing).
+    conn, org = _org(tmp_path)
+    r = metering.record_usage(
+        conn, org, provider="anthropic", model="claude-haiku-4-5",
+        input_tokens=1000, output_tokens=1000, cost_usd=1.0,
+        baseline_cost_usd=9.0, baseline_model="claude-opus-4-8", ts=_ts())
+    assert r.baseline_usd == 9.0
+
+
 def test_baseline_below_cost_clamps_to_zero(tmp_path):
     conn, org = _org(tmp_path)
     r = _meter(conn, org, cost=3.0, baseline=1.0)

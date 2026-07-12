@@ -660,6 +660,11 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json(400, {"error": "baseline_cost_usd must be non-negative"})
                 except (TypeError, ValueError):
                     return self._json(400, {"error": "baseline_cost_usd must be a number"})
+            # #7: alternatively name the baseline model; the server prices the same
+            # tokens from its published table (a string, not a dollar amount).
+            bmodel = ev.get("baseline_model")
+            if bmodel is not None and not isinstance(bmodel, str):
+                return self._json(400, {"error": "baseline_model must be a string"})
 
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
@@ -693,6 +698,7 @@ class Handler(BaseHTTPRequestHandler):
                             reasoning_tokens=strict_int(ev.get("reasoning_tokens", 0) or 0),
                             cost_usd=ev.get("cost_usd"),
                             baseline_cost_usd=ev.get("baseline_cost_usd"),
+                            baseline_model=ev.get("baseline_model"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
                             alert_cfg=cfg.get("alerts", {}),

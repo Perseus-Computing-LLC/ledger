@@ -86,7 +86,8 @@ def record_usage(conn, org_id: str, provider: str,
                  model: Optional[str] = None, task_type: str = "general",
                  workspace: Optional[str] = None,
                  cost_usd: Optional[float] = None,
-                 baseline_cost_usd: Optional[float] = None, source: str = "api",
+                 baseline_cost_usd: Optional[float] = None,
+                 baseline_model: Optional[str] = None, source: str = "api",
                  pricing_overrides: Optional[dict] = None,
                  ts: Optional[float] = None,
                  alert_cfg: Optional[dict] = None,
@@ -105,13 +106,22 @@ def record_usage(conn, org_id: str, provider: str,
     org has ever had credit and the event would push balance negative, it is
     rejected (not recorded).
 
-    Savings-share (#7): ``baseline_cost_usd`` is the counterfactual cost of this
-    same call *without* Perseus — the same token counts priced at the customer's
-    designated baseline model. When supplied it is stored (and hash-chained)
-    alongside the actual cost; the per-event saving is ``max(0, baseline - cost)``
-    and periodic savings-share billing sums it. Omit it (the default) and the
-    event simply never contributes to billable savings. It does NOT affect the
-    prepaid-credit debit, which always follows the actual ``cost_usd``.
+    Savings-share (#7): the counterfactual cost of this same call *without*
+    Perseus — the same token counts priced at the customer's designated baseline
+    model. Supply it one of two ways:
+
+    * ``baseline_cost_usd`` — an explicit USD figure, or
+    * ``baseline_model`` — the baseline model name; the SAME token counts are
+      then priced from Plutus's published table (honoring ``pricing_overrides``).
+      Preferred: the baseline is derived from published prices on chained token
+      counts, so the customer can independently reconstruct it — the client only
+      asserts *which model*, not the dollar amount.
+
+    When resolved it is stored (and hash-chained) alongside the actual cost; the
+    per-event saving is ``max(0, baseline - cost)`` and periodic savings-share
+    billing sums it. Omit both (the default) and the event never contributes to
+    billable savings. Neither affects the prepaid-credit debit, which always
+    follows the actual ``cost_usd``.
     """
     ts = ts if ts is not None else time.time()
 
@@ -172,6 +182,13 @@ def record_usage(conn, org_id: str, provider: str,
     # net against a genuine saving elsewhere in the period.
     baseline_micros = None
     savings_usd = 0.0
+    # Prefer an explicit baseline USD; otherwise, if a baseline model was named,
+    # price the SAME token counts from the published table (recomputable baseline).
+    if baseline_cost_usd is None and baseline_model:
+        bp, _exact = pricing.resolve_price(provider, baseline_model, pricing_overrides)
+        baseline_cost_usd = round(bp.cost(int(input_tokens), int(output_tokens),
+                                          int(cache_read_tokens),
+                                          int(reasoning_tokens)), 6)
     if baseline_cost_usd is not None:
         baseline_cost_usd = round(float(baseline_cost_usd), 6)
         if baseline_cost_usd < 0:
