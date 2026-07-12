@@ -77,6 +77,7 @@ blocked).
 | **Self-serve** | Open Google sign-in → a new Free-tier org per user → in-app upgrade nudges |
 | **Stripe billing** | Prepaid-credit top-ups, Pro Checkout, Customer Portal, idempotent webhooks — all optional/offline-safe |
 | **Alerts & reports** | Low-balance / budget-cap alerts (email) and monthly PDF/HTML spend reports |
+| **Tamper-evidence** | Cryptographic hash chain of usage events + externally-retained checkpoints for independent verification |
 
 ## Run the dashboard
 
@@ -224,6 +225,7 @@ rather than importing it, so the two ship and run independently.
 
 ## Docs
 
+- [docs/ledger-integrity.md](docs/ledger-integrity.md) — cryptographic tamper-evidence and externally-retained checkpoints
 - [docs/api.md](docs/api.md) — the `/v1/usage` ingest API + API keys + SDK remote mode
 - [docs/auth.md](docs/auth.md) — Google sign-in, allow-listing, and open signup
 - [docs/claude-code.md](docs/claude-code.md) — the Claude Code metering hook
