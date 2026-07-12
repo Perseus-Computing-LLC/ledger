@@ -1,0 +1,10 @@
+{
+  "name": "plutus-metering",
+  "description": "Meter Claude Code token usage to your self-hosted Plutus ledger. Each turn's usage is metered at session end so you can see your spend and efficiency (API-equivalent value vs. actual cost) on the Plutus dashboard. Sends token metadata only — never transcript content.",
+  "version": "0.1.0",
+  "author": { "name": "Perseus Computing LLC", "url": "https://perseus.observer" },
+  "homepage": "https://github.com/Perseus-Computing-LLC/plutus-metering-plugin",
+  "repository": "https://github.com/Perseus-Computing-LLC/plutus-metering-plugin",
+  "license": "MIT",
+  "keywords": ["metering", "billing", "cost", "token-usage", "finops", "plutus"]
+}
