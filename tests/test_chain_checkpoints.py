@@ -211,3 +211,48 @@ def test_recheckpoint_same_rowid_idempotent(tmp_path):
     assert cp1["through_rowid"] == cp2["through_rowid"]
     # UNIQUE(org_id, through_rowid) upserted, not duplicated
     assert len(db.list_checkpoints(conn, org)) == 1
+
+
+# ------------------------------------------------------ #121: operationalized ---
+def test_applied_close_records_a_checkpoint(tmp_path):
+    """#121: every APPLIED period close ends with a fresh anchor."""
+    from plutus_agent import reconcile
+    conn, org = _org(tmp_path)
+    _meter(conn, org, n=3)
+    out = reconcile.close_period(conn, org, "2026-06", providers=[], apply=True)
+    assert out["checkpoint"] is not None
+    assert out["checkpoint"]["event_count"] == 3
+    assert len(db.list_checkpoints(conn, org)) == 1
+
+
+def test_dry_run_close_does_not_checkpoint(tmp_path):
+    """A dry-run close must not write anything — including anchors."""
+    from plutus_agent import reconcile
+    conn, org = _org(tmp_path)
+    _meter(conn, org, n=2)
+    out = reconcile.close_period(conn, org, "2026-06", providers=[], apply=False)
+    assert out["checkpoint"] is None
+    assert db.list_checkpoints(conn, org) == []
+
+
+def test_close_checkpoint_opt_out(tmp_path):
+    """checkpoint=False opts an applied close out of auto-capture."""
+    from plutus_agent import reconcile
+    conn, org = _org(tmp_path)
+    _meter(conn, org, n=2)
+    out = reconcile.close_period(conn, org, "2026-06", providers=[], apply=True,
+                                 checkpoint=False)
+    assert out["checkpoint"] is None
+    assert db.list_checkpoints(conn, org) == []
+
+
+def test_mail_checkpoint_dry_run_when_unconfigured(tmp_path):
+    """#121 delivery sink degrades to an offline-safe dry run without SMTP."""
+    from plutus_agent import alerts
+    conn, org = _org(tmp_path)
+    _meter(conn, org, n=1)
+    cp = db.checkpoint_chain(conn, org)
+    out = alerts.mail_checkpoint({}, "Acme", cp, force=True)
+    assert out["sent"] == 0
+    assert out["dry_run"] is True
+    assert "smtp_host" in out["detail"]

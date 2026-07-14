@@ -29,6 +29,7 @@ _PUBLIC_PATHS = {"/", "/index.html",  # public landing for logged-out visitors
                  "/healthz", "/favicon.ico", "/webhook/stripe", "/pricing",
                  "/v1/usage",  # authenticated by its own Bearer API key, not a session
                  "/v1/usage/export.csv", "/v1/usage/export.json",  # Bearer-auth (#66)
+                 "/v1/checkpoints",  # Bearer-auth tamper-evidence anchors (#121)
                  "/v1/admin/orgs", "/v1/admin/credits", "/v1/admin/keys",  # admin-token (#66)
                  "/v1/admin/verify",  # ledger tamper-evidence (#108), admin-token
                  "/auth/login", "/auth/callback", "/auth/logout"}
@@ -404,6 +405,8 @@ class Handler(BaseHTTPRequestHandler):
                     before=_qs_int(q, "before", None, lo=1, hi=2**63 - 1)))
             if path in ("/v1/usage/export.csv", "/v1/usage/export.json"):
                 return self._usage_export(conn, path, q)
+            if path == "/v1/checkpoints":
+                return self._checkpoints_get(conn, q)
             if path.startswith("/v1/admin/"):
                 return self._admin_get(conn, path, q)
             if path in ("/billing/success", "/billing/cancel"):
@@ -452,7 +455,8 @@ class Handler(BaseHTTPRequestHandler):
             # neither). Exempt: /v1/usage (Bearer auth), /webhook/stripe (signed).
             needs_csrf_check = (
                 self.ctx.auth_on and
-                path not in {"/v1/usage", "/webhook/stripe"} and
+                path not in {"/v1/usage", "/webhook/stripe",
+                             "/v1/checkpoints"} and  # Bearer-auth (#121)
                 self._user is not None  # Cookie-authenticated
             )
             if needs_csrf_check and not (self._same_origin() or self._csrf_token_ok()):
@@ -462,6 +466,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._auth_logout(conn)
             if path == "/v1/usage":
                 return self._ingest_usage(conn)
+            if path == "/v1/checkpoints":
+                return self._checkpoints_post(conn)
             if path == "/webhook/stripe":
                 return self._webhook(conn)
             if path == "/billing/checkout/credit":
@@ -538,6 +544,9 @@ class Handler(BaseHTTPRequestHandler):
             summary["savings_share"] = None
         integrity = db.verify_chain(  # #108: tamper-evidence tile for this org
             conn, org_id=org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg))
+        # #121: latest retained anchor for the checkpoint tile (None = never
+        # anchored — the tile nudges toward `plutus checkpoint`).
+        ckpts = db.list_checkpoints(conn, org_id)
         page = views.render_dashboard(
             summary, orgs=self._scoped_orgs(conn), cfg=self.ctx.cfg,
             stripe_status=self.ctx.stripe.status(), demo=self.ctx.demo,
@@ -545,6 +554,7 @@ class Handler(BaseHTTPRequestHandler):
             api_keys=[dict(k) for k in db.list_api_keys(conn, org_id)],
             csrf=authmod.csrf_token(authmod.read_cookie(self)),
             integrity=integrity,
+            checkpoint=(ckpts[-1] if ckpts else None),
         )
         return self._send(200, page)
 
@@ -581,6 +591,43 @@ class Handler(BaseHTTPRequestHandler):
         csv_text = api.export_csv(conn, org_id, since, until)
         return self._send(200, csv_text, "text/csv; charset=utf-8",
                           {"Content-Disposition": 'attachment; filename="usage.csv"'})
+
+    def _checkpoints_get(self, conn, q):
+        """GET /v1/checkpoints — the org's retained anchors (#121). Bearer-
+        authenticated for API callers; falls back to the signed-in session for
+        the dashboard's download link. The customer stores these OUT OF BAND;
+        the in-DB copies are the weaker fallback (an operator could rewrite
+        them), which is why the response says so."""
+        org_id = self._bearer_org(conn)
+        if not org_id:
+            try:  # browser path: dashboard download link, session-scoped
+                org_id = self._authz_org(conn, q.get("org", [None])[0])
+            except Exception:
+                org_id = None
+        if not org_id:
+            return self._json(401, {"error": "invalid or missing API key "
+                                             "(or sign in and retry)"})
+        return self._json(200, {
+            "org_id": org_id,
+            "checkpoints": db.list_checkpoints(conn, org_id),
+            "note": "retain these out of band (email/S3 object-lock/git) — "
+                    "in-DB copies alone cannot prove operator honesty; verify "
+                    "with `plutus verify-checkpoints --file <retained copy>`",
+        })
+
+    def _checkpoints_post(self, conn):
+        """POST /v1/checkpoints — record a fresh tamper-evidence anchor for the
+        caller's org, Bearer-authenticated (#121). Returns the checkpoint dict
+        (the thing to retain). Idempotent per chain head."""
+        org_id = self._bearer_org(conn)
+        if not org_id:
+            return self._json(401, {"error": "invalid or missing API key"})
+        cp = db.checkpoint_chain(conn, org_id,
+                                 hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg))
+        if cp is None:
+            return self._json(200, {"recorded": False,
+                                    "detail": "no chained events yet"})
+        return self._json(200, {"recorded": True, "checkpoint": cp})
 
     def _usage_response(self, conn, org_id, out, n_blocked, n_over_balance, cfg):
         """Build the (code, body) for a recorded /v1/usage batch. Called inside the

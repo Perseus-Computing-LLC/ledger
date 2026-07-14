@@ -46,6 +46,101 @@ def _build_message(alert: dict, from_addr: str, to_addrs: list[str],
     return msg
 
 
+def _build_checkpoint_message(cp: dict, from_addr: str, to_addrs: list[str],
+                              org_name: str) -> EmailMessage:
+    """#121: the out-of-band checkpoint receipt. The JSON line in the body IS
+    the retained anchor — the recipient's mailbox is the independent store."""
+    import json as _json
+    msg = EmailMessage()
+    msg["Subject"] = (f"[Plutus] Ledger checkpoint — {org_name} "
+                      f"(rowid {cp['through_rowid']}, {cp['event_count']} events)")
+    msg["From"] = from_addr
+    msg["To"] = ", ".join(to_addrs)
+    msg.set_content(
+        "Retain this message: the JSON line below is a tamper-evidence anchor "
+        "for your Plutus usage ledger. Your operator cannot rewrite history "
+        "you hold a copy of.\n\n"
+        f"{_json.dumps(cp)}\n\n"
+        "Verify at any time:\n"
+        "  plutus verify-checkpoints --file <file containing the line above>\n\n"
+        f"Organization: {org_name}\n"
+        f"Chain head:   {cp['head_hash']}\n"
+        f"Signing mode: {cp['mode']}\n\n"
+        "— Plutus, the billing layer for AI agents\n"
+        "  https://perseus.observer/plutus/\n"
+    )
+    return msg
+
+
+def mail_checkpoint(cfg: dict, org_name: str, cp: dict,
+                    force: bool = False) -> dict:
+    """#121: deliver one checkpoint receipt out of band via the alerts SMTP
+    path. Offline-safe like :func:`send_pending` — unconfigured SMTP degrades
+    to a dry run describing what would be sent. ``force`` bypasses the
+    ``alerts.enabled`` gate (delivery explicitly requested via --deliver).
+
+    Trust model: the anchor is only *independent* if it lands somewhere the
+    operator cannot rewrite — the customer's mailbox qualifies; this DB does
+    not. In-DB checkpoints remain the weaker fallback (see verify-checkpoints
+    --file).
+    """
+    acfg = cfg.get("alerts", {})
+    enabled = acfg.get("enabled") or force
+    to_addrs = acfg.get("to_addrs") or []
+    smtp_host = acfg.get("smtp_host") or ""
+    if not (enabled and smtp_host and to_addrs):
+        reason = []
+        if not enabled:
+            reason.append("alerts.enabled is false")
+        if not smtp_host:
+            reason.append("no smtp_host")
+        if not to_addrs:
+            reason.append("no to_addrs")
+        return {"sent": 0, "dry_run": True,
+                "detail": "dry run — " + "; ".join(reason)}
+
+    from_addr = acfg.get("from_addr", "plutus@perseus.observer")
+    port = int(acfg.get("smtp_port", 587))
+    user = acfg.get("smtp_user") or ""
+    password = acfg.get("smtp_password") or ""
+    require_tls = bool(acfg.get("require_tls"))
+    msg = _build_checkpoint_message(cp, from_addr, to_addrs, org_name)
+    try:
+        ctx = ssl.create_default_context()
+        if port == 465:
+            with smtplib.SMTP_SSL(smtp_host, port, context=ctx, timeout=20) as server:
+                if user:
+                    server.login(user, password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_host, port, timeout=20) as server:
+                server.ehlo()
+                tls_secured = False
+                if "starttls" in server.esmtp_features:
+                    try:
+                        server.starttls(context=ctx)
+                        server.ehlo()
+                        tls_secured = True
+                    except Exception:
+                        pass
+                # Same #15 discipline as send_pending: fail closed rather than
+                # leak over an unencrypted link.
+                if require_tls and not tls_secured:
+                    return {"sent": 0, "dry_run": False,
+                            "error": "alerts.require_tls is set but STARTTLS "
+                                     "could not be established"}
+                if user and password:
+                    if not tls_secured:
+                        return {"sent": 0, "dry_run": False,
+                                "error": "SMTP credentials provided but TLS "
+                                         "could not be established"}
+                    server.login(user, password)
+                server.send_message(msg)
+    except Exception as e:
+        return {"sent": 0, "dry_run": False, "error": str(e)}
+    return {"sent": 1, "dry_run": False, "to": list(to_addrs)}
+
+
 def send_pending(conn, cfg: dict, org_id: str,
                  force: bool = False) -> dict:
     """Deliver undelivered alerts for an org. Returns a summary.

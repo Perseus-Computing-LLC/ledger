@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import (__version__, __tagline__, config as cfgmod, db, metering,
+from . import (__version__, __tagline__, alerts, config as cfgmod, db, metering,
                pricing, reconcile, savings as savings_mod, efficiency as eff_mod)
 
 
@@ -487,13 +487,21 @@ def cmd_checkpoint(args):
     else:
         orgs = [r["id"] for r in db.list_orgs(conn)]
     out = []
+    deliveries = []
     for oid in orgs:
         cp = db.checkpoint_chain(conn, oid, hmac_key=hmac_key)
         if cp is not None:
             out.append(cp)
+            if getattr(args, "deliver", False):
+                org_row = db.get_org(conn, oid)
+                deliveries.append((oid, alerts.mail_checkpoint(
+                    cfgmod.load(), org_row["name"] if org_row else oid, cp,
+                    force=True)))
     conn.close()
     if args.json:
-        print(json.dumps(out, indent=2))
+        print(json.dumps({"checkpoints": out,
+                          "deliveries": [{"org_id": o, **d} for o, d in deliveries]}
+                         if deliveries else out, indent=2))
         sys.exit(0)
     if not out:
         _ok("no chained events yet — nothing to checkpoint")
@@ -505,6 +513,11 @@ def cmd_checkpoint(args):
               f"{cp['event_count']:>6} events  head {cp['head_hash'][:16]}…")
         print(f"      {json.dumps(cp)}")
     print()
+    for oid, d in deliveries:
+        if d.get("sent"):
+            print(f"    ✉ {oid}: receipt emailed to {', '.join(d['to'])}")
+        else:
+            print(f"    ✉ {oid}: NOT sent — {d.get('error') or d.get('detail')}")
     _ok(f"{len(out)} checkpoint(s) recorded — save the JSON line(s) above")
     sys.exit(0)
 
@@ -562,16 +575,25 @@ def cmd_verify_checkpoints(args):
 
 
 def cmd_close(args):
-    """#109: fetch provider authoritative totals and reconcile — the cron close."""
+    """#109: fetch provider authoritative totals and reconcile — the cron close.
+
+    #121: an applied close also records (and optionally emails) a
+    tamper-evidence checkpoint, so every billing period ends anchored."""
     conn = _conn()
+    cfg = cfgmod.load()
     org = _resolve_org(conn, args.org)
     period = args.period or reconcile.previous_month_label()
     providers = None
     if args.providers:
         providers = [p.strip().lower() for p in args.providers.split(",") if p.strip()]
     out = reconcile.close_period(conn, org["id"], period,
-                                 providers=providers, apply=args.apply)
+                                 providers=providers, apply=args.apply,
+                                 checkpoint=getattr(args, "checkpoint", True),
+                                 hmac_key=cfgmod.chain_hmac_key(cfg))
     conn.close()
+    if out.get("checkpoint") and getattr(args, "deliver", False):
+        out["checkpoint_delivery"] = alerts.mail_checkpoint(
+            cfg, org["name"], out["checkpoint"], force=True)
 
     if args.json:
         print(json.dumps(out, indent=2))
@@ -603,6 +625,20 @@ def cmd_close(args):
     if out["unreconciled_providers"]:
         print(f"\n  not reconciled (no authoritative total): "
               f"{', '.join(out['unreconciled_providers'])}")
+    cp = out.get("checkpoint")
+    if cp:
+        print(f"\n    ⚓ checkpoint recorded — rowid {cp['through_rowid']:,}, "
+              f"{cp['event_count']:,} events, head {cp['head_hash'][:16]}… "
+              f"({cp['mode']})")
+        print(f"      {json.dumps(cp)}")
+        print("      retain the JSON line above out of band "
+              "(plutus verify-checkpoints --file)")
+        d = out.get("checkpoint_delivery")
+        if d is not None:
+            if d.get("sent"):
+                print(f"      ✉ receipt emailed to {', '.join(d['to'])}")
+            else:
+                print(f"      ✉ NOT emailed — {d.get('error') or d.get('detail')}")
     _ok("adjust entries written" if args.apply else "no changes written (dry run)")
     if out["fetch_errors"]:
         sys.exit(1)
@@ -874,6 +910,10 @@ def build_parser():
     pck.add_argument("--hmac-key", dest="hmac_key", default=None,
                      help="keyed-MAC secret (default: config/PLUTUS_CHAIN_HMAC_KEY; "
                           "pass empty string to force plain SHA-256)")
+    pck.add_argument("--deliver", action="store_true",
+                     help="also email each anchor as an out-of-band receipt via "
+                          "the alerts SMTP config (#121); dry-run when SMTP is "
+                          "unconfigured")
     pck.add_argument("--json", action="store_true")
     pck.set_defaults(func=cmd_checkpoint)
 
@@ -900,6 +940,12 @@ def build_parser():
                                          "(default: providers with recorded usage)")
     pcl.add_argument("--apply", action="store_true",
                      help="write adjust entries (default: dry run)")
+    pcl.add_argument("--no-checkpoint", dest="checkpoint", action="store_false",
+                     help="skip the automatic tamper-evidence checkpoint an "
+                          "applied close records (#121)")
+    pcl.add_argument("--deliver", action="store_true",
+                     help="email the close's checkpoint as an out-of-band "
+                          "receipt via the alerts SMTP config (#121)")
     pcl.add_argument("--json", action="store_true")
     pcl.set_defaults(func=cmd_close)
 

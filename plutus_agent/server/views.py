@@ -147,7 +147,8 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                      stripe_status: dict, demo: bool = False,
                      runway: dict | None = None, user=None,
                      api_keys: list | None = None, csrf: str = "",
-                     integrity: dict | None = None) -> str:
+                     integrity: dict | None = None,
+                     checkpoint: dict | None = None) -> str:
     # Fix #58: hidden CSRF field embedded in every state-changing form.
     csrf_field = (f"<input type='hidden' name='_csrf' value='{_e(csrf)}'>"
                   if csrf else "")
@@ -252,6 +253,34 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                 "<div class='v coral'>✗ tampered</div>"
                 "<div class='s'>hash chain broken — run <span class='num'>plutus verify</span></div></div>")
 
+    # Checkpoint anchor tile (#121): the latest externally-retainable anchor.
+    # Shown alongside the integrity tile — integrity says "the chain
+    # self-verifies today"; the anchor says "and here is the point a customer
+    # can independently hold us to".
+    checkpoint_card = ""
+    if integrity is not None:
+        if checkpoint:
+            import time as _time
+            when = _time.strftime("%Y-%m-%d %H:%M UTC",
+                                  _time.gmtime(float(checkpoint["ts"])))
+            keyed_cp = checkpoint.get("mode") == "hmac-sha256"
+            checkpoint_card = (
+                "<div class='card'><div class='l'>Checkpoint anchor</div>"
+                f"<div class='v green'>⚓ {_e(when)}</div>"
+                f"<div class='s'>rowid {int(checkpoint['through_rowid']):,} · "
+                f"{int(checkpoint['event_count']):,} events · "
+                f"{'signed' if keyed_cp else 'unsigned'} — verify with "
+                "<span class='num'>plutus verify-checkpoints --file</span> "
+                "against your retained copy "
+                "(<a href='/v1/checkpoints'>download</a>)</div></div>")
+        else:
+            checkpoint_card = (
+                "<div class='card'><div class='l'>Checkpoint anchor</div>"
+                "<div class='v'>—</div>"
+                "<div class='s'>no anchor yet — run <span class='num'>plutus "
+                "checkpoint</span> (auto on applied closes) and retain the "
+                "JSON out of band</div></div>")
+
     cards = f"""
     <div class="grid cards">
       <div class="card"><div class="l">Credit balance</div>
@@ -265,6 +294,7 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
         <div class="s"><span id="v-events">{w['mtd']['events']:,}</span> calls · 7d {_usd(w['7d']['cost'])}</div></div>
       {meter}
       {integrity_card}
+      {checkpoint_card}
     </div>"""
 
     # workspaces with budget bars
