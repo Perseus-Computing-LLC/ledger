@@ -628,3 +628,71 @@ class TestBodyCap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCheckpointEndpoints(unittest.TestCase):
+    """#121: record/list tamper-evidence anchors over the API."""
+
+    @classmethod
+    def setUpClass(cls):
+        fd, cls.dbpath = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        conn = db.connect(cls.dbpath)
+        cls.org_id = demo.seed(conn, events=30)
+        _, cls.key = db.create_api_key(conn, cls.org_id, name="ckpt-test")
+        conn.close()
+        ctx = app._Ctx(dict(DEFAULT_CONFIG), cls.dbpath, demo=True)
+        cls.httpd = app._Server(("127.0.0.1", 0), app.Handler, ctx)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        for ext in ("", "-wal", "-shm"):
+            try:
+                os.unlink(cls.dbpath + ext)
+            except OSError:
+                pass
+
+    def _req(self, method, path, token=None, payload=None):
+        url = f"http://127.0.0.1:{self.port}{path}"
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        data = json.dumps(payload).encode() if payload is not None else None
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode())
+
+    def test_post_records_then_get_lists(self):
+        status, body = self._req("POST", "/v1/checkpoints", token=self.key, payload={})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["recorded"])
+        cp = body["checkpoint"]
+        self.assertEqual(cp["org_id"], self.org_id)
+        self.assertTrue(cp["head_hash"])
+        self.assertGreater(cp["event_count"], 0)
+
+        status, body = self._req("GET", "/v1/checkpoints", token=self.key)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["org_id"], self.org_id)
+        self.assertEqual(len(body["checkpoints"]), 1)
+        self.assertEqual(body["checkpoints"][0]["head_hash"], cp["head_hash"])
+        self.assertIn("out of band", body["note"])
+
+    def test_post_requires_bearer(self):
+        status, body = self._req("POST", "/v1/checkpoints", payload={})
+        self.assertEqual(status, 401)
+
+    def test_post_is_idempotent_per_head(self):
+        s1, b1 = self._req("POST", "/v1/checkpoints", token=self.key, payload={})
+        s2, b2 = self._req("POST", "/v1/checkpoints", token=self.key, payload={})
+        self.assertEqual((s1, s2), (200, 200))
+        self.assertEqual(b1["checkpoint"]["through_rowid"],
+                         b2["checkpoint"]["through_rowid"])

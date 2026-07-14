@@ -122,6 +122,43 @@ key-holder can confirm the retained anchor was not itself forged. Omitting
 accidental corruption but is **weaker**, since an operator could rewrite those
 rows too. The strong guarantee requires a `--file` copy held out of band.
 
+## Operational checkpoints (#121)
+
+A checkpoint that is never taken protects nothing, and one that only lives in
+the operator's database protects little. #121 makes both failure modes hard:
+
+**Auto-capture on period close.** Every *applied* `plutus close` records a
+fresh anchor for the org (`--no-checkpoint` opts out), so a routine monthly
+cron leaves each billing period pinned without operator action. The anchor is
+included in the close's JSON output and printed for retention.
+
+**API + dashboard.**
+
+```bash
+curl -H "Authorization: Bearer plutus_sk_…" -X POST https://…/v1/checkpoints  # record now
+curl -H "Authorization: Bearer plutus_sk_…"        https://…/v1/checkpoints   # list/download
+```
+
+The customer calls `GET /v1/checkpoints` with **their own key** and stores the
+response wherever the operator can't reach — that pull, not the endpoint
+itself, is what creates independence. The dashboard shows the latest anchor
+(date, rowid, event count, signed/unsigned) next to the ledger-integrity tile,
+with a download link.
+
+**Out-of-band delivery: emailed receipts.** `plutus checkpoint --deliver` and
+`plutus close --apply --deliver` email each new anchor via the `alerts` SMTP
+config; the JSON line in the message body *is* the retained anchor, and the
+recipient's mailbox is the independent store. Offline-safe: unconfigured SMTP
+degrades to a dry run that says exactly what's missing.
+
+**Trust model, spelled out.** The guarantee chain is: hash chain (tamper-
+*evident*) → keyed MAC (no re-chaining without the key) → retained checkpoint
+(no history rewrite below a head someone else holds). Each layer only pays off
+if its secret/artifact lives outside the operator's blast radius: the HMAC key
+with the customer, the anchor in their mailbox / object-lock bucket / git
+history. In-DB-only anchors are the documented weak fallback — they catch
+corruption and casual tampering, not a motivated operator with DB access.
+
 ## Migration & scope
 
 - **Schema v6, additive.** `prev_hash`/`row_hash` are nullable and added by the

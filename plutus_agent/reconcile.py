@@ -274,7 +274,9 @@ def previous_month_label(now_ts: Optional[float] = None) -> str:
 def close_period(conn, org_id: str, period_label: str, *,
                  providers: Optional[list] = None, apply: bool = False,
                  fetchers: Optional[dict] = None,
-                 ts: Optional[float] = None) -> dict:
+                 ts: Optional[float] = None,
+                 checkpoint: bool = True,
+                 hmac_key: Optional[bytes] = None) -> dict:
     """Fetch each provider's authoritative total for ``period_label`` and
     reconcile the org's ledger to it — the unattended fetch → reconcile step
     (#109) behind the cron close.
@@ -286,6 +288,12 @@ def close_period(conn, org_id: str, period_label: str, *,
     A provider whose fetch fails is reported in ``fetch_errors`` and left OUT of
     the reconcile input, so the ledger is never zeroed on a failed fetch. Dry-run
     by default; nothing is written unless ``apply`` is True.
+
+    #121: an APPLIED close also records a tamper-evidence checkpoint for the
+    org (``checkpoint=False`` opts out), so every billing period ends with a
+    fresh anchor the customer can retain out of band — a checkpoint that is
+    never taken protects nothing. The anchor is returned as ``out["checkpoint"]``
+    (``None`` on dry runs, opt-out, or an org with no chained events).
     """
     from . import fetchers as _fetchers  # lazy: keep provider SDKs off the import path
     start_ts, end_ts = month_window(period_label)
@@ -299,4 +307,8 @@ def close_period(conn, org_id: str, period_label: str, *,
     out["providers_requested"] = list(providers)
     out["fetch_errors"] = fetch_errors
     out["fetched"] = {k: round(v, 6) for k, v in totals.items()}
+    out["checkpoint"] = None
+    if apply and checkpoint:
+        from . import db as _db
+        out["checkpoint"] = _db.checkpoint_chain(conn, org_id, hmac_key=hmac_key, ts=ts)
     return out
