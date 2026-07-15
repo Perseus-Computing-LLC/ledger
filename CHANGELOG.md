@@ -4,6 +4,18 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Quantization as a cost-model dimension** (#128). The precision a model is
+  served at (fp16 / fp8 / nvfp4 / int8 / int4 / 1bit) is now a first-class lever
+  in pricing: `pricing.resolve_precision_multiplier()` and a new
+  `quantization=` argument to `pricing.estimate_cost()` scale per-token inference
+  cost by a precision multiplier. Multipliers default to **1.0 (no assumed
+  savings)** for every tier and for any unrecognized input — so an uncalibrated
+  deployment can never over-report savings. Real multipliers are supplied from
+  *measured* artifacts (perseus-vault#630) via `pricing.quantization` in
+  `~/.plutus/config.yaml`, never from vendor-published claims. See
+  [docs/quantization-cost-model.md](docs/quantization-cost-model.md).
+
 ### Changed
 - **Savings-share default is now 10%** (was 18%). `billing.savings_share_pct`
   defaults to `0.10` and `savings.DEFAULT_RATE_BPS` to `1000`; per-run `--rate`
