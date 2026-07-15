@@ -162,6 +162,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Override provider price tables here, shaped:
         # overrides: { anthropic: { claude-opus-4-8: {input: 15, output: 75} } }
         "overrides": {},
+        # Quantization/precision multipliers on per-token inference cost, shaped:
+        # quantization: { nvfp4: 0.55, int4: 0.5 } (see pricing.QUANTIZATION_TIERS).
+        # Empty by default (every tier = 1.0, no assumed savings). Populate with
+        # MEASURED multipliers (perseus-vault#630), never vendor-published claims.
+        "quantization": {},
         # Free-tier quota: when an org on a limited tier exceeds its monthly
         # tracked-token allowance, events are still recorded but flagged
         # ``over_free_limit`` so the dashboard can nudge an upgrade. Flip

@@ -246,6 +246,56 @@ PRICE_TABLE: dict[str, dict[str, ModelPrice]] = {
 }
 
 
+# ------------------------------------------------- quantization / precision ---
+# Serving models at lower numeric precision (fp8, nvfp4, int4, ...) reduces the
+# per-token *inference* cost. Plutus models this as a precision **multiplier** on
+# the resolved per-token cost: cost_at_precision = base_cost * multiplier.
+#
+# The tiers below are just a recognized taxonomy — NOT a claim about savings. The
+# multipliers default to 1.0 (identity: no assumed savings) on purpose. Real
+# multipliers are populated from *measured* quality/latency/cost artifacts
+# (perseus-vault#630 lands the INT8 / 1-bit / NVFP4 numbers), never from
+# vendor-published "1.73x / ~2x" figures. Until a tier is calibrated with a
+# measured multiplier — via ``pricing.quantization`` in ``~/.plutus/config.yaml``
+# or the ``overrides`` arg — quoting a quantization tier changes nothing, so an
+# uncalibrated deployment can never over-report savings.
+QUANTIZATION_TIERS = ("fp16", "fp8", "nvfp4", "int8", "int4", "1bit")
+
+# tier -> multiplier on per-token inference cost. All 1.0 until measured; see the
+# note above. Override with measured values, e.g.
+# ``pricing: {quantization: {nvfp4: 0.55}}``.
+PRECISION_MULTIPLIERS: dict[str, float] = {t: 1.0 for t in QUANTIZATION_TIERS}
+
+
+def resolve_precision_multiplier(
+    quantization: Optional[str],
+    overrides: Optional[dict] = None,
+) -> tuple[float, bool]:
+    """Resolve ``(multiplier, known)`` for a quantization tier.
+
+    ``multiplier`` scales the per-token inference cost (1.0 = no change).
+    ``known`` is ``True`` only when the tier was matched in ``overrides`` (the
+    ``pricing.quantization`` config block) or in :data:`PRECISION_MULTIPLIERS`.
+    An unrecognized tier — or ``None`` — resolves to ``(1.0, False)`` so an
+    unknown precision is a safe no-op, never a silent discount.
+
+    ``overrides`` is shaped ``{tier: multiplier}`` and takes precedence over the
+    built-in defaults, so measured artifacts (perseus-vault#630) can be dropped
+    in without a code change.
+    """
+    if not quantization:
+        return 1.0, False
+    tier_key = str(quantization).lower()
+    if overrides and tier_key in overrides:
+        try:
+            return float(overrides[tier_key]), True
+        except (TypeError, ValueError):
+            return 1.0, False
+    if tier_key in PRECISION_MULTIPLIERS:
+        return PRECISION_MULTIPLIERS[tier_key], True
+    return 1.0, False
+
+
 def resolve_price(provider: str, model: Optional[str] = None,
                   overrides: Optional[dict] = None) -> tuple[ModelPrice, bool]:
     """Resolve ``(price, exact)`` for (provider, model), honoring config overrides.
@@ -294,8 +344,18 @@ def model_price(provider: str, model: Optional[str] = None,
 def estimate_cost(provider: str, model: Optional[str],
                   input_tokens: int, output_tokens: int,
                   cache_read_tokens: int = 0, reasoning_tokens: int = 0,
-                  overrides: Optional[dict] = None) -> float:
-    """Estimate USD cost of a usage event from token counts."""
+                  overrides: Optional[dict] = None,
+                  quantization: Optional[str] = None,
+                  quantization_overrides: Optional[dict] = None) -> float:
+    """Estimate USD cost of a usage event from token counts.
+
+    ``quantization`` optionally names a precision tier (see
+    :data:`QUANTIZATION_TIERS`); the resolved per-token cost is scaled by that
+    tier's multiplier (:func:`resolve_precision_multiplier`, honoring
+    ``quantization_overrides``). Omitted or uncalibrated → no change.
+    """
     price = model_price(provider, model, overrides)
-    return round(price.cost(input_tokens, output_tokens,
-                            cache_read_tokens, reasoning_tokens), 6)
+    base = price.cost(input_tokens, output_tokens,
+                      cache_read_tokens, reasoning_tokens)
+    mult, _ = resolve_precision_multiplier(quantization, quantization_overrides)
+    return round(base * mult, 6)
