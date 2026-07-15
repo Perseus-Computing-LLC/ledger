@@ -55,6 +55,11 @@ def chat(base_url, model, user, timeout=120):
         "model": model,
         "messages": [{"role": "user", "content": user}],
         "tools": TOOLS,
+        # "auto": the model decides which tool (if any) to call. This measures
+        # real tool-selection judgment. NOTE: "required" forces a call but on
+        # some serving stacks collapses to a single tool (grammar artifact), so
+        # it's unreliable for a precision-retention comparison — use auto on a
+        # capable model (70B) that reliably calls tools when appropriate.
         "tool_choice": "auto",
         "temperature": 0,
     }).encode()
@@ -97,21 +102,28 @@ def main():
     a = ap.parse_args()
 
     cases = [json.loads(l) for l in Path(a.prompts).read_text(encoding="utf-8").splitlines() if l.strip()]
-    details, correct = [], 0
+    details, correct, args_correct = [], 0, 0
     for c in cases:
         try:
             resp = chat(a.base_url, a.model, c["user"])
             name, args = first_tool_call(resp)
         except Exception as exc:  # network / server error — count as a miss, record why
             name, args = None, {"_error": str(exc)}
-        ok = case_passes(name, args, c["expect_name"], c.get("expect_args_contains"))
-        correct += int(ok)
+        # Primary metric: correct TOOL SELECTED (robust, precision-comparable).
+        name_ok = name == c["expect_name"]
+        # Secondary: did the args also carry the expected values (noisier).
+        args_ok = case_passes(name, args, c["expect_name"], c.get("expect_args_contains"))
+        correct += int(name_ok)
+        args_correct += int(args_ok)
         details.append({"user": c["user"], "expect": c["expect_name"],
-                        "got_name": name, "got_args": args, "pass": ok})
+                        "got_name": name, "got_args": args,
+                        "pass": name_ok, "args_ok": args_ok})
 
     n = len(cases)
     out = {"model": a.model, "base_url": a.base_url, "total": n,
            "correct": correct, "accuracy": round(correct / n, 4) if n else 0.0,
+           "args_correct": args_correct,
+           "args_accuracy": round(args_correct / n, 4) if n else 0.0,
            "details": details}
     json.dump(out, open(a.out, "w"), indent=2)
     print(f"{a.model}: tool-use accuracy {correct}/{n} = {out['accuracy']}  -> {a.out}")

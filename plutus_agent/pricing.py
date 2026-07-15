@@ -296,8 +296,9 @@ QUANTIZATION_TIERS = ("fp16", "fp8", "nvfp4", "int8", "int4", "1bit")
 # from measured perseus-vault#630 artifacts via config overrides.
 PRECISION_MULTIPLIERS: dict[str, float] = {
     "fp16": 1.2,   # measured: ~same quality as INT8, larger model
-    "fp8": 1.0,    # uncalibrated
-    "nvfp4": 1.0,  # uncalibrated (blocked on Blackwell)
+    "fp8": 1.0,    # baseline for the NVFP4 measurement (see benchmark/quantization)
+    "nvfp4": 0.49,  # measured (#131): 0.4881 = FP8 2676 tok/s / NVFP4 5482 tok/s,
+                    # Llama-3.3-70B on 1x B200 (nvidia NVFP4 vs RedHat FP8 ckpts)
     "int8": 1.0,   # baseline — shipped default
     "int4": 1.0,   # uncalibrated
     "1bit": 0.05,  # measured: 32× memory reduction, 91% recall@1 retention
