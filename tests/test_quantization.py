@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Tests for the quantization/precision dimension of the cost model (#128).
 
-Design contract: the precision multiplier defaults to identity (1.0) for every
-recognized tier and for unrecognized input, so an uncalibrated deployment can
-never over-report savings. Measured multipliers (perseus-vault#630) arrive via
-config/overrides — never vendor-published claims — and only then change cost.
+Design contract: the precision multiplier is identity (1.0) for every
+*uncalibrated* tier and for unrecognized input, so an uncalibrated deployment can
+never over-report savings. Measured tiers carry benchmark-derived values (never
+vendor claims): 1bit / fp16 from perseus-vault#630, nvfp4 from the #131 B200
+LLM-serving benchmark. Config overrides always take precedence.
 """
 import os
 import sys
@@ -18,11 +19,18 @@ from plutus_agent import pricing, config as cfgmod
 class TestPrecisionMultiplier(unittest.TestCase):
     def test_defaults_are_identity(self):
         # Uncalibrated tiers are 1.0 — no assumed savings.
-        UNCALIBRATED = {"fp8", "nvfp4", "int4"}
+        UNCALIBRATED = {"fp8", "int4"}
         for tier in UNCALIBRATED:
             mult, known = pricing.resolve_precision_multiplier(tier)
             self.assertTrue(known, tier)
             self.assertEqual(mult, 1.0, tier)
+
+    def test_nvfp4_is_measured(self):
+        # nvfp4 is populated from the #131 B200 LLM-serving benchmark
+        # (FP8 2676 tok/s vs NVFP4 5482 tok/s -> ~0.49 cost multiplier).
+        mult, known = pricing.resolve_precision_multiplier("nvfp4")
+        self.assertTrue(known)
+        self.assertEqual(mult, 0.49)
 
     def test_1bit_is_measured(self):
         # 1bit is now populated from perseus-vault#630 benchmark data.
@@ -52,7 +60,8 @@ class TestPrecisionMultiplier(unittest.TestCase):
         self.assertFalse(known)
 
     def test_case_insensitive(self):
-        self.assertEqual(pricing.resolve_precision_multiplier("NVFP4")[0], 1.0)
+        # "NVFP4" normalizes to the measured nvfp4 tier (0.49); an override wins.
+        self.assertEqual(pricing.resolve_precision_multiplier("NVFP4")[0], 0.49)
         self.assertEqual(
             pricing.resolve_precision_multiplier("NVFP4", {"nvfp4": 0.5})[0], 0.5
         )
@@ -70,12 +79,21 @@ class TestPrecisionMultiplier(unittest.TestCase):
 
 
 class TestEstimateCostWithQuantization(unittest.TestCase):
-    def test_default_matches_unquantized(self):
+    def test_uncalibrated_tier_matches_unquantized(self):
+        # An uncalibrated tier (int4) applies no discount — no free lunch.
+        base = pricing.estimate_cost("anthropic", "claude-opus-4-8", 1_000_000, 0)
+        quoted = pricing.estimate_cost(
+            "anthropic", "claude-opus-4-8", 1_000_000, 0, quantization="int4"
+        )
+        self.assertEqual(base, quoted)
+
+    def test_measured_nvfp4_scales_cost(self):
+        # nvfp4 now carries a measured multiplier (#131) -> cost scales by ~0.49.
         base = pricing.estimate_cost("anthropic", "claude-opus-4-8", 1_000_000, 0)
         quoted = pricing.estimate_cost(
             "anthropic", "claude-opus-4-8", 1_000_000, 0, quantization="nvfp4"
         )
-        self.assertEqual(base, quoted)  # identity default, no free lunch
+        self.assertAlmostEqual(quoted, base * 0.49, places=6)
 
     def test_measured_override_scales_cost(self):
         base = pricing.estimate_cost("anthropic", "claude-opus-4-8", 1_000_000, 0)
