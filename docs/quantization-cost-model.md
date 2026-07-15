@@ -36,10 +36,10 @@ ratios (INT8 is already the Vault's shipped default embedding path).
 |-------|-----------|--------|
 | int8  | 1.00      | Vault shipped default (baseline) |
 | 1bit  | 0.05      | perseus-vault#630 row 1: 32× memory reduction, ~91% recall@1 retention vs dense |
+| fp16  | 1.20      | perseus-vault#630 row 2: equivalent quality to INT8 (0.989 cosine), larger model (86MB vs 23MB) |
 | fp8   | 1.00      | Uncalibrated |
 | nvfp4 | 1.00      | Uncalibrated (blocked on Blackwell hardware) |
 | int4  | 1.00      | Uncalibrated |
-| fp16  | 1.00      | Uncalibrated |
 
 **1-bit benchmark details (2026-07-15):** 24-memory paraphrase-heavy recall
 dataset, all-MiniLM-L6-v2 (384-dim quantized ONNX), pure sign-quantized Hamming
@@ -52,10 +52,22 @@ ranking vs Vault dense (cosine). Measured on CPU.
 | recall@5  | 100.0%    | 100.0%     | 1.000 |
 | MRR       | 0.894     | 0.948      | 0.943 |
 
-The 1bit multiplier (0.05) is a conservative lower-bound estimate: the raw memory
-bandwidth ratio is 0.031 (48-byte signature vs 1,536-byte f32 embedding), and the
-quality retention is ~91% at recall@1. The multiplier errs well above the hardware
-floor to leave room for the rerank-pool overhead in the two-phase path.
+Memory: 48 bytes/signature vs 1,536 bytes/f32 embedding = 32× reduction.
+
+**FP32 vs INT8 benchmark details (2026-07-15):** 2,000-entity synthetic corpus,
+batch-embedded with both models. Direct embedding quality comparison.
+
+| Metric | Value |
+|--------|-------|
+| Mean cosine (same text) | 0.989 |
+| Top-1 NN agreement | 71% |
+| Top-100 NN agreement | 85% |
+| Mean Spearman's ρ | 0.982 |
+| Model size | INT8: 23MB, FP32: 86MB (3.7×) |
+
+INT8 and FP32/FP16 embeddings are practically indistinguishable for retrieval.
+INT8 is both the quality and efficiency winner. fp16 multiplier is set to 1.2
+to reflect the larger model footprint.
 
 Drop measured ratios into config without a code change:
 
@@ -89,11 +101,36 @@ cost = pricing.estimate_cost(
 `QUANTIZATION_TIERS` is the recognized taxonomy; `PRECISION_MULTIPLIERS` holds
 the (identity) defaults.
 
-## Not yet done: quantization-aware routing
+## Quantization-aware routing
 
-The issue's sketch also floats preferring a cheaper quantization in
-`plutus_route.py` when the quality delta is acceptable. That is a **follow-up**,
-intentionally not built here: it needs (1) per-model quantization metadata the
-router doesn't yet carry and (2) the measured multipliers above. Wiring it before
-those exist would mean routing on guessed ratios — exactly what the 1.0 default
-is there to prevent.
+`plutus_route.py` includes a `quantization-aware` policy (#128 step 3) that
+applies precision multipliers to model costs and re-ranks providers by effective
+cost (`base_cost × multiplier`). A configurable quality floor
+(`quality_min_retention`, default 0.90) filters out quantization tiers whose
+measured quality retention falls below the threshold.
+
+```bash
+# Route with quantization-aware cost optimization
+python plutus_route.py --policy quantization-aware --dry-run
+
+# Stack with other policies:
+python plutus_route.py --policy "quantization-aware,cost-prefer-cheapest" --dry-run
+```
+
+Configuration in `plutus.budgets.json`:
+
+```json
+{
+  "routing": {
+    "policy": "quantization-aware",
+    "quality_min_retention": 0.90
+  }
+}
+```
+
+Per-model quantization availability is in `MODEL_QUANTIZATION_TIERS` (currently
+fp16/fp8 for all models). As providers deploy NVFP4 on Blackwell/Rubin hardware,
+add tiers to this table and populate the corresponding precision multipliers.
+
+All policy decisions are logged to `plutus.routing.jsonl` with the effective
+cost computation visible in the policy notes.
