@@ -1,0 +1,10 @@
+{"user": "What's the weather in Tokyo right now? Use fahrenheit.", "expect_name": "get_weather", "expect_args_contains": {"city": "tokyo", "unit": "fahrenheit"}}
+{"user": "Look up the latest news on the NVFP4 format.", "expect_name": "web_search", "expect_args_contains": {"query": "nvfp4"}}
+{"user": "What is 1875 divided by 3, plus 42?", "expect_name": "calculator", "expect_args_contains": {"expression": "1875"}}
+{"user": "Email alice@example.com with the subject 'Q3 numbers' letting her know the report is ready.", "expect_name": "send_email", "expect_args_contains": {"to": "alice@example.com", "subject": "Q3"}}
+{"user": "How much is NVDA trading at?", "expect_name": "get_stock_price", "expect_args_contains": {"ticker": "NVDA"}}
+{"user": "Is it going to be cold in Oslo today?", "expect_name": "get_weather", "expect_args_contains": {"city": "oslo"}}
+{"user": "Find recent papers about 4-bit quantized inference.", "expect_name": "web_search", "expect_args_contains": {"query": "quantized"}}
+{"user": "Compute 17 percent of 2400.", "expect_name": "calculator", "expect_args_contains": {"expression": "2400"}}
+{"user": "Get the current share price for Apple.", "expect_name": "get_stock_price", "expect_args_contains": {"ticker": "AAPL"}}
+{"user": "Send bob@corp.io a note titled 'Lunch' asking if noon works.", "expect_name": "send_email", "expect_args_contains": {"to": "bob@corp.io", "subject": "Lunch"}}
