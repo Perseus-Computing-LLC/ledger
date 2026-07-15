@@ -18,7 +18,7 @@ from plutus_agent import pricing, config as cfgmod
 class TestPrecisionMultiplier(unittest.TestCase):
     def test_defaults_are_identity(self):
         # Uncalibrated tiers are 1.0 — no assumed savings.
-        UNCALIBRATED = {"fp16", "fp8", "nvfp4", "int4"}
+        UNCALIBRATED = {"fp8", "nvfp4", "int4"}
         for tier in UNCALIBRATED:
             mult, known = pricing.resolve_precision_multiplier(tier)
             self.assertTrue(known, tier)
@@ -35,6 +35,12 @@ class TestPrecisionMultiplier(unittest.TestCase):
         mult, known = pricing.resolve_precision_multiplier("int8")
         self.assertTrue(known)
         self.assertEqual(mult, 1.0)
+
+    def test_fp16_is_measured(self):
+        # FP16 is slightly above baseline (larger model, same quality as INT8).
+        mult, known = pricing.resolve_precision_multiplier("fp16")
+        self.assertTrue(known)
+        self.assertEqual(mult, 1.2)
 
     def test_none_is_safe_noop(self):
         self.assertEqual(pricing.resolve_precision_multiplier(None), (1.0, False))

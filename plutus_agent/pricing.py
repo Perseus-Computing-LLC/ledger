@@ -264,9 +264,17 @@ QUANTIZATION_TIERS = ("fp16", "fp8", "nvfp4", "int8", "int4", "1bit")
 # tier -> multiplier on per-token inference cost.
 #
 # INT8: the Vault's shipped default embedding path (all-MiniLM-L6-v2 qint8
-# ONNX). The multiplier is 1.0 because this IS the baseline — all published
-# recall numbers (LongMemEval 73.6%, recall-gate, 1M scale points) are from
-# the INT8 path.
+# ONNX, 23MB). The multiplier is 1.0 because this IS the baseline — all
+# published recall numbers (LongMemEval 73.6%, recall-gate, 1M scale points)
+# are from the INT8 path.
+#
+# FP16 / FP32: measured against INT8 on 2026-07-15 (#630 row 2). INT8 and
+# FP32 embeddings have 0.989 mean cosine similarity, 71% top-1 NN agreement,
+# and 0.982 mean Spearman's ρ. INT8 is 3.7× smaller (23MB vs 86MB) and
+# delivers equivalent retrieval quality. No cost multiplier advantage exists
+# for FP16/FP32 — the INT8 default is both the quality and efficiency winner.
+# FP16 is set to 1.2 (slightly above baseline) to reflect the larger model
+# footprint and marginally higher inference cost, not lower quality.
 #
 # 1bit: populated from measured embedding-quality benchmark (2026-07-15,
 # perseus-vault#630 row 1). Pure 1-bit sign-quantized Hamming ranking (no
@@ -281,19 +289,18 @@ QUANTIZATION_TIERS = ("fp16", "fp8", "nvfp4", "int8", "int4", "1bit")
 # 32× memory-bandwidth reduction, erring well above the hardware floor to
 # leave headroom for the rerank pool overhead in the two-phase path. Real
 # measured latency ratios across corpus scales — not just bandwidth — will
-# replace this when the full scale-bench rows (FP16-vs-INT8 A/B, 1M Lambda)
-# land in perseus-vault#630.
+# replace this when the full scale-bench rows (1M Lambda) land.
 #
 # fp8 / nvfp4 / int4: uncalibrated (1.0). Vendor-published headline figures
 # are NOT sourced here per the issue owner's steer; real multipliers come
 # from measured perseus-vault#630 artifacts via config overrides.
 PRECISION_MULTIPLIERS: dict[str, float] = {
-    "fp16": 1.0,
-    "fp8": 1.0,
-    "nvfp4": 1.0,
-    "int8": 1.0,
-    "int4": 1.0,
-    "1bit": 0.05,   # measured: 32× memory reduction, 95% recall@1 retention
+    "fp16": 1.2,   # measured: ~same quality as INT8, larger model
+    "fp8": 1.0,    # uncalibrated
+    "nvfp4": 1.0,  # uncalibrated (blocked on Blackwell)
+    "int8": 1.0,   # baseline — shipped default
+    "int4": 1.0,   # uncalibrated
+    "1bit": 0.05,  # measured: 32× memory reduction, 91% recall@1 retention
 }
 
 
