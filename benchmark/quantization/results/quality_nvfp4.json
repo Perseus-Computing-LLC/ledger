@@ -1,0 +1,117 @@
+{
+  "model": "nvidia/Llama-3.3-70B-Instruct-FP4",
+  "base_url": "http://127.0.0.1:30000/v1",
+  "total": 10,
+  "correct": 10,
+  "accuracy": 1.0,
+  "args_correct": 10,
+  "args_accuracy": 1.0,
+  "details": [
+    {
+      "user": "What's the weather in Tokyo right now? Use fahrenheit.",
+      "expect": "get_weather",
+      "got_name": "get_weather",
+      "got_args": {
+        "city": "Tokyo",
+        "unit": "fahrenheit"
+      },
+      "pass": true,
+      "args_ok": true
+    },
+    {
+      "user": "Look up the latest news on the NVFP4 format.",
+      "expect": "web_search",
+      "got_name": "web_search",
+      "got_args": {
+        "query": "latest news on NVFP4 format"
+      },
+      "pass": true,
+      "args_ok": true
+    },
+    {
+      "user": "What is 1875 divided by 3, plus 42?",
+      "expect": "calculator",
+      "got_name": "calculator",
+      "got_args": {
+        "expression": "1875 / 3 + 42"
+      },
+      "pass": true,
+      "args_ok": true
+    },
+    {
+      "user": "Email alice@example.com with the subject 'Q3 numbers' letting her know the report is ready.",
+      "expect": "send_email",
+      "got_name": "send_email",
+      "got_args": {
+        "to": "alice@example.com",
+        "subject": "Q3 numbers",
+        "body": "The report is ready."
+      },
+      "pass": true,
+      "args_ok": true
+    },
+    {
+      "user": "How much is NVDA trading at?",
+      "expect": "get_stock_price",
+      "got_name": "get_stock_price",
+      "got_args": {
+        "ticker": "NVDA"
+      },
+      "pass": true,
+      "args_ok": true
+    },
+    {
+      "user": "Is it going to be cold in Oslo today?",
+      "expect": "get_weather",
+      "got_name": "get_weather",
+      "got_args": {
+        "city": "Oslo",
+        "unit": "celsius"
+      },
+      "pass": true,
+      "args_ok": true
+    },
+    {
+      "user": "Find recent papers about 4-bit quantized inference.",
+      "expect": "web_search",
+      "got_name": "web_search",
+      "got_args": {
+        "query": "4-bit quantized inference papers"
+      },
+      "pass": true,
+      "args_ok": true
+    },
+    {
+      "user": "Compute 17 percent of 2400.",
+      "expect": "calculator",
+      "got_name": "calculator",
+      "got_args": {
+        "expression": "0.17 * 2400"
+      },
+      "pass": true,
+      "args_ok": true
+    },
+    {
+      "user": "Get the current share price for Apple.",
+      "expect": "get_stock_price",
+      "got_name": "get_stock_price",
+      "got_args": {
+        "ticker": "AAPL"
+      },
+      "pass": true,
+      "args_ok": true
+    },
+    {
+      "user": "Send bob@corp.io a note titled 'Lunch' asking if noon works.",
+      "expect": "send_email",
+      "got_name": "send_email",
+      "got_args": {
+        "to": "bob@corp.io",
+        "subject": "Lunch",
+        "body": "Does noon work for you?"
+      },
+      "pass": true,
+      "args_ok": true
+    }
+  ]
+}

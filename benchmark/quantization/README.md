@@ -5,52 +5,59 @@ LLM, and produces the number that populates `pricing.quantization['nvfp4']` /
 `PRECISION_MULTIPLIERS` (#128). This is the per-token *serving* lever — distinct
 from the embedding-quantization question (perseus-vault#629, closed: no).
 
-**Target:** `meta-llama/Llama-3.3-70B-Instruct`, tool-use quality eval.
-**Vehicle:** one NVIDIA **Blackwell** GPU (native FP4) — e.g. RunPod 1× B200
-(192 GB), ≈ $6/h. Fits at both FP8 (~70 GB) and NVFP4 (~35 GB).
+## Measured result — Llama-3.3-70B on 1× NVIDIA B200 (2026-07-15)
 
-> ⚠️ Authored without a Blackwell GPU on hand — treat as a runbook + scaffold,
-> not a green-tested harness. Verify the SGLang flags and `bench_serving` output
-> field names against the installed version on first run (they drift across
-> releases). Serve **the same base model** at both precisions so the ratio is a
-> pure precision effect.
+| | FP8 | NVFP4 |
+|---|---|---|
+| checkpoint | `RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic` (compressed-tensors) | `nvidia/Llama-3.3-70B-Instruct-FP4` (modelopt) |
+| output throughput | 2,676 tok/s | **5,482 tok/s** |
+| $/1M output tok @ $5.89/h | $0.61 | **$0.30** |
+| tool-use selection (N=10, `tool_choice=auto`) | 10/10 | 10/10 |
 
-## Why the multiplier is hardware-price-independent
-Both precisions run on the **same pod**, so $/h cancels:
+**`nvfp4_multiplier = 0.49`** (NVFP4 ≈ 2.05× throughput → ~half the per-token cost)
+· **tool-use retention = 1.0** (no quality loss observed). Adopted into
+`plutus_agent/pricing.py` (`PRECISION_MULTIPLIERS['nvfp4']=0.49`) and the router
+floor (`plutus_route.py`), since retention cleared the quality floor. Raw
+artifacts in [`results/`](results/) (`results.json` + per-precision
+`bench_*.json` / `quality_*.json`).
 
-```
-nvfp4_multiplier = cost_nvfp4 / cost_fp8 = output_throughput_fp8 / output_throughput_nvfp4
-```
+> **Caveats.** N=10 tool-use is a coarse quality probe (no degradation *observed*,
+> not a guarantee across workloads). FP8 and NVFP4 use different quant recipes
+> (compressed-tensors vs modelopt) because **nvidia's modelopt-FP8 checkpoint
+> segfaulted in `flashinfer_bmm_fp8` during CUDA-graph capture** on this SGLang
+> build (0.5.15) — a different FP8 recipe was substituted; both are standard
+> production servings of the same base model. Re-run to refresh.
 
-The `$6/h` only feeds the absolute dashboard figure:
+## How it was run (reproduce)
 
-```
-$ / 1M output tokens = ($/h) / (3600 · tok_per_s) · 1e6   (= 1666.7 / tok_per_s at $6/h)
-```
-
-## Run
+On a Blackwell pod (RunPod 1× B200, ~$5.89/h; needs CUDA ≥12.8 / torch ≥2.7):
 
 ```bash
-# On the B200 pod:
-export HF_TOKEN=...            # Llama-3.3-70B is gated — accept the license on HF first
-pip install "sglang[all]"      # needs a build with Blackwell/FP4 support (sgl-project/sglang#26083)
+pip install "sglang[all]"                       # 0.5.15 here (Blackwell FP4: sgl-project/sglang#26083)
+# gotcha: the CUDA-13 pip libs aren't on the loader path — deep_gemm needs libnvrtc.so.13:
+export LD_LIBRARY_PATH="$(python -c 'import nvidia,os,glob;print(":".join(sorted(glob.glob(os.path.dirname(nvidia.__file__)+"/*/lib"))))')"
+export HF_HOME=/root/hf                          # authenticate HF (Llama-3.3-70B is gated)
 
-cd benchmark/quantization
-# 1) cheap smoke pass first (validates the pipeline on a small model, ~minutes)
-MODEL=meta-llama/Llama-3.1-8B-Instruct ./run_bench.sh
-# 2) the real run
-MODEL=meta-llama/Llama-3.3-70B-Instruct ./run_bench.sh
-
-# 3) quality retention on the tool-use set, per precision (server must be up):
-#    launch each precision, then:
-python tooluse_eval.py --base-url http://127.0.0.1:30000/v1 --model $MODEL --out quality_fp8.json
-python tooluse_eval.py --base-url http://127.0.0.1:30000/v1 --model $MODEL --out quality_nvfp4.json
+# bench_one.sh serves ONE (pre-quantized) checkpoint, runs sglang.bench_serving,
+# scores tool-use, tears down. Run once per precision (sequential fits <200GB disk):
+NUM_PROMPTS=500 IN=1024 OUTLEN=512 ./bench_one.sh fp8   RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic compressed-tensors
+NUM_PROMPTS=500 IN=1024 OUTLEN=512 ./bench_one.sh nvfp4 nvidia/Llama-3.3-70B-Instruct-FP4          modelopt_fp4
 ```
 
-`run_bench.sh` serves each precision, runs `sglang.bench_serving`, records output
-throughput, and writes `results.json` with the computed multiplier + $/1M-token
-figures. `tooluse_eval.py` scores a pinned tool-use set (`prompts_tooluse.jsonl`)
-against the live OpenAI-compatible endpoint; `retention = acc_nvfp4 / acc_fp8`.
+`bench_one.sh` records `output_throughput` per precision; the multiplier is
+`throughput_fp8 / throughput_nvfp4`. `tooluse_eval.py` scores the pinned set
+(`prompts_tooluse.jsonl`) against the live endpoint with **`tool_choice=auto`**
+(forced `required` collapses some stacks to one tool — see the module comment);
+`retention = toolselect_acc_nvfp4 / toolselect_acc_fp8`.
+
+> Serve NVFP4 and FP8 with `--tool-call-parser llama3` (else `tool_calls` aren't
+> parsed). `run_bench.sh` is the earlier online-quant sketch; the pre-quantized
+> two-checkpoint path above is what produced the committed result.
+
+### Why the multiplier is hardware-price-independent
+Both precisions run on the same pod, so $/h cancels: the multiplier is purely
+`throughput_fp8 / throughput_nvfp4`. The $/h only sets the absolute $/1M figure
+(`= ($/h)/(3600·tok_s)·1e6`).
 
 ## Adopt criterion (matches the router's quality floor)
 Only write `nvfp4 = throughput_fp8 / throughput_nvfp4` into

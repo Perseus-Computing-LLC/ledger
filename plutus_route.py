@@ -128,8 +128,9 @@ QUANTIZATION_QUALITY_FLOOR = {
     "1bit": 0.90,   # measured: ~91% recall@1 vs binary dense
     "int8": 1.00,   # baseline
     "int4": 1.00,   # uncalibrated
-    "nvfp4": 1.00,  # uncalibrated
-    "fp8":  1.00,   # uncalibrated
+    "nvfp4": 1.00,  # measured (#131): 1.0 tool-use retention (10/10 tool-select,
+                    # Llama-3.3-70B NVFP4 vs FP8 on B200; N=10 — see benchmark/quantization)
+    "fp8":  1.00,   # baseline for the NVFP4 measurement
     "fp16": 0.99,   # measured: 0.989 cosine vs INT8, NN agreement 71-85%
 }
 

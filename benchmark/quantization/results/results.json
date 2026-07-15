@@ -1,0 +1,23 @@
+{
+  "model": "Llama-3.3-70B-Instruct \u2014 FP8 vs NVFP4 (1x B200)",
+  "gpu": "1x NVIDIA B200",
+  "cost_per_hour_usd": 5.89,
+  "quality_eval": "tool-use, tool_choice=auto, N=10 (tool-selection accuracy)",
+  "note": "FP8=RedHatAI compressed-tensors w8a8; NVFP4=nvidia modelopt fp4; same base model.",
+  "fp8": {
+    "ckpt": "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic",
+    "output_tok_s": 2675.7,
+    "usd_per_1M_out": 0.6115,
+    "toolselect_acc": 1.0,
+    "args_acc": 1.0
+  },
+  "nvfp4": {
+    "ckpt": "nvidia/Llama-3.3-70B-Instruct-FP4",
+    "output_tok_s": 5481.8,
+    "usd_per_1M_out": 0.2985,
+    "toolselect_acc": 1.0,
+    "args_acc": 1.0
+  },
+  "nvfp4_multiplier": 0.4881,
+  "tooluse_retention": 1.0
+}
