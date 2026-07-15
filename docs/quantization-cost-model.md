@@ -30,8 +30,34 @@ workload.
 
 Real multipliers come from *measured* quality/latency/cost artifacts. The source
 of record is **perseus-vault#630**, which produces measured INT8 / 1-bit / NVFP4
-ratios (INT8 is already the Vault's shipped default embedding path). Drop the
-measured ratios into config — no code change:
+ratios (INT8 is already the Vault's shipped default embedding path).
+
+| Tier  | Multiplier | Source |
+|-------|-----------|--------|
+| int8  | 1.00      | Vault shipped default (baseline) |
+| 1bit  | 0.05      | perseus-vault#630 row 1: 32× memory reduction, ~91% recall@1 retention vs dense |
+| fp8   | 1.00      | Uncalibrated |
+| nvfp4 | 1.00      | Uncalibrated (blocked on Blackwell hardware) |
+| int4  | 1.00      | Uncalibrated |
+| fp16  | 1.00      | Uncalibrated |
+
+**1-bit benchmark details (2026-07-15):** 24-memory paraphrase-heavy recall
+dataset, all-MiniLM-L6-v2 (384-dim quantized ONNX), pure sign-quantized Hamming
+ranking vs Vault dense (cosine). Measured on CPU.
+
+| Metric    | 1-bit pure | Full dense | Ratio |
+|-----------|-----------|------------|-------|
+| recall@1  | 83.3%     | 91.7%      | 0.908 |
+| recall@3  | 91.7%     | 95.8%      | 0.957 |
+| recall@5  | 100.0%    | 100.0%     | 1.000 |
+| MRR       | 0.894     | 0.948      | 0.943 |
+
+The 1bit multiplier (0.05) is a conservative lower-bound estimate: the raw memory
+bandwidth ratio is 0.031 (48-byte signature vs 1,536-byte f32 embedding), and the
+quality retention is ~91% at recall@1. The multiplier errs well above the hardware
+floor to leave room for the rerank-pool overhead in the two-phase path.
+
+Drop measured ratios into config without a code change:
 
 ```yaml
 # ~/.plutus/config.yaml

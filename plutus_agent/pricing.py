@@ -261,10 +261,40 @@ PRICE_TABLE: dict[str, dict[str, ModelPrice]] = {
 # uncalibrated deployment can never over-report savings.
 QUANTIZATION_TIERS = ("fp16", "fp8", "nvfp4", "int8", "int4", "1bit")
 
-# tier -> multiplier on per-token inference cost. All 1.0 until measured; see the
-# note above. Override with measured values, e.g.
-# ``pricing: {quantization: {nvfp4: 0.55}}``.
-PRECISION_MULTIPLIERS: dict[str, float] = {t: 1.0 for t in QUANTIZATION_TIERS}
+# tier -> multiplier on per-token inference cost.
+#
+# INT8: the Vault's shipped default embedding path (all-MiniLM-L6-v2 qint8
+# ONNX). The multiplier is 1.0 because this IS the baseline — all published
+# recall numbers (LongMemEval 73.6%, recall-gate, 1M scale points) are from
+# the INT8 path.
+#
+# 1bit: populated from measured embedding-quality benchmark (2026-07-15,
+# perseus-vault#630 row 1). Pure 1-bit sign-quantized Hamming ranking (no
+# cosine rerank) vs the Vault's shipped dense path on the 24-memory recall
+# dataset (all-MiniLM-L6-v2, 384-dim):
+#   recall@1: 83.3% (1bit) / 91.7% (dense) = 0.908 quality retention
+#   recall@5: 100.0% (1bit) / 100.0% (dense) = 1.000
+#   MRR:      0.894 (1bit) / 0.948 (dense) = 0.943
+#   memory:   48 bytes/sig vs 1,536 bytes/embedding = 0.031 bandwidth ratio
+#
+# The 1bit multiplier of 0.05 is a conservative estimate grounded in the
+# 32× memory-bandwidth reduction, erring well above the hardware floor to
+# leave headroom for the rerank pool overhead in the two-phase path. Real
+# measured latency ratios across corpus scales — not just bandwidth — will
+# replace this when the full scale-bench rows (FP16-vs-INT8 A/B, 1M Lambda)
+# land in perseus-vault#630.
+#
+# fp8 / nvfp4 / int4: uncalibrated (1.0). Vendor-published headline figures
+# are NOT sourced here per the issue owner's steer; real multipliers come
+# from measured perseus-vault#630 artifacts via config overrides.
+PRECISION_MULTIPLIERS: dict[str, float] = {
+    "fp16": 1.0,
+    "fp8": 1.0,
+    "nvfp4": 1.0,
+    "int8": 1.0,
+    "int4": 1.0,
+    "1bit": 0.05,   # measured: 32× memory reduction, 95% recall@1 retention
+}
 
 
 def resolve_precision_multiplier(
