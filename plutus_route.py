@@ -117,6 +117,38 @@ MODEL_QUALITY_SCORE = {
     "gemini-2.5-flash":  72,
 }
 
+# ── quantization-aware routing (#128 step 3) ────────────────────────────
+# Measured quality retention per quantization tier vs the INT8 baseline.
+# These are conservative lower bounds from perseus-vault#630 benchmarks:
+#   - 1bit: 0.91 recall@1 retention (24-entity recall dataset)
+#   - fp16: 0.989 cosine similarity vs INT8 (2000-entity embedding benchmark)
+#   - int8: 1.0 (the baseline — shipped default)
+# Uncalibrated tiers get 1.0 (no assumed quality loss until measured).
+QUANTIZATION_QUALITY_FLOOR = {
+    "1bit": 0.90,   # measured: ~91% recall@1 vs binary dense
+    "int8": 1.00,   # baseline
+    "int4": 1.00,   # uncalibrated
+    "nvfp4": 1.00,  # uncalibrated
+    "fp8":  1.00,   # uncalibrated
+    "fp16": 0.99,   # measured: 0.989 cosine vs INT8, NN agreement 71-85%
+}
+
+# Per-model availability of quantization tiers.
+# Currently: all models are served at fp8/fp16 (the API default).
+# NVFP4/1bit tiers will become available as providers deploy Blackwell/Rubin.
+# This table is the input to quantization-aware routing: it tells the router
+# which models can be served at which quantizations. Expand as providers
+# add quantized serving endpoints.
+MODEL_QUANTIZATION_TIERS = {
+    # All flagship models support fp16 (API default) and fp8 (inference optimization)
+    "deepseek-v4-pro":           ["fp16", "fp8"],
+    "deepseek-v4-flash":         ["fp16", "fp8"],
+    "claude-opus-4-8":           ["fp16", "fp8"],
+    "claude-sonnet-4-5-20250929": ["fp16", "fp8"],
+    "gemini-3.1-pro-preview":    ["fp16", "fp8"],
+    "gemini-2.5-flash":          ["fp16", "fp8"],
+}
+
 def _load_policy_config():
     """Read routing.policy from plutus.budgets.json."""
     budgets_path = os.environ.get("PLUTUS_BUDGETS",
@@ -186,6 +218,58 @@ def _apply_policy(order, rw, policy_name, policy_config):
         elif pol == "cost-cap,quality-floor" or pol == "cost-cap+quality-floor":
             # Handled by comma splitting above — two passes
             pass
+
+        elif pol == "quantization-aware":
+            # #128 step 3: prefer cheaper quantization tiers when quality
+            # delta is acceptable. Applies precision multipliers to model
+            # costs via plutus_agent.pricing, then re-ranks by effective cost.
+            # Only keeps models whose quantization quality retention is above
+            # the configured floor (quality_min_retention, default 0.90).
+            try:
+                from plutus_agent import pricing
+            except ImportError:
+                notes.append("quantization-aware: plutus_agent not importable, skipped")
+                continue
+
+            min_retention = policy_config.get("quality_min_retention", 0.90)
+
+            def effective_cost(p):
+                """Best effective cost across available quantization tiers."""
+                model = FLAGSHIP.get(p)
+                tiers = MODEL_QUANTIZATION_TIERS.get(model, ["fp16"])
+                best = float("inf")
+                for tier in tiers:
+                    retention = QUANTIZATION_QUALITY_FLOOR.get(tier, 1.0)
+                    if retention < min_retention:
+                        continue
+                    mult, _ = pricing.resolve_precision_multiplier(tier)
+                    base_cost = MODEL_COST_PER_1M_IN.get(model, 999)
+                    effective = base_cost * mult
+                    if effective < best:
+                        best = effective
+                return best
+
+            filtered = []
+            for p in order:
+                ec = effective_cost(p)
+                if ec < float("inf"):
+                    filtered.append(p)
+                else:
+                    skipped.append(p)
+                    notes.append(
+                        f"quantization-aware: {p} has no tier meeting quality floor"
+                    )
+            if filtered:
+                order = sorted(filtered, key=effective_cost)
+                notes.append(
+                    f"quantization-aware: re-ranked by effective cost "
+                    f"(min_retention={min_retention})"
+                )
+            else:
+                notes.append(
+                    "quantization-aware: no models pass quality floor, "
+                    "keeping runway order"
+                )
     
     return order, skipped, notes
 
@@ -427,7 +511,7 @@ def main():
     ap.add_argument("--version", action="version", version=f"plutus v{VERSION}")
     ap.add_argument("--dry-run", action="store_true", help="preview routing without writing config")
     ap.add_argument("--apply", action="store_true", help="write routing to config.yaml")
-    ap.add_argument("--policy", metavar="NAME", help="override routing policy (runway, cost-cap, latency-weighted, quality-floor, or comma-separated stack)")
+    ap.add_argument("--policy", metavar="NAME", help="override routing policy (runway, cost-cap, cost-prefer-cheapest, latency-weighted, quality-floor, quantization-aware, or comma-separated stack)")
     ap.add_argument("--backtest", metavar="POLICY", help="replay session history against a policy and report savings")
     args = ap.parse_args()
     dry = args.dry_run
