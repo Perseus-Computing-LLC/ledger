@@ -14,7 +14,7 @@ live FinOps tools; the engine bridges to them via ``plutus_agent.bridge`` rather
 than importing them, so the two can ship and run independently.
 """
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 # The frozen `/v1` HTTP API contract version (SemVer), tracked in `openapi.yaml`.
 # Intentionally INDEPENDENT of `__version__`: the package ships fixes/features on
 # its own cadence, but the wire contract only bumps on an actual `/v1` change

@@ -4,6 +4,8 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-07-16
+
 ### Changed
 - **Copy aligned with shipped reality** (audit 2026-07-16). The Team tier no
   longer advertises "Attribution by user" or a team roster: usage_events has no
