@@ -352,6 +352,7 @@ components:
         over_balance: { type: boolean }
         unpriced: { type: boolean, description: "True when the cost is an estimate with no exact model price." }
         savings_usd: { type: number, description: "Per-event provable saving: max(0, baseline - cost); 0 when no baseline was recorded." }
+        baseline_usd: { type: number, nullable: true, description: "Counterfactual cost the saving was computed against; null when no baseline was recorded." }
         leaked_usd: { type: number, description: "Per-event efficiency leakage vs the on-policy optimal (#8); 0 when no optimal was recorded." }
     UsageResponse:
       type: object

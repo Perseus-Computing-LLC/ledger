@@ -832,6 +832,7 @@ class Handler(BaseHTTPRequestHandler):
                             "over_balance": res.over_balance,
                             "unpriced": res.unpriced,
                             "savings_usd": res.savings_usd,
+                            "baseline_usd": res.baseline_usd,
                             "leaked_usd": res.leaked_usd,
                         })
                     code, body = self._usage_response(
