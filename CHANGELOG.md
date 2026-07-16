@@ -4,6 +4,16 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Copy aligned with shipped reality** (audit 2026-07-16). The Team tier no
+  longer advertises "Attribution by user" or a team roster: usage_events has no
+  user column and no seat plumbing exists yet (both tracked in #136); the tier
+  now promises workspace + provider attribution, which the ledger actually
+  does. "Verifiable receipts" on the Pro tier is now "chain-verifiable ledger"
+  (checkpoint receipts in #121 are real; a packaged savings-receipt artifact is
+  not, yet). The efficiency module's docstring no longer quotes dogfood dollar
+  figures that have no committed artifact.
+
 ### Added
 - **Quantization as a cost-model dimension** (#128). The precision a model is
   served at (fp16 / fp8 / nvfp4 / int8 / int4 / 1bit) is now a first-class lever

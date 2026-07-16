@@ -26,7 +26,7 @@ Plutus is the meter that proves it.
 |---|---|---|
 | **Free** | $0 | Perseus context engine (local), Perseus Vault (local, up to 10K entities), Plutus metering (unlimited), 1 seat |
 | **Pro** | $20/mo | Everything in Free + Vault (unlimited entities), full Plutus reporting, no savings-share |
-| **Pro Team** | $50/mo | Pro for up to 5 seats + attribution by user, 25 workspaces |
+| **Pro Team** | $50/mo | Pro for up to 5 seats + attribution by workspace, 25 workspaces (per-user attribution tracked in #136) |
 | **Team** | $10/seat/mo + 10% savings-share | Pro Team at scale + mandatory savings-share on verified Perseus savings |
 | **Enterprise** | Custom | Self-hosted or dedicated, SSO, SLA, negotiated terms |
 
