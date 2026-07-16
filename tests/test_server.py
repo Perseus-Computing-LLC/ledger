@@ -316,6 +316,30 @@ class TestBatchAtomicity(unittest.TestCase):
         conn.close()
         self.assertEqual(before, after, "No tokens should have been recorded")
 
+    def test_baseline_tokens_recorded_with_savings(self):
+        # #134: token-reduction counterfactual through the API. The reduced call
+        # sent 25,497 input tokens; without the optimization it would have sent
+        # 104,180. Priced at the event's own model, the saving must be positive
+        # and the response must carry it.
+        status, body = self._post({
+            "provider": "anthropic", "model": "claude-opus-4-8",
+            "input_tokens": 25497, "output_tokens": 500,
+            "baseline_input_tokens": 104180, "baseline_output_tokens": 500,
+        })
+        self.assertEqual(status, 200)
+        self.assertTrue(body["recorded"])
+        self.assertGreater(body["savings_usd"], 0)
+
+    def test_negative_baseline_tokens_rejected(self):
+        # #134: same non-negative rule as the actual token fields; a negative
+        # counterfactual could only inflate billable savings.
+        status, body = self._post({
+            "provider": "anthropic", "input_tokens": 100,
+            "baseline_input_tokens": -1,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("baseline token", body["error"])
+
 
 class TestPrepaidHardStop(unittest.TestCase):
     """Fix #28: block_over_balance prevents debits past zero."""
