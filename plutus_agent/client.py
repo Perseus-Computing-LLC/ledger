@@ -99,8 +99,25 @@ class Meter:
               task_type: str = "general", workspace: Optional[str] = None,
               input_tokens: int = 0, output_tokens: int = 0,
               cache_read_tokens: int = 0, reasoning_tokens: int = 0,
-              cost_usd: Optional[float] = None, source: str = "sdk"):
+              cost_usd: Optional[float] = None,
+              baseline_cost_usd: Optional[float] = None,
+              baseline_model: Optional[str] = None,
+              baseline_input_tokens: Optional[int] = None,
+              baseline_output_tokens: Optional[int] = None,
+              source: str = "sdk"):
         """Meter one call. Returns a :class:`metering.MeterResult`.
+
+        Savings baselines (#134): ``record_usage`` has carried the savings-share
+        counterfactual since #7, but the SDK never exposed it, so an embedded or
+        remote integration could not record provable savings (coverage stayed
+        zero and the billboard/savings-share paths never activated). Pass ONE of:
+        ``baseline_cost_usd`` (explicit dollars), ``baseline_model`` (same token
+        counts priced at that model: model-substitution savings), or
+        ``baseline_input_tokens``/``baseline_output_tokens`` (the counterfactual
+        counts this call would have sent without the optimization, e.g. the
+        full-context prompt Perseus replaced with a recall: token-reduction
+        savings; combine with ``baseline_model`` to price them at another
+        model). Omit all (the default) and nothing changes.
 
         Prepaid hard-stop (fix #28/P1): the embedded local path enforces the same
         ``pricing.block_over_balance`` policy as the hosted ``/v1/usage`` API
@@ -125,6 +142,14 @@ class Meter:
                 event["workspace"] = workspace
             if cost_usd is not None:
                 event["cost_usd"] = cost_usd
+            if baseline_cost_usd is not None:
+                event["baseline_cost_usd"] = baseline_cost_usd
+            if baseline_model is not None:
+                event["baseline_model"] = baseline_model
+            if baseline_input_tokens is not None:
+                event["baseline_input_tokens"] = int(baseline_input_tokens)
+            if baseline_output_tokens is not None:
+                event["baseline_output_tokens"] = int(baseline_output_tokens)
             return self._track_remote(event)
 
         return metering.record_usage(
@@ -132,7 +157,11 @@ class Meter:
             task_type=task_type, workspace=workspace,
             input_tokens=input_tokens, output_tokens=output_tokens,
             cache_read_tokens=cache_read_tokens, reasoning_tokens=reasoning_tokens,
-            cost_usd=cost_usd, source=source,
+            cost_usd=cost_usd,
+            baseline_cost_usd=baseline_cost_usd, baseline_model=baseline_model,
+            baseline_input_tokens=baseline_input_tokens,
+            baseline_output_tokens=baseline_output_tokens,
+            source=source,
             pricing_overrides=self.cfg.get("pricing", {}).get("overrides"),
             alert_cfg=self.cfg.get("alerts", {}),
             block_over_limit=bool(self.cfg.get("pricing", {}).get("block_over_free_limit")),
