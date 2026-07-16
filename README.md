@@ -130,7 +130,7 @@ single lever set differently per tier (suggested → waived → mandatory):
 | Plan | Price | For | Savings-share |
 |---|---|---|---|
 | **Free** | $0 | Individuals — unlimited metering + verify you're getting your tokens | **Suggested** — an optional tip jar |
-| **Pro** | $20 / mo | Power users — full reporting, leakage, verifiable receipts, export | **Waived** — the flat price replaces it |
+| **Pro** | $20 / mo | Power users — full reporting, leakage, chain-verifiable ledger, export | **Waived** — the flat price replaces it |
 | **Team** | $10 / seat / mo | Companies — individual + aggregate attribution, admin | **Mandatory** — 10% of provable savings |
 | **Enterprise** | Custom | Org-wide FinOps — SSO, SLA, self-hosted | Negotiated |
 

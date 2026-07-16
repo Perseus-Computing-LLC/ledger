@@ -16,7 +16,7 @@ set to a different position per tier.**
 | Tier | Who | Price | Reporting | Savings-share |
 |---|---|---|---|---|
 | **Free** | Individual devs | $0, unlimited metering | Headline savings number only | **Suggested** — optional tip jar |
-| **Pro** | Power users / prosumers | $20/mo flat | Full depth + verifiable receipts | **Waived** — the flat fee replaces it |
+| **Pro** | Power users / prosumers | $20/mo flat | Full depth + chain-verifiable ledger | **Waived** — the flat fee replaces it |
 | **Team** | Companies | $10/seat/mo | Full depth + team attribution | **Mandatory** — 10% of provable savings |
 | **Enterprise** | Large orgs | Custom | Everything + SSO/SLA/self-host | Negotiated |
 

@@ -3,9 +3,11 @@
 Savings-share (:mod:`plutus_agent.savings`) measures ONE kind of efficiency:
 routing to a cheaper model than the flagship. But the dogfood reconciliation
 showed the bigger story is *sourcing* — running open models locally or on a
-subscription for a fraction of the API price. DeepSeek: 3.6B tokens worth ~$227
-at API list prices, actually billed $2.56. Claude Code: ~$310 of API-equivalent
-usage for ~$59 of credits.
+subscription for a fraction of the API price. (Illustrative dogfood example,
+no committed artifact — do not quote these numbers anywhere public: DeepSeek
+tokens worth roughly two hundred dollars at API list prices billed at a few
+dollars on subscription. The module below computes the real figures from a
+real ledger; quote THOSE.)
 
 This module computes, per org + period, three token-derived figures from the
 published price table plus one ground-truth figure:
