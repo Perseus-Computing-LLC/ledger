@@ -15,6 +15,19 @@ All notable changes to Plutus are documented here.
   figures that have no committed artifact.
 
 ### Added
+- **Savings baselines exposed end to end** (#134). `Meter.track` now accepts
+  `baseline_cost_usd` / `baseline_model` (which `record_usage` has carried since
+  #7 but the SDK never exposed, so production coverage stayed zero outside the
+  Hermes sync), and a new **token-reduction counterfactual**:
+  `baseline_input_tokens` / `baseline_output_tokens` record the token counts a
+  call would have sent *without* the optimization (e.g. the full-context prompt
+  a memory recall replaced), priced from the published table at
+  `baseline_model` if given, else at the event's own model, with the actual
+  cost floored at its own list price so a mis-recorded cost can never inflate
+  the saving. Same fields accepted per event on `POST /v1/usage` (negative
+  counts rejected 400) and documented in `openapi.yaml`. This is the mechanism
+  that lets Perseus record token-reduction savings per call, which the
+  model-substitution baseline structurally cannot see (perseus#805).
 - **Quantization as a cost-model dimension** (#128). The precision a model is
   served at (fp16 / fp8 / nvfp4 / int8 / int4 / 1bit) is now a first-class lever
   in pricing: `pricing.resolve_precision_multiplier()` and a new

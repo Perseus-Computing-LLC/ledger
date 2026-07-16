@@ -334,6 +334,10 @@ components:
         cache_read_tokens: { type: integer, default: 0 }
         reasoning_tokens: { type: integer, default: 0 }
         cost_usd: { type: number, nullable: true, description: "Exact cost; omit to estimate from tokens. Must be >= 0." }
+        baseline_cost_usd: { type: number, nullable: true, description: "Savings-share counterfactual in USD (#7): what this call would have cost without the optimization. Must be >= 0; omit for none." }
+        baseline_model: { type: string, nullable: true, description: "Savings-share counterfactual model (#7): the same token counts priced at this model's published rate (model-substitution savings). When baseline_input_tokens/baseline_output_tokens are present, prices those counterfactual counts instead." }
+        baseline_input_tokens: { type: integer, nullable: true, description: "Token-reduction counterfactual (#134): input tokens this call would have sent without the optimization (e.g. the full-context prompt a recall replaced). Priced at baseline_model if given, else this event's model. Must be >= 0." }
+        baseline_output_tokens: { type: integer, nullable: true, description: "Token-reduction counterfactual output tokens (#134). Must be >= 0." }
         external_ref: { type: string, nullable: true, description: "Per-task/per-question attribution id (e.g. an Invarium task_id) linking this event to the task that produced it." }
         source: { type: string, default: api }
     EventResult:
@@ -347,6 +351,8 @@ components:
         over_free_limit: { type: boolean }
         over_balance: { type: boolean }
         unpriced: { type: boolean, description: "True when the cost is an estimate with no exact model price." }
+        savings_usd: { type: number, description: "Per-event provable saving: max(0, baseline - cost); 0 when no baseline was recorded." }
+        leaked_usd: { type: number, description: "Per-event efficiency leakage vs the on-policy optimal (#8); 0 when no optimal was recorded." }
     UsageResponse:
       type: object
       description: |

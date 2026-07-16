@@ -742,6 +742,15 @@ class Handler(BaseHTTPRequestHandler):
             bmodel = ev.get("baseline_model")
             if bmodel is not None and not isinstance(bmodel, str):
                 return self._json(400, {"error": "baseline_model must be a string"})
+            # #134: token-reduction counterfactual counts. Same non-negative rule
+            # as the actual token fields — a negative count could only inflate
+            # the baseline and therefore billable savings.
+            try:
+                if any(ev.get(f) is not None and int(ev.get(f)) < 0 for f in (
+                        "baseline_input_tokens", "baseline_output_tokens")):
+                    return self._json(400, {"error": "baseline token fields must be non-negative"})
+            except (TypeError, ValueError):
+                return self._json(400, {"error": "baseline token fields must be integers"})
             # #8: efficiency-leakage counterfactual — same guard as the baseline.
             optimal = ev.get("optimal_cost_usd")
             if optimal is not None:
@@ -791,6 +800,12 @@ class Handler(BaseHTTPRequestHandler):
                             cost_usd=ev.get("cost_usd"),
                             baseline_cost_usd=ev.get("baseline_cost_usd"),
                             baseline_model=ev.get("baseline_model"),
+                            baseline_input_tokens=(
+                                strict_int(ev["baseline_input_tokens"])
+                                if ev.get("baseline_input_tokens") is not None else None),
+                            baseline_output_tokens=(
+                                strict_int(ev["baseline_output_tokens"])
+                                if ev.get("baseline_output_tokens") is not None else None),
                             optimal_cost_usd=ev.get("optimal_cost_usd"),
                             optimal_model=ev.get("optimal_model"),
                             external_ref=ev.get("external_ref"),

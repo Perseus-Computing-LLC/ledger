@@ -91,6 +91,8 @@ def record_usage(conn, org_id: str, provider: str,
                  cost_usd: Optional[float] = None,
                  baseline_cost_usd: Optional[float] = None,
                  baseline_model: Optional[str] = None,
+                 baseline_input_tokens: Optional[int] = None,
+                 baseline_output_tokens: Optional[int] = None,
                  optimal_cost_usd: Optional[float] = None,
                  optimal_model: Optional[str] = None,
                  external_ref: Optional[str] = None, source: str = "api",
@@ -121,7 +123,17 @@ def record_usage(conn, org_id: str, provider: str,
       then priced from Plutus's published table (honoring ``pricing_overrides``).
       Preferred: the baseline is derived from published prices on chained token
       counts, so the customer can independently reconstruct it — the client only
-      asserts *which model*, not the dollar amount.
+      asserts *which model*, not the dollar amount. This measures model
+      SUBSTITUTION savings (same work, cheaper model), or
+    * ``baseline_input_tokens`` / ``baseline_output_tokens`` (#134) — the token
+      counts the same call would have sent WITHOUT the optimization (e.g. the
+      full-context / pre-trim prompt Perseus replaced with a recall). Priced
+      from the published table at ``baseline_model`` if also given, else at
+      this event's own model. This measures token REDUCTION savings — the
+      counterfactual the model-substitution path structurally cannot see,
+      because the ledger only ever receives the already-reduced counts. The
+      caller asserts only the counterfactual token counts; the dollars stay
+      reconstructable from the published table.
 
     When resolved it is stored (and hash-chained) alongside the actual cost; the
     per-event saving is ``max(0, baseline - cost)`` and periodic savings-share
@@ -188,6 +200,15 @@ def record_usage(conn, org_id: str, provider: str,
     # net against a genuine saving elsewhere in the period.
     baseline_micros = None
     savings_usd = 0.0
+    # #134: validate counterfactual token counts up front, same rule as the
+    # actual counts (#80) — a negative count could only inflate the baseline.
+    has_baseline_tokens = (baseline_input_tokens is not None
+                           or baseline_output_tokens is not None)
+    if has_baseline_tokens:
+        b_in = int(baseline_input_tokens or 0)
+        b_out = int(baseline_output_tokens or 0)
+        if b_in < 0 or b_out < 0:
+            raise ValueError("baseline token counts must be non-negative")
     if baseline_cost_usd is not None:
         # Caller asserted an explicit baseline USD — use it as-is; the saving is
         # baseline minus the recorded actual.
@@ -198,6 +219,25 @@ def record_usage(conn, org_id: str, provider: str,
             )
         baseline_micros = db.usd_to_micros(baseline_cost_usd)
         savings_usd = round(max(0.0, baseline_cost_usd - cost_usd), 6)
+    elif has_baseline_tokens:
+        # #134: token-reduction counterfactual. Price the counterfactual counts
+        # at the named baseline model (or this event's own model), floor the
+        # recorded actual at its own list price over the ACTUAL chained counts
+        # (same defensibility rule as the routing path below: a broken/too-low
+        # cost field must not inflate the saving), and store a baseline such
+        # that (baseline - cost) equals the floored saving. Reconstructable
+        # from the chained actual counts + the asserted counterfactual counts
+        # + the published table.
+        bp, _ = pricing.resolve_price(provider, baseline_model or model,
+                                      pricing_overrides)
+        ap, _ = pricing.resolve_price(provider, model, pricing_overrides)
+        baseline_est = bp.cost(b_in, b_out, 0, 0)
+        actual_floor = ap.cost(int(input_tokens), int(output_tokens),
+                               int(cache_read_tokens), int(reasoning_tokens))
+        effective_cost = max(cost_usd, actual_floor)
+        savings_usd = round(max(0.0, baseline_est - effective_cost), 6)
+        baseline_cost_usd = round(cost_usd + savings_usd, 6)
+        baseline_micros = db.usd_to_micros(baseline_cost_usd)
     elif baseline_model:
         # Token-derived saving, immune to a mis-recorded actual cost. Both the
         # flagship baseline AND a floor for the actual are priced from the SAME
