@@ -209,8 +209,18 @@ class Meter:
             cost_usd=float(body.get("cost_usd") or 0.0),
             estimated=bool(body.get("estimated", True)),
             balance_after=float(body.get("balance_after") or 0.0), alerts=[],
+            # Fix #143: the server has returned the savings/efficiency fields
+            # since #7/#134 but this mapping predated them, so a remote track()
+            # with a baseline reported savings_usd=0.0 even though the ledger
+            # recorded the saving. Defaults keep older servers working.
+            baseline_usd=(float(body["baseline_usd"])
+                          if body.get("baseline_usd") is not None else None),
+            savings_usd=float(body.get("savings_usd") or 0.0),
+            leaked_usd=float(body.get("leaked_usd") or 0.0),
             recorded=bool(body.get("recorded", True)),
             over_free_limit=bool(body.get("over_free_limit", False)),
+            over_balance=bool(body.get("over_balance", False)),
+            unpriced=bool(body.get("unpriced", False)),
         )
 
     def _local_only(self, what: str):

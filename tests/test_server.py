@@ -152,6 +152,49 @@ class TestServer(unittest.TestCase):
         self.assertGreater(r.cost_usd, 0)
         m.close()
 
+    def test_remote_meter_maps_savings(self):
+        # #143: the live /v1/usage response has carried savings_usd/leaked_usd
+        # since #7/#134, but _track_remote's response→result mapping predated
+        # them, so a remote track() with a baseline reported savings_usd=0.0
+        # while the ledger recorded the saving. Assert the caller-visible
+        # result agrees with the live response shape.
+        m = self._remote_meter()
+        r = m.track(provider="anthropic", model="claude-opus-4-8",
+                    input_tokens=25_497, output_tokens=500,
+                    baseline_input_tokens=104_180, baseline_output_tokens=500)
+        self.assertTrue(r.recorded)
+        self.assertGreater(r.savings_usd, 0)
+        self.assertIsNotNone(r.baseline_usd)
+        self.assertAlmostEqual(r.savings_usd, r.baseline_usd - r.cost_usd,
+                               places=6)
+        self.assertEqual(r.leaked_usd, 0.0)
+        m.close()
+
+    def test_remote_meter_old_server_defaults(self):
+        # #143: an older server that omits the savings fields must map to the
+        # dataclass defaults (0.0 / None), not crash or invent a saving.
+        import urllib.request as ur
+
+        class _FakeResp:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self):
+                return b'{"recorded": true, "cost_usd": 0.01, "balance_after": 0.0}'
+
+        orig = ur.urlopen
+        ur.urlopen = lambda req, *a, **k: _FakeResp()
+        try:
+            r = Meter(remote="http://x", api_key="plutus_sk_x").track(
+                provider="anthropic", input_tokens=1, baseline_input_tokens=100)
+        finally:
+            ur.urlopen = orig
+        self.assertTrue(r.recorded)
+        self.assertEqual(r.savings_usd, 0.0)
+        self.assertIsNone(r.baseline_usd)
+        self.assertEqual(r.leaked_usd, 0.0)
+        self.assertFalse(r.over_balance)
+        self.assertFalse(r.unpriced)
+
     def test_remote_meter_bad_key_raises(self):
         m = Meter(remote=f"http://127.0.0.1:{self.port}", api_key="plutus_sk_bogus")
         with self.assertRaises(PlutusAuthError):

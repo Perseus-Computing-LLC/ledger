@@ -4,6 +4,17 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Remote-mode `Meter.track` no longer drops the savings fields** (#143). The
+  `/v1/usage` response has carried `savings_usd`/`leaked_usd` since #7/#134,
+  but the SDK's response→result mapping predated them, so a remote `track()`
+  with a baseline reported `savings_usd=0.0` even though the server recorded
+  the saving in the hash-chained ledger. The reconstructed `MeterResult` now
+  maps `savings_usd`, `baseline_usd` (newly returned per event and documented
+  in `openapi.yaml`), `leaked_usd`, `over_balance`, and `unpriced`, with
+  defaults so older servers keep working. Ledger and billing were unaffected;
+  only the caller-visible result understated.
+
 ## [1.1.0] — 2026-07-16
 
 ### Changed
