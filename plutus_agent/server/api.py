@@ -26,6 +26,8 @@ def summary_json(conn, org_id: str) -> dict:
         "by_provider": s["by_provider"],
         "by_workspace": s["by_workspace"],
         "by_task_type": s["by_task_type"],
+        "by_user": s["by_user"],
+        "seats": s["seats"],
         "provider_health": s["provider_health"],
         "alerts": s["alerts"],
     }
@@ -63,7 +65,8 @@ def events_json(conn, org_id: str, limit: int = 50, before=None) -> dict:
 
 _EXPORT_COLUMNS = ["id", "ts", "provider", "model", "task_type", "workspace",
                    "input_tokens", "output_tokens", "cache_read_tokens",
-                   "reasoning_tokens", "cost_usd", "baseline_usd",
+                   "cache_write_tokens", "reasoning_tokens", "user_id",
+                   "cost_usd", "baseline_usd",
                    "external_ref", "estimated", "source"]
 
 

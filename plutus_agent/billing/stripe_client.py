@@ -82,6 +82,7 @@ class StripeClient:
             "mode": mode,
             "publishable_key": self.publishable,
             "has_pro_price": bool(self.billing.get("stripe_price_pro")),
+            "has_team_price": bool(self.billing.get("stripe_price_team")),
         }
 
     def _require(self):
@@ -201,6 +202,24 @@ class StripeClient:
             success_url=self.billing.get("success_url", ""),
             cancel_url=self.billing.get("cancel_url", ""),
             metadata={"plutus_org_id": org_id, "kind": "subscription"},
+        )
+        return {"id": session["id"], "url": session["url"]}
+
+    def team_checkout(self, conn, org_id: str) -> dict:
+        """Subscription Checkout for Team, priced by active seat quantity."""
+        self._require()
+        price = self.billing.get("stripe_price_team")
+        if not price:
+            raise BillingError("No Team price configured. Set billing.stripe_price_team.")
+        customer = self.ensure_customer(conn, org_id)
+        quantity = max(1, db.active_seat_count(conn, org_id))
+        session = self._stripe.checkout.Session.create(
+            mode="subscription", customer=customer,
+            line_items=[{"price": price, "quantity": quantity}],
+            success_url=self.billing.get("success_url", ""),
+            cancel_url=self.billing.get("cancel_url", ""),
+            metadata={"plutus_org_id": org_id, "kind": "team_subscription",
+                      "seat_quantity": str(quantity)},
         )
         return {"id": session["id"], "url": session["url"]}
 
@@ -356,6 +375,9 @@ def _apply_checkout_completed(conn, obj) -> dict:
                             reason="Stripe checkout", stripe_ref=ref, commit=False)
         return {"status": "credited", "org_id": org_id, "amount_usd": usd,
                 "balance_after": float(row["balance_after"])}
+    if kind == "team_subscription":
+        db.set_org_tier(conn, org_id, "team", commit=False)
+        return {"status": "subscribed", "org_id": org_id, "tier": "team"}
     if kind == "subscription" or obj.get("mode") == "subscription":
         db.set_org_tier(conn, org_id, "pro", commit=False)
         return {"status": "subscribed", "org_id": org_id, "tier": "pro"}
@@ -371,7 +393,10 @@ def _apply_subscription_change(conn, obj) -> dict:
     # fails would otherwise retain full Pro for the entire dunning window. Stripe
     # restores `active` (→ Pro again) when payment succeeds, and emits
     # `subscription.deleted` (→ free) when dunning is exhausted.
-    tier = "pro" if status in ("active", "trialing") else "free"
+    meta = obj.get("metadata") or {}
+    is_team = meta.get("kind") == "team_subscription"
+    tier = "team" if is_team and status in ("active", "trialing") else (
+        "pro" if status in ("active", "trialing") else "free")
     db.set_org_tier(conn, org_id, tier, commit=False)
     return {"status": "tier_set", "org_id": org_id, "tier": tier,
             "subscription_status": status}

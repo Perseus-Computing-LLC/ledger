@@ -19,7 +19,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from .. import __version__, bridge, config as cfgmod, db
+from .. import __version__, bridge, config as cfgmod, db, pricing
 from ..billing import StripeClient, BillingError, handle_webhook_event
 from ..utils import strict_int
 from . import api, views, auth as authmod
@@ -384,6 +384,15 @@ class Handler(BaseHTTPRequestHandler):
                 offset = _qs_int(q, "offset", 0, lo=0, hi=10_000_000) or 0
                 return self._json(200, api.orgs_json(
                     conn, self._scoped_orgs(conn), limit=limit, offset=offset))
+            if path == "/api/users":
+                org_id = self._authz_org(conn, q.get("org", [None])[0])
+                if not org_id:
+                    return self._json(404, {"error": "no organizations"})
+                return self._json(200, {
+                    "org_id": org_id,
+                    "users": [dict(u) for u in db.list_users(conn, org_id, True)],
+                    "active_seats": db.active_seat_count(conn, org_id),
+                })
             if path == "/api/summary":
                 org_id = self._authz_org(conn, q.get("org", [None])[0])
                 if not org_id:
@@ -468,12 +477,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._ingest_usage(conn)
             if path == "/v1/checkpoints":
                 return self._checkpoints_post(conn)
+            if path == "/api/users":
+                return self._users_create(conn)
+            if path == "/api/users/deactivate":
+                return self._users_deactivate(conn)
             if path == "/webhook/stripe":
                 return self._webhook(conn)
             if path == "/billing/checkout/credit":
                 return self._checkout_credit(conn)
             if path == "/billing/checkout/pro":
                 return self._checkout_pro(conn)
+            if path == "/billing/checkout/team":
+                return self._checkout_team(conn)
             if path == "/billing/checkout/donate":
                 return self._checkout_donate(conn)
             if path == "/billing/portal":
@@ -767,6 +782,9 @@ class Handler(BaseHTTPRequestHandler):
             xref = ev.get("external_ref")
             if xref is not None and not isinstance(xref, str):
                 return self._json(400, {"error": "external_ref must be a string"})
+            uid = ev.get("user_id")
+            if uid is not None and not isinstance(uid, str):
+                return self._json(400, {"error": "user_id must be a string"})
 
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
@@ -813,6 +831,7 @@ class Handler(BaseHTTPRequestHandler):
                             optimal_cost_usd=ev.get("optimal_cost_usd"),
                             optimal_model=ev.get("optimal_model"),
                             external_ref=ev.get("external_ref"),
+                            user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
                             alert_cfg=cfg.get("alerts", {}),
@@ -838,6 +857,7 @@ class Handler(BaseHTTPRequestHandler):
                             "savings_usd": res.savings_usd,
                             "baseline_usd": res.baseline_usd,
                             "leaked_usd": res.leaked_usd,
+                            "user_id": res.user_id,
                         })
                     code, body = self._usage_response(
                         conn, org_id, out, n_blocked, n_over_balance, cfg)
@@ -979,6 +999,29 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"error": f"no admin route for {path}"})
 
     # ---- API keys (session-gated; created from the dashboard) --------------
+    def _users_create(self, conn):
+        f = self._form()
+        org_id = self._authz_org(conn, f.get("org"), strict=True)
+        email = (f.get("email") or "").strip()
+        if not org_id or not email or "@" not in email:
+            return self._json(400, {"error": "org and a valid email are required"})
+        org = db.get_org(conn, org_id)
+        limit = pricing.tier(org["tier"]).seats
+        if limit is not None and db.active_seat_count(conn, org_id) >= limit:
+            return self._json(409, {"error": "seat limit reached", "limit": limit})
+        user = db.ensure_user(conn, org_id, email, (f.get("name") or "").strip() or None)
+        return self._json(201, {"user": dict(user),
+                                "active_seats": db.active_seat_count(conn, org_id)})
+
+    def _users_deactivate(self, conn):
+        f = self._form()
+        org_id = self._authz_org(conn, f.get("org"), strict=True)
+        user_id = (f.get("user_id") or "").strip()
+        if not org_id or not user_id or not db.set_user_active(conn, user_id, org_id, False):
+            return self._json(404, {"error": "user not found"})
+        return self._json(200, {"user_id": user_id, "active": False,
+                                "active_seats": db.active_seat_count(conn, org_id)})
+
     def _keys_create(self, conn):
         f = self._form()
         org_id = self._authz_org(conn, f.get("org"), strict=True)
@@ -1013,6 +1056,14 @@ class Handler(BaseHTTPRequestHandler):
         if not org_id:
             raise BillingError("no organization to bill")
         sess = self.ctx.stripe.pro_checkout(conn, org_id)
+        return self._redirect(sess["url"])
+
+    def _checkout_team(self, conn):
+        f = self._form()
+        org_id = self._authz_org(conn, f.get("org"), strict=True)
+        if not org_id:
+            raise BillingError("no organization to bill")
+        sess = self.ctx.stripe.team_checkout(conn, org_id)
         return self._redirect(sess["url"])
 
     def _checkout_donate(self, conn):

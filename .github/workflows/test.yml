@@ -35,6 +35,9 @@ jobs:
           python3 plutus.py --help > /dev/null
           python3 plutus_route.py --help > /dev/null
 
+      - name: Price table freshness guard
+        run: python3 tools/check_price_freshness.py
+
       - name: Smoke test — json mode
         run: python3 plutus.py --json 2>/dev/null || echo "(state.db unavailable — expected in CI)"
 

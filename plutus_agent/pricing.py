@@ -106,12 +106,8 @@ TIERS = {
         full_reporting=True,
         features=(
             "Everything in Pro, per seat",
-            # #136: per-user attribution is not implemented yet (usage_events
-            # has no user column). Do not promise it on a pricing surface
-            # until the seat/user plumbing ships; workspace + provider is
-            # what the ledger actually attributes today.
-            "Attribution by workspace & provider",
-            "Aggregate spend rollups per workspace",
+            "Attribution by user, workspace & provider",
+            "Aggregate spend rollups per user and workspace",
             "Unlimited workspaces",
             "$10/seat/mo + 10% of savings (with Perseus)",
         ),
