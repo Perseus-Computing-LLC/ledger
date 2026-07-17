@@ -176,6 +176,9 @@ class ModelPrice:
     # Per-1M rate for reasoning/"thinking" tokens. None => billed at the output
     # rate (the common case; most providers don't price reasoning separately).
     reasoning: Optional[float] = None
+    # Per-1M rate for provider cache creation/write tokens. None means the
+    # provider has not published a cache-write price for this model.
+    cache_write: Optional[float] = None
 
     def cost(self, input_tokens: int, output_tokens: int,
              cache_read_tokens: int = 0, reasoning_tokens: int = 0) -> float:
@@ -187,6 +190,17 @@ class ModelPrice:
             + cache_read_tokens / 1_000_000 * self.cache_read
         )
 
+    def cost_with_cache_write(self, input_tokens: int, output_tokens: int,
+                              cache_read_tokens: int = 0,
+                              reasoning_tokens: int = 0,
+                              cache_write_tokens: int = 0) -> float:
+        """Price an event including provider-reported cache-write tokens."""
+        total = self.cost(input_tokens, output_tokens, cache_read_tokens,
+                          reasoning_tokens)
+        if cache_write_tokens and self.cache_write is not None:
+            total += cache_write_tokens / 1_000_000 * self.cache_write
+        return total
+
 
 # provider -> {model_id: ModelPrice}, plus a "_default" per provider. Prices are
 # USD per 1,000,000 tokens (input, output, cache_read). See PRICE_TABLE_AS_OF.
@@ -195,14 +209,14 @@ class ModelPrice:
 # resolve_price) so a fallback estimate is never mistaken for an exact price.
 PRICE_TABLE: dict[str, dict[str, ModelPrice]] = {
     "anthropic": {
-        "_default": ModelPrice(3.0, 15.0, 0.30),
-        "claude-fable-5": ModelPrice(15.0, 75.0, 1.50),
-        "claude-opus-4-8": ModelPrice(15.0, 75.0, 1.50),
-        "claude-sonnet-4-6": ModelPrice(3.0, 15.0, 0.30),
-        "claude-sonnet-4-5-20250929": ModelPrice(3.0, 15.0, 0.30),
-        "claude-sonnet-4-5": ModelPrice(3.0, 15.0, 0.30),
-        "claude-haiku-4-5-20251001": ModelPrice(1.0, 5.0, 0.10),
-        "claude-haiku-4-5": ModelPrice(1.0, 5.0, 0.10),
+        "_default": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
+        "claude-fable-5": ModelPrice(15.0, 75.0, 1.50, None, 18.75),
+        "claude-opus-4-8": ModelPrice(15.0, 75.0, 1.50, None, 18.75),
+        "claude-sonnet-4-6": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
+        "claude-sonnet-4-5-20250929": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
+        "claude-sonnet-4-5": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
+        "claude-haiku-4-5-20251001": ModelPrice(1.0, 5.0, 0.10, None, 1.25),
+        "claude-haiku-4-5": ModelPrice(1.0, 5.0, 0.10, None, 1.25),
     },
     "openai": {
         "_default": ModelPrice(2.50, 10.0, 1.25),
@@ -358,6 +372,7 @@ def resolve_price(provider: str, model: Optional[str] = None,
             float(p.get("output", 0)),
             float(p.get("cache_read", 0)),
             None if r is None else float(r),
+            None if p.get("cache_write") is None else float(p["cache_write"]),
         )
 
     if overrides and provider in overrides:

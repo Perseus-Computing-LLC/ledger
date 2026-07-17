@@ -99,6 +99,7 @@ class Meter:
               task_type: str = "general", workspace: Optional[str] = None,
               input_tokens: int = 0, output_tokens: int = 0,
               cache_read_tokens: int = 0, reasoning_tokens: int = 0,
+              cache_write_tokens: Optional[int] = None,
               cost_usd: Optional[float] = None,
               baseline_cost_usd: Optional[float] = None,
               baseline_model: Optional[str] = None,
@@ -136,6 +137,8 @@ class Meter:
                 "cache_read_tokens": int(cache_read_tokens),
                 "reasoning_tokens": int(reasoning_tokens),
             }
+            if cache_write_tokens is not None:
+                event["cache_write_tokens"] = int(cache_write_tokens)
             if model:
                 event["model"] = model
             if workspace:
@@ -157,6 +160,7 @@ class Meter:
             task_type=task_type, workspace=workspace,
             input_tokens=input_tokens, output_tokens=output_tokens,
             cache_read_tokens=cache_read_tokens, reasoning_tokens=reasoning_tokens,
+            cache_write_tokens=cache_write_tokens,
             cost_usd=cost_usd,
             baseline_cost_usd=baseline_cost_usd, baseline_model=baseline_model,
             baseline_input_tokens=baseline_input_tokens,

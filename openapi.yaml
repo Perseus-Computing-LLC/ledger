@@ -332,6 +332,7 @@ components:
         input_tokens: { type: integer, default: 0 }
         output_tokens: { type: integer, default: 0 }
         cache_read_tokens: { type: integer, default: 0 }
+        cache_write_tokens: { type: integer, nullable: true, description: "Provider-reported cache creation/write tokens; priced separately when a cache-write rate is published." }
         reasoning_tokens: { type: integer, default: 0 }
         cost_usd: { type: number, nullable: true, description: "Exact cost; omit to estimate from tokens. Must be >= 0." }
         baseline_cost_usd: { type: number, nullable: true, description: "Savings-share counterfactual in USD (#7): what this call would have cost without the optimization. Must be >= 0; omit for none." }

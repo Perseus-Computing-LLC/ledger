@@ -43,7 +43,9 @@ from typing import Optional
 # 10 = adds usage_events.external_ref (per-task/per-question attribution id, e.g. an
 #     Invarium task_id) + ix_usage_extref. Nullable and hash-chained as an optional
 #     trailing field, so pre-v10 rows still verify byte-identically.
-SCHEMA_VERSION = 10
+# 11 = adds usage_events.cache_write_tokens for provider cache-creation billing.
+#     Nullable and hash-chained as an optional trailing field for the same reason.
+SCHEMA_VERSION = 11
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -106,6 +108,9 @@ _CHAIN_FIELDS_OPTIONAL = (
     # form; a row that carries it hashes it, so a billed saving can't be
     # re-pointed to a different task undetected.
     "external_ref",
+    # Anthropic cache-creation input tokens (#135). Optional trailing field keeps
+    # pre-v11 canonical forms unchanged while making cache-write usage immutable.
+    "cache_write_tokens",
 )
 
 
@@ -473,6 +478,10 @@ CREATE TABLE IF NOT EXISTS usage_events (
     input_tokens      INTEGER NOT NULL DEFAULT 0,
     output_tokens     INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    -- Provider-reported cache creation/write tokens. NULL means the integration
+    -- did not provide this field; unlike cache reads, writes are billed at a
+    -- provider/model-specific premium. Nullable for additive migration (#135).
+    cache_write_tokens INTEGER,
     reasoning_tokens  INTEGER NOT NULL DEFAULT 0,
     cost_micros       INTEGER NOT NULL DEFAULT 0,
     -- Counterfactual cost for savings-share billing (#7): what this same call
@@ -741,6 +750,9 @@ def _migrate_add_columns(conn) -> None:
         # existing rows stay NULL and the hash chain over pre-v10 rows is
         # unchanged (external_ref is an optional trailing chain field).
         ("usage_events", "external_ref", "TEXT"),
+        # #135: provider cache-creation/write tokens. Nullable so old rows remain
+        # semantically absent and pre-v11 chain canonical forms are preserved.
+        ("usage_events", "cache_write_tokens", "INTEGER"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
