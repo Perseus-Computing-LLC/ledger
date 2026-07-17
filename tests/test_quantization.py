@@ -32,8 +32,8 @@ class TestPrecisionMultiplier(unittest.TestCase):
         self.assertTrue(known)
         self.assertEqual(mult, 0.49)
 
-    def test_1bit_is_measured(self):
-        # 1bit is now populated from perseus-vault#630 benchmark data.
+    def test_1bit_is_assumed(self):
+        # 1bit is a bandwidth-based assumption, not a measured serving-cost ratio.
         mult, known = pricing.resolve_precision_multiplier("1bit")
         self.assertTrue(known)
         self.assertEqual(mult, 0.05)

@@ -268,10 +268,12 @@ PRICE_TABLE: dict[str, dict[str, ModelPrice]] = {
 # per-token *inference* cost. Plutus models this as a precision **multiplier** on
 # the resolved per-token cost: cost_at_precision = base_cost * multiplier.
 #
-# The tiers below are just a recognized taxonomy — NOT a claim about savings. The
+# The tiers below are just a recognized taxonomy — NOT a claim about ledger spend.
+# These multipliers are estimator/router inputs only; ``record_usage`` does not
+# accept a quantization tier and never applies one to a billed usage event. The
 # multipliers default to 1.0 (identity: no assumed savings) on purpose. Real
 # multipliers are populated from *measured* quality/latency/cost artifacts
-# (perseus-vault#630 lands the INT8 / 1-bit / NVFP4 numbers), never from
+# (benchmark artifacts such as perseus-vault#630 and Plutus#131), never from
 # vendor-published "1.73x / ~2x" figures. Until a tier is calibrated with a
 # measured multiplier — via ``pricing.quantization`` in ``~/.plutus/config.yaml``
 # or the ``overrides`` arg — quoting a quantization tier changes nothing, so an
@@ -293,8 +295,10 @@ QUANTIZATION_TIERS = ("fp16", "fp8", "nvfp4", "int8", "int4", "1bit")
 # FP16 is set to 1.2 (slightly above baseline) to reflect the larger model
 # footprint and marginally higher inference cost, not lower quality.
 #
-# 1bit: populated from measured embedding-quality benchmark (2026-07-15,
-# perseus-vault#630 row 1). Pure 1-bit sign-quantized Hamming ranking (no
+# 1bit: an ASSUMED inference from memory-bandwidth reduction, not a measured
+# serving-cost ratio. The embedding-quality benchmark (2026-07-15,
+# perseus-vault#630 row 1) measures retrieval quality, not end-to-end cost. Pure
+# 1-bit sign-quantized Hamming ranking (no
 # cosine rerank) vs the Vault's shipped dense path on the 24-memory recall
 # dataset (all-MiniLM-L6-v2, 384-dim):
 #   recall@1: 83.3% (1bit) / 91.7% (dense) = 0.908 quality retention
@@ -302,9 +306,9 @@ QUANTIZATION_TIERS = ("fp16", "fp8", "nvfp4", "int8", "int4", "1bit")
 #   MRR:      0.894 (1bit) / 0.948 (dense) = 0.943
 #   memory:   48 bytes/sig vs 1,536 bytes/embedding = 0.031 bandwidth ratio
 #
-# The 1bit multiplier of 0.05 is a conservative estimate grounded in the
-# 32× memory-bandwidth reduction, erring well above the hardware floor to
-# leave headroom for the rerank pool overhead in the two-phase path. Real
+# The 1bit multiplier of 0.05 is a conservative ASSUMPTION grounded in the
+# 32× memory-bandwidth reduction, erring well above the hardware floor to leave
+# headroom for the rerank pool overhead in the two-phase path. Real
 # measured latency ratios across corpus scales — not just bandwidth — will
 # replace this when the full scale-bench rows (1M Lambda) land.
 #
@@ -318,7 +322,7 @@ PRECISION_MULTIPLIERS: dict[str, float] = {
                     # Llama-3.3-70B on 1x B200 (nvidia NVFP4 vs RedHat FP8 ckpts)
     "int8": 1.0,   # baseline — shipped default
     "int4": 1.0,   # uncalibrated
-    "1bit": 0.05,  # measured: 32× memory reduction, 91% recall@1 retention
+    "1bit": 0.05,  # assumed from bandwidth; not a measured cost ratio
 }
 
 
@@ -403,7 +407,11 @@ def estimate_cost(provider: str, model: Optional[str],
                   overrides: Optional[dict] = None,
                   quantization: Optional[str] = None,
                   quantization_overrides: Optional[dict] = None) -> float:
-    """Estimate USD cost of a usage event from token counts.
+    """Estimate USD cost from token counts for routing/estimation only.
+
+    Quantization multipliers are intentionally not part of ``record_usage`` or
+    the usage ledger. They are estimator/router inputs until a serving tier is
+    calibrated with a defensible end-to-end cost measurement.
 
     ``quantization`` optionally names a precision tier (see
     :data:`QUANTIZATION_TIERS`); the resolved per-token cost is scaled by that
