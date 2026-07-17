@@ -396,19 +396,22 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
         gross = share.get("gross_savings_usd") or 0.0
         has_savings = covered > 0 and gross > 0   # Perseus baseline present
 
-        # tip jar (Free only) — only when the ecosystem actually produced provable
-        # savings to share; you can't ask for a cut of savings that don't exist.
+        audit = summary.get("audit") or {}
+        recommended_donation = float(audit.get("recommended_donation_usd") or 0.0)
+        donation_bps = int(audit.get("recommended_donation_bps") or 0)
         tip_html = ""
         if tobj.savings_share == "suggested" and can_checkout and has_savings:
-            tip_amt = max(5, int(round(share.get("billable_share_usd") or 0.0)))
+            tip_amt = max(1, int(round(recommended_donation)))
             tip_html = (
                 f"<form method='post' action='/billing/checkout/donate' "
                 f"style='display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap'>"
                 f"<input type='hidden' name='org' value='{_e(org['id'])}'>{csrf_field}"
-                f"<span class='muted' style='font-size:13px'>That's ~{_usd(share.get('billable_share_usd') or 0.0)} "
-                f"at 10% of the {_usd(gross)} Perseus saved you. Chip in — totally optional.</span>"
-                f"<input class='amt' type='number' name='amount' value='{tip_amt}' min='5' step='5' style='width:80px'>"
-                f"<button class='btn ghost' type='submit'>Chip in →</button></form>")
+                f"<span class='muted' style='font-size:13px'>"
+                f"Optional {donation_bps / 100:.0f}% thank-you: {_usd(recommended_donation)} "
+                f"of the {_usd(gross)} verified savings."
+                f"</span>"
+                f"<input class='amt' type='number' name='amount' value='{tip_amt}' min='1' step='1' style='width:80px'>"
+                f"<button class='btn ghost' type='submit'>Support Perseus →</button></form>")
         elif tobj.savings_share == "waived":
             tip_html = ("<div class='muted' style='font-size:13px;margin-top:10px'>"
                         "You're on Pro — a flat $20/mo, no savings-share.</div>")
