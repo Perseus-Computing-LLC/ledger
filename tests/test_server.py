@@ -201,8 +201,14 @@ class TestServer(unittest.TestCase):
             m.track(provider="anthropic", input_tokens=10)
 
     def test_remote_meter_no_key_errors(self):
-        with self.assertRaises(ValueError):
-            Meter(remote=f"http://127.0.0.1:{self.port}")
+        # PLUTUS_API_KEY may be set in the environment
+        old_key = os.environ.pop("PLUTUS_API_KEY", None)
+        try:
+            with self.assertRaises(ValueError):
+                Meter(remote=f"http://127.0.0.1:{self.port}")
+        finally:
+            if old_key is not None:
+                os.environ["PLUTUS_API_KEY"] = old_key
 
     def test_remote_balance_is_local_only(self):
         m = self._remote_meter()

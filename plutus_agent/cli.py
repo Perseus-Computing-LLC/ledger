@@ -208,13 +208,31 @@ def cmd_keys(args):
         _, secret = db.create_api_key(conn, org["id"], name=args.name)
         _ok(f"API key for '{org['name']}' — store it now, it won't be shown again:")
         print(f"    {secret}")
+    elif args.action == "create-scoped":
+        scope = None
+        if args.workspace:
+            scope = {"workspaces": [args.workspace]}
+        row, secret = db.create_api_key_scoped(
+            conn, org["id"], name=args.name, scope=scope)
+        _ok(f"Scoped API key for '{org['name']}' — store it now:")
+        scope_txt = f" (scoped to workspace '{args.workspace}')" if args.workspace else ""
+        print(f"    {secret}{scope_txt}")
     elif args.action == "list":
         keys = db.list_api_keys(conn, org["id"])
         if not keys:
             print("  (no API keys)")
         for k in keys:
             used = "never" if not k["last_used_at"] else f"{int((time.time()-k['last_used_at'])/86400)}d ago"
-            print(f"  {k['id']}  {k['prefix']+'…':<22} {(k['name'] or '-'):<18} used {used}")
+            scope_txt = ""
+            if k.get("scope"):
+                try:
+                    scope = json.loads(k["scope"])
+                    if scope.get("workspaces"):
+                        scope_txt = f"  [ws:{','.join(scope['workspaces'])}]"
+                except Exception:
+                    pass
+            event_txt = f" ev:{k.get('event_count', 0)}" if k.get("event_count") else ""
+            print(f"  {k['id']}  {k['prefix']+'…':<22} {(k['name'] or '-'):<18} used {used}{scope_txt}{event_txt}")
     elif args.action == "revoke":
         if not args.key_id:
             sys.exit("plutus: pass the key id to revoke, e.g. `plutus keys revoke key_…`")
@@ -222,7 +240,63 @@ def cmd_keys(args):
             _ok(f"revoked {args.key_id}")
         else:
             print(f"  no active key '{args.key_id}' for this org")
+    elif args.action == "rotate":
+        if not args.key_id:
+            sys.exit("plutus: pass the key id to rotate, e.g. `plutus keys rotate key_…`")
+        overlap = getattr(args, "overlap", 300)
+        new_row, secret, old_row = db.rotate_api_key(
+            conn, org["id"], args.key_id, overlap_seconds=overlap,
+            name=args.name)
+        _ok(f"rotation started for {args.key_id}")
+        print(f"    new key id  : {new_row['id']}")
+        print(f"    new secret  : {secret}")
+        print(f"    old key expires in {overlap}s (zero-downtime)")
+        if overlap > 0:
+            print(f"  To complete now: `plutus keys rotate-complete {new_row['id']}`")
+    elif args.action == "rotate-complete":
+        if not args.key_id:
+            sys.exit("plutus: pass the id of the NEW key to complete rotation")
+        if db.complete_key_rotation(conn, org["id"], args.key_id):
+            _ok(f"rotation completed — old key revoked")
+        else:
+            print(f"  no active rotation found for {args.key_id}")
+    elif args.action == "rotate-now":
+        if not args.key_id:
+            sys.exit("plutus: pass the key id to rotate and immediately revoke")
+        new_row, secret = db.rotate_and_revoke(
+            conn, org["id"], args.key_id, name=args.name)
+        _ok(f"emergency rotation — old key immediately revoked")
+        print(f"    new key id  : {new_row['id']}")
+        print(f"    new secret  : {secret}")
     conn.close()
+
+
+def cmd_ingest_health(args):
+    """#150: Ingestion health diagnostics per source."""
+    conn = _conn()
+    org = _resolve_org(conn, args.org)
+    rows = db.get_ingest_health(conn, org["id"])
+    conn.close()
+    if args.json:
+        print(json.dumps(rows, indent=2, default=str))
+        return
+    if not rows:
+        _ok("no ingestion events recorded yet")
+        return
+    print(f"\n  ingest health for '{org['name']}' — last-24h view\n")
+    print(f"    {'SOURCE':<30} {'STATUS':<8} {'EVENTS':>8} {'ERRORS':>8}  LAST SEEN")
+    print("    " + "-" * 78)
+    now = time.time()
+    for r in rows:
+        status = "✓" if r["last_ok"] else "✗"
+        last = "never" if not r["last_ts"] else (
+            f"{int((now - r['last_ts'])/60)}m ago" if (now - r["last_ts"]) < 3600
+            else f"{int((now - r['last_ts'])/3600)}h ago")
+        err = (r["last_error"] or "")[:40]
+        print(f"    {r['source']:<30} {status:<8} {r['total_events']:>8} {r['total_errors']:>8}  {last}")
+        if err:
+            print(f"      ↳ {err}")
+    print()
 
 
 def cmd_topup(args):
@@ -895,11 +969,22 @@ def build_parser():
     pm.set_defaults(func=cmd_meter)
 
     pk = sub.add_parser("keys", help="manage ingest API keys")
-    pk.add_argument("action", choices=["create", "list", "revoke"])
-    pk.add_argument("key_id", nargs="?", help="key id (for revoke)")
-    pk.add_argument("--name", help="label for a new key")
+    pk.add_argument("action",
+                    choices=["create", "create-scoped", "list", "revoke",
+                             "rotate", "rotate-complete", "rotate-now"])
+    pk.add_argument("key_id", nargs="?", help="key id (for revoke/rotate)")
+    pk.add_argument("--name", help="label for a new key or rotated key")
     pk.add_argument("--org")
+    pk.add_argument("--overlap", type=int, default=300,
+                    help="rotation overlap in seconds (default: 300 = 5min)")
+    pk.add_argument("--workspace", help="scope the key to a specific workspace (create-scoped)")
     pk.set_defaults(func=cmd_keys)
+
+    pih = sub.add_parser("ingest-health",
+                         help="show ingestion health diagnostics per source (#150)")
+    pih.add_argument("--org")
+    pih.add_argument("--json", action="store_true")
+    pih.set_defaults(func=cmd_ingest_health)
 
     pt = sub.add_parser("topup", help="add prepaid credit")
     pt.add_argument("--org"); pt.add_argument("--amount", type=float, required=True)
