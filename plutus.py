@@ -6,7 +6,7 @@ Named for the Greek god of wealth. Plutus watches the money flowing out of
 every LLM provider you use so you can balance usage across them efficiently.
 
 Two data sources, fused per provider:
-  1. LIVE BALANCE  — for providers that expose a balance API (DeepSeek, OpenAI).
+  1. LIVE BALANCE  — for providers that expose a balance API (currently DeepSeek).
   2. LOCAL LEDGER  — per-session cost rows Hermes writes to state.db
                      (billing_provider + estimated/actual_cost_usd + tokens).
                      Used for spend, burn-rate, and remaining-budget math on
@@ -101,32 +101,6 @@ def deepseek_balance(api_key):
     except Exception as e:
         return {"ok": False, "error": str(e), "source": "estimate"}
 
-def openai_balance(api_key):
-    """OpenAI balance via billing subscription endpoint.
-    Returns hard_limit_usd - total_usage as balance_usd.
-    Gracefully falls back on 404/403."""
-    try:
-        data = _get("https://api.openai.com/v1/dashboard/billing/subscription",
-                    {"Authorization": f"Bearer {api_key}", "Accept": "application/json"})
-        if data.get("object") == "error":
-            return {"ok": False, "error": data.get("message"), "source": "estimate"}
-        total_granted = data.get("hard_limit_usd", 0)
-        total_used = data.get("total_usage", 0)
-        return {
-            "balance_usd": round(total_granted - total_used, 4),
-            "granted_usd": total_granted,
-            "topped_up_usd": None,
-            "available": True,
-            "ok": True,
-            "source": "live",
-        }
-    except urllib.error.HTTPError as e:
-        if e.code in (403, 404):
-            return {"ok": False, "error": f"OpenAI API returned {e.code} (no billing details or invalid key)", "source": "estimate"}
-        return {"ok": False, "error": str(e), "source": "estimate"}
-    except Exception as e:
-        return {"ok": False, "error": str(e), "source": "estimate"}
-
 def anthropic_balance(api_key):
     """Anthropic — no public balance API yet (github.com/anthropics/anthropic-sdk-python/issues/505).
     Always returns estimate; use budget-based remaining instead."""
@@ -140,7 +114,7 @@ def google_balance(api_key):
 # provider name -> balance fetcher (returns {balance_usd, ok, source: 'live'|'estimate'})
 BALANCE_FETCHERS = {
     "deepseek":  deepseek_balance,
-    "openai":    openai_balance,
+
     "anthropic": anthropic_balance,
     "google":    google_balance,
 }

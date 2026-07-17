@@ -24,6 +24,7 @@ def track_anthropic(meter, response: Any, *, model: Optional[str] = None,
         input_tokens=int(get("input_tokens") or 0),
         output_tokens=int(get("output_tokens") or 0),
         cache_read_tokens=int(get("cache_read_input_tokens") or 0),
+        cache_write_tokens=int(get("cache_creation_input_tokens") or 0),
         source="anthropic",
     )
 

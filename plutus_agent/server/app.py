@@ -713,7 +713,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if any(int(ev.get(f, 0) or 0) < 0 for f in (
                         "input_tokens", "output_tokens",
-                        "cache_read_tokens", "reasoning_tokens")):
+                        "cache_read_tokens", "cache_write_tokens",
+                        "reasoning_tokens")):
                     return self._json(400, {"error": "token fields must be non-negative"})
             except (TypeError, ValueError):
                 return self._json(400, {"error": "token fields must be integers"})
@@ -796,6 +797,9 @@ class Handler(BaseHTTPRequestHandler):
                             input_tokens=strict_int(ev.get("input_tokens", 0) or 0),
                             output_tokens=strict_int(ev.get("output_tokens", 0) or 0),
                             cache_read_tokens=strict_int(ev.get("cache_read_tokens", 0) or 0),
+                            cache_write_tokens=(
+                                strict_int(ev["cache_write_tokens"])
+                                if ev.get("cache_write_tokens") is not None else None),
                             reasoning_tokens=strict_int(ev.get("reasoning_tokens", 0) or 0),
                             cost_usd=ev.get("cost_usd"),
                             baseline_cost_usd=ev.get("baseline_cost_usd"),

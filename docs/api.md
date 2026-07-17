@@ -36,6 +36,7 @@ curl -X POST https://plutus.perseus.observer/v1/usage \
 | `model` | | used for price-table lookup when `cost_usd` is omitted |
 | `input_tokens` / `output_tokens` | | integers; default 0 |
 | `cache_read_tokens` / `reasoning_tokens` | | integers; default 0 |
+| `cache_write_tokens` | | provider-reported cache creation tokens; nullable, priced separately when supported |
 | `cost_usd` | | exact cost; if omitted, estimated from tokens |
 | `task_type` | | defaults to `general` (drives the ROI breakdown) |
 | `workspace` | | name/slug/id; auto-created within the tier's workspace cap |

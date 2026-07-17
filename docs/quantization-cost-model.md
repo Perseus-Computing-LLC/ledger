@@ -6,11 +6,18 @@ Blackwell/Rubin-class hardware, a cost model that can't see precision will
 misprice a growing share of real spend. This is issue
 [#128](https://github.com/Perseus-Computing-LLC/plutus/issues/128).
 
-Plutus models precision as a **multiplier** on the resolved per-token cost:
+Plutus models precision as a **multiplier** on the resolved per-token cost for
+router/estimator decisions:
 
 ```
 cost_at_precision = base_cost × precision_multiplier
 ```
+
+These multipliers are **not ledger inputs**. `record_usage` and `/v1/usage` do
+not accept a quantization tier, so billed usage remains based on the provider's
+reported tokens and exact cost. A multiplier must not be presented as a
+customer's measured spend or savings until an end-to-end serving-cost benchmark
+supports it.
 
 ## The honest default: 1.0
 
@@ -35,10 +42,10 @@ ratios (INT8 is already the Vault's shipped default embedding path).
 | Tier  | Multiplier | Source |
 |-------|-----------|--------|
 | int8  | 1.00      | Vault shipped default (baseline) |
-| 1bit  | 0.05      | perseus-vault#630 row 1: 32× memory reduction, ~91% recall@1 retention vs dense |
+| 1bit  | 0.05      | **Assumed**, based on 32× memory reduction; Vault#630 measures quality, not serving cost |
 | fp16  | 1.20      | perseus-vault#630 row 2: equivalent quality to INT8 (0.989 cosine), larger model (86MB vs 23MB) |
 | fp8   | 1.00      | Uncalibrated |
-| nvfp4 | 1.00      | Uncalibrated (blocked on Blackwell hardware) |
+| nvfp4 | 0.49      | Plutus#131: measured B200 throughput ratio (FP8/NVFP4) |
 | int4  | 1.00      | Uncalibrated |
 
 **1-bit benchmark details (2026-07-15):** 24-memory paraphrase-heavy recall
@@ -99,7 +106,7 @@ cost = pricing.estimate_cost(
 ```
 
 `QUANTIZATION_TIERS` is the recognized taxonomy; `PRECISION_MULTIPLIERS` holds
-the (identity) defaults.
+router/estimator multipliers. These values do not alter ledger debits.
 
 ## Quantization-aware routing
 

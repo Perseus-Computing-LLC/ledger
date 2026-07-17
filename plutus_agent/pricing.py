@@ -176,6 +176,9 @@ class ModelPrice:
     # Per-1M rate for reasoning/"thinking" tokens. None => billed at the output
     # rate (the common case; most providers don't price reasoning separately).
     reasoning: Optional[float] = None
+    # Per-1M rate for provider cache creation/write tokens. None means the
+    # provider has not published a cache-write price for this model.
+    cache_write: Optional[float] = None
 
     def cost(self, input_tokens: int, output_tokens: int,
              cache_read_tokens: int = 0, reasoning_tokens: int = 0) -> float:
@@ -187,6 +190,17 @@ class ModelPrice:
             + cache_read_tokens / 1_000_000 * self.cache_read
         )
 
+    def cost_with_cache_write(self, input_tokens: int, output_tokens: int,
+                              cache_read_tokens: int = 0,
+                              reasoning_tokens: int = 0,
+                              cache_write_tokens: int = 0) -> float:
+        """Price an event including provider-reported cache-write tokens."""
+        total = self.cost(input_tokens, output_tokens, cache_read_tokens,
+                          reasoning_tokens)
+        if cache_write_tokens and self.cache_write is not None:
+            total += cache_write_tokens / 1_000_000 * self.cache_write
+        return total
+
 
 # provider -> {model_id: ModelPrice}, plus a "_default" per provider. Prices are
 # USD per 1,000,000 tokens (input, output, cache_read). See PRICE_TABLE_AS_OF.
@@ -195,14 +209,14 @@ class ModelPrice:
 # resolve_price) so a fallback estimate is never mistaken for an exact price.
 PRICE_TABLE: dict[str, dict[str, ModelPrice]] = {
     "anthropic": {
-        "_default": ModelPrice(3.0, 15.0, 0.30),
-        "claude-fable-5": ModelPrice(15.0, 75.0, 1.50),
-        "claude-opus-4-8": ModelPrice(15.0, 75.0, 1.50),
-        "claude-sonnet-4-6": ModelPrice(3.0, 15.0, 0.30),
-        "claude-sonnet-4-5-20250929": ModelPrice(3.0, 15.0, 0.30),
-        "claude-sonnet-4-5": ModelPrice(3.0, 15.0, 0.30),
-        "claude-haiku-4-5-20251001": ModelPrice(1.0, 5.0, 0.10),
-        "claude-haiku-4-5": ModelPrice(1.0, 5.0, 0.10),
+        "_default": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
+        "claude-fable-5": ModelPrice(15.0, 75.0, 1.50, None, 18.75),
+        "claude-opus-4-8": ModelPrice(15.0, 75.0, 1.50, None, 18.75),
+        "claude-sonnet-4-6": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
+        "claude-sonnet-4-5-20250929": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
+        "claude-sonnet-4-5": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
+        "claude-haiku-4-5-20251001": ModelPrice(1.0, 5.0, 0.10, None, 1.25),
+        "claude-haiku-4-5": ModelPrice(1.0, 5.0, 0.10, None, 1.25),
     },
     "openai": {
         "_default": ModelPrice(2.50, 10.0, 1.25),
@@ -254,10 +268,12 @@ PRICE_TABLE: dict[str, dict[str, ModelPrice]] = {
 # per-token *inference* cost. Plutus models this as a precision **multiplier** on
 # the resolved per-token cost: cost_at_precision = base_cost * multiplier.
 #
-# The tiers below are just a recognized taxonomy — NOT a claim about savings. The
+# The tiers below are just a recognized taxonomy — NOT a claim about ledger spend.
+# These multipliers are estimator/router inputs only; ``record_usage`` does not
+# accept a quantization tier and never applies one to a billed usage event. The
 # multipliers default to 1.0 (identity: no assumed savings) on purpose. Real
 # multipliers are populated from *measured* quality/latency/cost artifacts
-# (perseus-vault#630 lands the INT8 / 1-bit / NVFP4 numbers), never from
+# (benchmark artifacts such as perseus-vault#630 and Plutus#131), never from
 # vendor-published "1.73x / ~2x" figures. Until a tier is calibrated with a
 # measured multiplier — via ``pricing.quantization`` in ``~/.plutus/config.yaml``
 # or the ``overrides`` arg — quoting a quantization tier changes nothing, so an
@@ -279,8 +295,10 @@ QUANTIZATION_TIERS = ("fp16", "fp8", "nvfp4", "int8", "int4", "1bit")
 # FP16 is set to 1.2 (slightly above baseline) to reflect the larger model
 # footprint and marginally higher inference cost, not lower quality.
 #
-# 1bit: populated from measured embedding-quality benchmark (2026-07-15,
-# perseus-vault#630 row 1). Pure 1-bit sign-quantized Hamming ranking (no
+# 1bit: an ASSUMED inference from memory-bandwidth reduction, not a measured
+# serving-cost ratio. The embedding-quality benchmark (2026-07-15,
+# perseus-vault#630 row 1) measures retrieval quality, not end-to-end cost. Pure
+# 1-bit sign-quantized Hamming ranking (no
 # cosine rerank) vs the Vault's shipped dense path on the 24-memory recall
 # dataset (all-MiniLM-L6-v2, 384-dim):
 #   recall@1: 83.3% (1bit) / 91.7% (dense) = 0.908 quality retention
@@ -288,9 +306,9 @@ QUANTIZATION_TIERS = ("fp16", "fp8", "nvfp4", "int8", "int4", "1bit")
 #   MRR:      0.894 (1bit) / 0.948 (dense) = 0.943
 #   memory:   48 bytes/sig vs 1,536 bytes/embedding = 0.031 bandwidth ratio
 #
-# The 1bit multiplier of 0.05 is a conservative estimate grounded in the
-# 32× memory-bandwidth reduction, erring well above the hardware floor to
-# leave headroom for the rerank pool overhead in the two-phase path. Real
+# The 1bit multiplier of 0.05 is a conservative ASSUMPTION grounded in the
+# 32× memory-bandwidth reduction, erring well above the hardware floor to leave
+# headroom for the rerank pool overhead in the two-phase path. Real
 # measured latency ratios across corpus scales — not just bandwidth — will
 # replace this when the full scale-bench rows (1M Lambda) land.
 #
@@ -304,7 +322,7 @@ PRECISION_MULTIPLIERS: dict[str, float] = {
                     # Llama-3.3-70B on 1x B200 (nvidia NVFP4 vs RedHat FP8 ckpts)
     "int8": 1.0,   # baseline — shipped default
     "int4": 1.0,   # uncalibrated
-    "1bit": 0.05,  # measured: 32× memory reduction, 91% recall@1 retention
+    "1bit": 0.05,  # assumed from bandwidth; not a measured cost ratio
 }
 
 
@@ -358,6 +376,7 @@ def resolve_price(provider: str, model: Optional[str] = None,
             float(p.get("output", 0)),
             float(p.get("cache_read", 0)),
             None if r is None else float(r),
+            None if p.get("cache_write") is None else float(p["cache_write"]),
         )
 
     if overrides and provider in overrides:
@@ -388,7 +407,11 @@ def estimate_cost(provider: str, model: Optional[str],
                   overrides: Optional[dict] = None,
                   quantization: Optional[str] = None,
                   quantization_overrides: Optional[dict] = None) -> float:
-    """Estimate USD cost of a usage event from token counts.
+    """Estimate USD cost from token counts for routing/estimation only.
+
+    Quantization multipliers are intentionally not part of ``record_usage`` or
+    the usage ledger. They are estimator/router inputs until a serving tier is
+    calibrated with a defensible end-to-end cost measurement.
 
     ``quantization`` optionally names a precision tier (see
     :data:`QUANTIZATION_TIERS`); the resolved per-token cost is scaled by that

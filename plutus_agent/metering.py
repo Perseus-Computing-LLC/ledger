@@ -86,6 +86,7 @@ def _resolve_workspace(conn, org_id: str, workspace: Optional[str],
 def record_usage(conn, org_id: str, provider: str,
                  input_tokens: int = 0, output_tokens: int = 0,
                  cache_read_tokens: int = 0, reasoning_tokens: int = 0,
+                 cache_write_tokens: Optional[int] = None,
                  model: Optional[str] = None, task_type: str = "general",
                  workspace: Optional[str] = None,
                  cost_usd: Optional[float] = None,
@@ -148,13 +149,15 @@ def record_usage(conn, org_id: str, provider: str,
     # every SUM(tokens) aggregate. Authoritative guard; the /v1/usage boundary
     # also rejects negatives with a 400 before reaching here.
     if (int(input_tokens) < 0 or int(output_tokens) < 0
-            or int(cache_read_tokens) < 0 or int(reasoning_tokens) < 0):
+            or int(cache_read_tokens) < 0 or int(reasoning_tokens) < 0
+            or (cache_write_tokens is not None and int(cache_write_tokens) < 0)):
         raise ValueError("token counts must be non-negative")
 
     org = db.get_org(conn, org_id)
     limit = pricing.tier(org["tier"]).tracked_tokens_month if org else None
     event_tokens = (int(input_tokens) + int(output_tokens)
-                    + int(cache_read_tokens) + int(reasoning_tokens))
+                    + int(cache_read_tokens) + int(reasoning_tokens)
+                    + int(cache_write_tokens or 0))
     tracked_before = tracked_tokens_mtd(conn, org_id, ts) if limit is not None else 0
     if limit is not None and block_over_limit and tracked_before >= limit:
         return MeterResult(
@@ -174,8 +177,9 @@ def record_usage(conn, org_id: str, provider: str,
         # (no exact model price) so a coarse estimate is never mistaken for an
         # authoritative cost. The caller should pass exact cost_usd or calibrate.
         price, exact = pricing.resolve_price(provider, model, pricing_overrides)
-        cost_usd = price.cost(input_tokens, output_tokens,
-                              cache_read_tokens, reasoning_tokens)
+        cost_usd = price.cost_with_cache_write(
+            input_tokens, output_tokens, cache_read_tokens, reasoning_tokens,
+            int(cache_write_tokens or 0))
         unpriced = not exact
     cost_usd = round(float(cost_usd), 6)
 
@@ -319,6 +323,8 @@ def record_usage(conn, org_id: str, provider: str,
         "provider": provider, "model": model, "task_type": task_type,
         "input_tokens": int(input_tokens), "output_tokens": int(output_tokens),
         "cache_read_tokens": int(cache_read_tokens),
+        "cache_write_tokens": (int(cache_write_tokens)
+                                if cache_write_tokens is not None else None),
         "reasoning_tokens": int(reasoning_tokens), "cost_micros": cost_micros,
         "estimated": int(estimated), "source": source, "ts": ts,
         # Optional trailing chain fields; None => omitted from the hash so rows
@@ -331,11 +337,12 @@ def record_usage(conn, org_id: str, provider: str,
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
         "INSERT INTO usage_events(id,org_id,workspace_id,provider,model,task_type,"
-        "input_tokens,output_tokens,cache_read_tokens,reasoning_tokens,cost_micros,"
+        "input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,cost_micros,"
         "baseline_micros,optimal_micros,external_ref,estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
+         (int(cache_write_tokens) if cache_write_tokens is not None else None),
          int(reasoning_tokens), cost_micros, baseline_micros, optimal_micros,
          external_ref, int(estimated), source, ts, prev_hash, row_hash),
     )

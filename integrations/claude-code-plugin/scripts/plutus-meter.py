@@ -63,9 +63,8 @@ def _save_state(state: dict) -> None:
 def _sum_usage(lines):
     """Sum assistant-message usage over ``lines``, grouped by model.
 
-    Returns {model: {input, output, cache_read}}. cache_creation folds into input
-    (Plutus prices input/output/cache_read; cache-write ~= input rate, close
-    enough for tracking)."""
+    Returns {model: {input, output, cache_read, cache_write}}. Cache creation is
+    kept separate so provider cache-write premiums are not hidden as input."""
     by_model = {}
     for ln in lines:
         try:
@@ -79,9 +78,10 @@ def _sum_usage(lines):
         if not u:
             continue
         model = msg.get("model") or "claude"
-        agg = by_model.setdefault(model, {"input": 0, "output": 0, "cache_read": 0})
-        agg["input"] += int(u.get("input_tokens") or 0) \
-            + int(u.get("cache_creation_input_tokens") or 0)
+        agg = by_model.setdefault(model, {"input": 0, "output": 0,
+                                           "cache_read": 0, "cache_write": 0})
+        agg["input"] += int(u.get("input_tokens") or 0)
+        agg["cache_write"] += int(u.get("cache_creation_input_tokens") or 0)
         agg["output"] += int(u.get("output_tokens") or 0)
         agg["cache_read"] += int(u.get("cache_read_input_tokens") or 0)
     return by_model
@@ -122,7 +122,7 @@ def main() -> int:
     by_model = _sum_usage(new_lines)
     events = []
     for model, u in by_model.items():
-        if u["input"] or u["output"] or u["cache_read"]:
+        if u["input"] or u["output"] or u["cache_read"] or u["cache_write"]:
             events.append({
                 "provider": "anthropic",
                 "model": model,
@@ -132,6 +132,7 @@ def main() -> int:
                 "input_tokens": u["input"],
                 "output_tokens": u["output"],
                 "cache_read_tokens": u["cache_read"],
+                "cache_write_tokens": u["cache_write"],
             })
 
     if not events:
