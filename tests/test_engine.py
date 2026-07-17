@@ -66,8 +66,9 @@ class TestPricing(unittest.TestCase):
         # The three-tier savings-share ladder.
         self.assertEqual(pricing.tier("free").savings_share, "suggested")
         self.assertEqual(pricing.tier("pro").savings_share, "waived")
-        self.assertEqual(pricing.tier("team").savings_share, "mandatory")
-        self.assertEqual(pricing.tier("team").per_seat_usd_month, 10.0)
+        self.assertEqual(pricing.tier("team").savings_share, "none")
+        self.assertEqual(pricing.tier("team").per_seat_usd_month, 20.0)
+        self.assertEqual(pricing.tier("team").min_seats, 11)
         self.assertFalse(pricing.tier("free").full_reporting)
         self.assertTrue(pricing.tier("pro").full_reporting)
 
@@ -613,12 +614,13 @@ class TestThreeTierModel(unittest.TestCase):
     def test_savings_mode_ladder(self):
         self.assertEqual(pricing.savings_mode("free"), "suggested")
         self.assertEqual(pricing.savings_mode("pro"), "waived")
-        self.assertEqual(pricing.savings_mode("team"), "mandatory")
-        self.assertEqual(pricing.savings_mode("enterprise"), "custom")
+        self.assertEqual(pricing.savings_mode("team"), "none")
+        self.assertEqual(pricing.savings_mode("enterprise"), "mandatory")
 
     def test_team_tier_shape(self):
         t = pricing.tier("team")
-        self.assertEqual(t.per_seat_usd_month, 10.0)
+        self.assertEqual(t.per_seat_usd_month, 20.0)
+        self.assertEqual(t.min_seats, 11)
         self.assertTrue(t.full_reporting)
         self.assertIsNone(t.seats)  # unlimited
 

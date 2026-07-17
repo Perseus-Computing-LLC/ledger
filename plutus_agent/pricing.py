@@ -44,10 +44,19 @@ class Tier:
     #   "custom"    — Enterprise: negotiated
     #   "none"      — not applicable
     savings_share: str = "none"
-    # Whether the deep reporting surfaces (per-model / per-task breakdowns,
-    # leakage & adherence, exports, verifiable savings receipts) are unlocked.
-    # Free sees the headline savings number only; paid tiers see everything.
+    # Whether paid-only deep reporting surfaces are unlocked. Audit receipts are
+    # separate and remain available to every tier.
     full_reporting: bool = False
+    # Whether every user on this tier can access an auditable savings receipt.
+    audit_access: bool = True
+    # Suggested donation rate for Free users, in basis points of independently
+    # verified savings. This is a recommendation, never an invoice.
+    donation_bps: int = 0
+    # Savings-share rate in basis points when the tier uses a verified-savings
+    # share. Enterprise is currently the only candidate in the new contract.
+    savings_share_bps: int = 0
+    # Minimum seats required for this tier. None means no minimum.
+    min_seats: Optional[int] = None
 
     @property
     def is_metered_limit(self) -> bool:
@@ -62,14 +71,16 @@ TIERS = {
         tracked_tokens_month=None,   # unlimited metering — the savings billboard
                                      # has to keep running to be a reminder
         workspaces=1,
-        seats=5,
+        seats=10,
         savings_share="suggested",
         full_reporting=False,
+        audit_access=True,
+        donation_bps=500,
         features=(
             "Unlimited spend metering",
             "Verify you're getting the tokens you pay for",
             "Live efficiency number (flagship-equivalent)",
-            "Up to 5 team members · 1 workspace",
+            "Up to 10 team members · 1 workspace",
             "Optional tip jar when Perseus saves you money",
         ),
         blurb="Track your own AI spend and verify you're getting your tokens. Free, no card.",
@@ -98,18 +109,21 @@ TIERS = {
         key="team",
         name="Team",
         price_usd_month=0.0,         # priced per seat, not flat
-        per_seat_usd_month=10.0,
+        per_seat_usd_month=20.0,
         tracked_tokens_month=None,
         workspaces=None,
         seats=None,
-        savings_share="mandatory",   # 10% of provable savings, invoiced
+        min_seats=11,
+        savings_share="none",
+        savings_share_bps=0,
         full_reporting=True,
+        audit_access=True,
         features=(
             "Everything in Pro, per seat",
             "Attribution by user, workspace & provider",
             "Aggregate spend rollups per user and workspace",
             "Unlimited workspaces",
-            "$10/seat/mo + 10% of savings (with Perseus)",
+            "$20/seat/mo for teams of 11+",
         ),
         blurb="Track and attribute spend across your team — by workspace and by provider.",
     ),
@@ -120,8 +134,10 @@ TIERS = {
         tracked_tokens_month=None,
         workspaces=None,
         seats=None,
-        savings_share="custom",
+        savings_share="mandatory",
+        savings_share_bps=1000,
         full_reporting=True,
+        audit_access=True,
         features=(
             "Everything in Team",
             "SSO (SAML / OIDC)",
@@ -148,6 +164,27 @@ def savings_mode(tier_key: str) -> str:
     """The savings-share setting for a tier: suggested | waived | mandatory |
     custom | none. The single lever behind the whole model."""
     return tier(tier_key).savings_share
+
+
+def recommended_donation_usd(tier_key: str, verified_savings_usd: float) -> float:
+    """Return the optional donation recommendation, never an invoice."""
+    t = tier(tier_key)
+    if verified_savings_usd <= 0 or t.donation_bps <= 0:
+        return 0.0
+    return round(float(verified_savings_usd) * t.donation_bps / 10_000.0, 2)
+
+
+def seat_charge_usd(tier_key: str, seats: int) -> float:
+    """Return the monthly seat floor for a tier, validating seat minimums."""
+    t = tier(tier_key)
+    seats = int(seats)
+    if seats < 1:
+        raise ValueError("seats must be at least 1")
+    if t.min_seats is not None and seats < t.min_seats:
+        raise ValueError(f"{t.name} requires at least {t.min_seats} seats")
+    if t.per_seat_usd_month is not None:
+        return round(seats * t.per_seat_usd_month, 2)
+    return round(t.price_usd_month, 2)
 
 
 # ----------------------------------------------------- provider price tables ---

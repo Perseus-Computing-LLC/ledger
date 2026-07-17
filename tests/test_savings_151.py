@@ -251,8 +251,8 @@ def test_tiers_have_correct_savings_mode():
     """The four tiers have the correct savings_share setting."""
     assert savings_mode("free") == "suggested"
     assert savings_mode("pro") == "waived"
-    assert savings_mode("team") == "mandatory"
-    assert savings_mode("enterprise") == "custom"
+    assert savings_mode("team") == "none"
+    assert savings_mode("enterprise") == "mandatory"
 
 
 def test_free_tier_has_suggested_savings(tmp_path):
@@ -271,19 +271,21 @@ def test_pro_tier_waives_savings(tmp_path):
     assert t.price_usd_month == 20.0
 
 
-def test_team_tier_makes_savings_mandatory(tmp_path):
-    """Team orgs have mandatory savings-share."""
+def test_team_tier_is_seat_only(tmp_path):
+    """Team orgs are seat-priced from 11 seats; savings-share is not billed."""
     conn, org = _org(tmp_path, tier="team")
     t = tier("team")
-    assert t.savings_share == "mandatory"
+    assert t.savings_share == "none"
     assert t.price_usd_month == 0.0  # per-seat pricing
-    assert t.per_seat_usd_month == 10.0
+    assert t.per_seat_usd_month == 20.0
+    assert t.min_seats == 11
 
 
-def test_enterprise_tier_custom_savings(tmp_path):
-    """Enterprise orgs have custom savings-share."""
+def test_enterprise_tier_uses_ten_percent_verified_savings():
+    """Enterprise uses the auditable 10% verified-savings mode."""
     t = tier("enterprise")
-    assert t.savings_share == "custom"
+    assert t.savings_share == "mandatory"
+    assert t.savings_share_bps == 1000
     assert t.price_usd_month == 0.0
 
 
