@@ -635,6 +635,12 @@ CREATE TABLE IF NOT EXISTS savings_invoices (
     total_events      INTEGER NOT NULL DEFAULT 0,  -- all metered events in the period
     stripe_invoice_id TEXT,                   -- NULL until a Stripe invoice is raised
     status            TEXT NOT NULL DEFAULT 'pending',  -- pending|invoiced|void
+    -- #151: price table version at billing time, so the exact rates used to
+    -- compute the savings can be reconstructed later.
+    pricing_version   TEXT,                   -- e.g. "2026-06-26" from PRICE_TABLE_AS_OF
+    -- #151: whether the minimum charge threshold was cleared. False when the
+    -- amount was below min_charge_usd and no Stripe invoice was raised.
+    min_charge_met    INTEGER NOT NULL DEFAULT 0,
     ts                REAL NOT NULL,
     UNIQUE(org_id, period_label)
 );
@@ -797,6 +803,9 @@ def _migrate_add_columns(conn) -> None:
         ("api_keys", "scope", "TEXT"),
         ("api_keys", "event_count", "INTEGER NOT NULL DEFAULT 0"),
         ("api_keys", "rotation_of", "TEXT"),
+        # #151: savings-share pricing version and min-charge tracking.
+        ("savings_invoices", "pricing_version", "TEXT"),
+        ("savings_invoices", "min_charge_met", "INTEGER NOT NULL DEFAULT 0"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
@@ -1567,13 +1576,19 @@ def record_savings_invoice(conn, org_id: str, period_label: str, *,
                            amount_micros: int, covered_events: int,
                            total_events: int, stripe_invoice_id: Optional[str] = None,
                            status: str = "pending", ts: Optional[float] = None,
-                           commit: bool = True) -> dict:
+                           commit: bool = True,
+                           pricing_version: Optional[str] = None,
+                           min_charge_met: bool = False) -> dict:
     """Insert-or-update the savings-share invoice for an org+period.
 
     Idempotent by the ``UNIQUE(org_id, period_label)`` constraint: the first call
     inserts, a re-run for the same period updates the same row (e.g. to attach a
     Stripe invoice id or restate the amount after more usage landed). Returns the
     stored row via :func:`get_savings_invoice`.
+
+    New in #151: ``pricing_version`` captures the price table vintage at billing
+    time so the exact rates used can be reconstructed later. ``min_charge_met``
+    records whether the amount cleared the minimum-charge threshold.
     """
     ts = ts if ts is not None else time.time()
     existing = conn.execute(
@@ -1584,24 +1599,78 @@ def record_savings_invoice(conn, org_id: str, period_label: str, *,
         conn.execute(
             "UPDATE savings_invoices SET gross_savings_micros=?, rate_bps=?, "
             "amount_micros=?, covered_events=?, total_events=?, "
-            "stripe_invoice_id=COALESCE(?, stripe_invoice_id), status=?, ts=? "
+            "stripe_invoice_id=COALESCE(?, stripe_invoice_id), status=?, ts=?, "
+            "pricing_version=COALESCE(?, pricing_version), "
+            "min_charge_met=? "
             "WHERE org_id=? AND period_label=?",
             (int(gross_savings_micros), int(rate_bps), int(amount_micros),
              int(covered_events), int(total_events), stripe_invoice_id, status, ts,
+             pricing_version, int(min_charge_met),
              org_id, period_label),
         )
     else:
         conn.execute(
             "INSERT INTO savings_invoices(id,org_id,period_label,gross_savings_micros,"
-            "rate_bps,amount_micros,covered_events,total_events,stripe_invoice_id,status,ts)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "rate_bps,amount_micros,covered_events,total_events,stripe_invoice_id,"
+            "status,ts,pricing_version,min_charge_met)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (new_id("savinv"), org_id, period_label, int(gross_savings_micros),
              int(rate_bps), int(amount_micros), int(covered_events),
-             int(total_events), stripe_invoice_id, status, ts),
+             int(total_events), stripe_invoice_id, status, ts,
+             pricing_version, int(min_charge_met)),
         )
     if commit:
         conn.commit()
     return get_savings_invoice(conn, org_id, period_label)
+
+
+def get_invoice_events(conn, org_id: str, period_label: str) -> list[dict]:
+    """Return all usage_events for an org+period with pricing version info
+    so a customer can reconstruct the exact evidence behind an invoice (#151).
+
+    Returns a list of dicts with event fields plus a ``pricing_version`` key
+    sourced from the savings_invoices row (or None if not yet invoiced).
+    """
+    from .pricing import PRICE_TABLE_AS_OF
+    start_ts, end_ts = _month_window(period_label)
+    inv = get_savings_invoice(conn, org_id, period_label)
+    pv = (inv or {}).get("pricing_version") or PRICE_TABLE_AS_OF
+    rows = conn.execute(
+        "SELECT id, org_id, provider, model, ts, cost_micros, "
+        "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, "
+        "baseline_micros, estimated, external_ref, user_id, prev_hash, row_hash "
+        "FROM usage_events WHERE org_id=? AND ts>=? AND ts<? "
+        "ORDER BY ts ASC, rowid ASC",
+        (org_id, float(start_ts), float(end_ts)),
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        cost_micros = d.pop("cost_micros", 0)
+        d["cost_usd"] = micros_to_usd(int(cost_micros))
+        if d.get("baseline_micros") is not None:
+            d["baseline_usd"] = micros_to_usd(int(d["baseline_micros"]))
+            d["savings_usd"] = micros_to_usd(
+                int(max(0, d["baseline_micros"] - int(cost_micros)))
+            )
+        else:
+            d["baseline_usd"] = None
+            d["savings_usd"] = 0.0
+        d["pricing_version"] = pv
+        out.append(d)
+    return out
+
+
+def _month_window(period_label: str) -> tuple[float, float]:
+    """Return (start_ts, end_ts) for a 'YYYY-MM' period label."""
+    import datetime as _dt
+    y, m = period_label.split("-")
+    start = _dt.datetime(int(y), int(m), 1, tzinfo=_dt.timezone.utc).timestamp()
+    if m == "12":
+        end = _dt.datetime(int(y) + 1, 1, 1, tzinfo=_dt.timezone.utc).timestamp()
+    else:
+        end = _dt.datetime(int(y), int(m) + 1, 1, tzinfo=_dt.timezone.utc).timestamp()
+    return start, end
 
 
 # ------------------------------------------------------------- stripe idemp ---

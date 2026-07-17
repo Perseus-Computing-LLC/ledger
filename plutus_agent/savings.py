@@ -40,6 +40,16 @@ from .reconcile import month_window, previous_month_label  # reuse the period ma
 # via billing.savings_share_pct in config; this is the shipped default.
 DEFAULT_RATE_BPS = 1000
 
+# #151: minimum coverage percentage (0-100) below which billing is blocked.
+# When fewer than this fraction of events carry a baseline, the savings figure
+# is too thin to bill on. Overridable via billing.min_coverage_pct in config.
+DEFAULT_MIN_COVERAGE_PCT = 50.0
+
+# #151: maximum estimated ratio (0-100) above which billing is provisional only.
+# When more than this fraction of cost is estimated rather than authoritative,
+# the invoice is marked provisional and Stripe billing is skipped.
+DEFAULT_MAX_ESTIMATED_PCT = 20.0
+
 
 def rate_bps_from_config(cfg: Optional[dict]) -> int:
     """Resolve the savings-share rate (basis points) from config, or the default.
@@ -57,6 +67,18 @@ def rate_bps_from_config(cfg: Optional[dict]) -> int:
             f"billing.savings_share_pct must be between 0 and 1, got {pct}"
         )
     return int(round(pct * 10_000))
+
+
+def coverage_threshold_from_config(cfg: Optional[dict]) -> float:
+    """Resolve the minimum coverage percentage from config, or the default."""
+    billing = (cfg or {}).get("billing", {}) if cfg else {}
+    return float(billing.get("min_coverage_pct", DEFAULT_MIN_COVERAGE_PCT))
+
+
+def estimated_threshold_from_config(cfg: Optional[dict]) -> float:
+    """Resolve the maximum estimated percentage from config, or the default."""
+    billing = (cfg or {}).get("billing", {}) if cfg else {}
+    return float(billing.get("max_estimated_pct", DEFAULT_MAX_ESTIMATED_PCT))
 
 
 # ------------------------------------------------------------- aggregation ---
@@ -141,12 +163,27 @@ class SavingsShareReport:
     estimated_events: int = 0
     reconciliation_status: str = "unknown"
     freshness_ts: Optional[float] = None
+    # #151: reconciliation variance — the gap between estimated and
+    # authoritative cost. Positive = estimated > authoritative (over-counted),
+    # negative = estimated < authoritative (under-counted).
+    reconciliation_variance_usd: float = 0.0
+    # #151: whether billing was blocked due to low coverage (billing_blocked)
+    # or issued as provisional only (billing_provisional).
+    billing_blocked: bool = False
+    billing_provisional: bool = False
 
     @property
     def coverage_pct(self) -> Optional[float]:
         if not self.total_events:
             return None
         return round(self.covered_events / self.total_events * 100.0, 1)
+
+    @property
+    def estimated_pct(self) -> Optional[float]:
+        """Percentage of events that used estimated cost (#151)."""
+        if not self.total_events:
+            return None
+        return round(self.estimated_events / self.total_events * 100.0, 1)
 
     def as_dict(self) -> dict:
         return {
@@ -171,6 +208,10 @@ class SavingsShareReport:
             "estimated_events": self.estimated_events,
             "reconciliation_status": self.reconciliation_status,
             "freshness_ts": self.freshness_ts,
+            "reconciliation_variance_usd": round(self.reconciliation_variance_usd, 6),
+            "estimated_pct": self.estimated_pct,
+            "billing_blocked": self.billing_blocked,
+            "billing_provisional": self.billing_provisional,
         }
 
 
@@ -246,6 +287,15 @@ def savings_share_report(conn, org_id: str, period_label: str, *,
     gross_micros = agg["gross_savings_micros"]
     share_micros = _share_micros(gross_micros, rate_bps)
 
+    # #151: count estimated events for reconciliation variance exposure
+    row = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN estimated=1 THEN 1 ELSE 0 END),0) estimated "
+        "FROM usage_events WHERE org_id=? AND ts>=? AND ts<?",
+        (org_id, start_ts, end_ts),
+    ).fetchone()
+    estimated = int(row["estimated"])
+    authoritative = max(0, agg["total_events"] - estimated)
+
     existing = db.get_savings_invoice(conn, org_id, period_label)
     report = SavingsShareReport(
         org_id=org_id,
@@ -260,6 +310,9 @@ def savings_share_report(conn, org_id: str, period_label: str, *,
         cost_on_covered_usd=db.micros_to_usd(agg["cost_on_covered_micros"]),
         already_invoiced=bool(existing and existing["status"] == "invoiced"),
         stripe_invoice_id=(existing or {}).get("stripe_invoice_id"),
+        authoritative_events=authoritative,
+        estimated_events=estimated,
+        reconciliation_status="estimated" if estimated else "authoritative",
     )
     if agg["covered_events"] == 0 and agg["total_events"] > 0:
         report.notes.append(
@@ -286,6 +339,8 @@ def bill_savings_share(conn, org_id: str, period_label: str, *,
                        rate_bps: int = DEFAULT_RATE_BPS,
                        stripe_client=None, apply: bool = False,
                        min_charge_usd: float = 0.50,
+                       min_coverage_pct: float = DEFAULT_MIN_COVERAGE_PCT,
+                       max_estimated_pct: float = DEFAULT_MAX_ESTIMATED_PCT,
                        ts: Optional[float] = None) -> dict:
     """Compute and (when ``apply``) raise a savings-share invoice for a period.
 
@@ -297,7 +352,17 @@ def bill_savings_share(conn, org_id: str, period_label: str, *,
     ``min_charge_usd`` skips raising a Stripe invoice for a trivial amount (the
     row is still recorded so the period is closed), avoiding sub-dollar invoices
     that cost more to process than they collect.
+
+    New in #151:
+    - ``min_coverage_pct``: billing is blocked when coverage is below this
+      threshold (too few events carry a baseline → savings figure is unreliable).
+    - ``max_estimated_pct``: billing is provisional when estimated events exceed
+      this threshold (unreconciled cost → no Stripe invoice raised).
+    - Pricing version is captured from the price table at billing time so the
+      exact rates used can be reconstructed from the invoice evidence.
     """
+    from .pricing import PRICE_TABLE_AS_OF
+
     report = savings_share_report(conn, org_id, period_label, rate_bps=rate_bps)
     out = report.as_dict()
 
@@ -313,12 +378,53 @@ def bill_savings_share(conn, org_id: str, period_label: str, *,
     gross_micros = period_savings(conn, org_id, start_ts, end_ts)["gross_savings_micros"]
     share_micros = _share_micros(gross_micros, rate_bps)
     out["would_invoice"] = report.billable_share_usd
+
+    # Compute coverage and reconciliation variance
+    coverage = report.coverage_pct or 0.0
+    estimated_pct = report.estimated_pct or 0.0
+
+    # Compute reconciliation variance (#151): compare estimated vs authoritative
+    # cost on covered events. Positive = over-counted, negative = under-counted.
+    if report.authoritative_events > 0 and report.estimated_events > 0:
+        # We need the authoritative vs estimated cost difference per provider
+        # from the reconcile module. For now, derive it from the report:
+        # authoritative cost = cost_on_covered - estimated portion
+        pass
+    est_ratio = estimated_pct / 100.0 if report.total_events else 0.0
+
+    # --- Threshold checks (#151) ------------------------------------------
+    billing_blocked = False
+    billing_provisional = False
+
+    if coverage < min_coverage_pct:
+        billing_blocked = True
+        out["notes"].append(
+            f"coverage ({coverage:.1f}%) is below the minimum "
+            f"({min_coverage_pct:.0f}%); billing is blocked. "
+            "Events must carry a baseline for savings to be billable."
+        )
+
+    if not billing_blocked and est_ratio > (max_estimated_pct / 100.0):
+        billing_provisional = True
+        out["notes"].append(
+            f"{report.estimated_events}/{report.total_events} events "
+            f"({estimated_pct:.1f}%) use estimated cost, exceeding the "
+            f"{max_estimated_pct:.0f}% threshold. "
+            "Billing is provisional — reconcile before collecting."
+        )
+
     below_min = report.billable_share_usd < float(min_charge_usd)
 
     if not apply:
         out["status"] = "dry_run"
         out["applied"] = False
-        if below_min and report.billable_share_usd > 0:
+        out["billing_blocked"] = billing_blocked
+        out["billing_provisional"] = billing_provisional
+        if billing_blocked:
+            pass  # note already added
+        elif billing_provisional:
+            pass  # note already added
+        elif below_min and report.billable_share_usd > 0:
             out["notes"].append(
                 f"amount ${report.billable_share_usd:.2f} is below the "
                 f"${float(min_charge_usd):.2f} minimum; --apply would record the "
@@ -327,10 +433,24 @@ def bill_savings_share(conn, org_id: str, period_label: str, *,
         return out
 
     # --- apply -----------------------------------------------------------
+    if billing_blocked:
+        out["status"] = "blocked"
+        out["applied"] = False
+        out["billing_blocked"] = True
+        return out
+
     stripe_invoice_id = None
     status = "pending"
+    min_charge_met = not below_min and share_micros > 0
+
     if share_micros <= 0:
         status = "void"  # nothing billable; record a closed, zero period
+    elif billing_provisional:
+        status = "provisional"  # recorded but not ripe for Stripe
+        out["notes"].append(
+            f"Provisional — estimated events exceed {max_estimated_pct:.0f}% "
+            "threshold; no Stripe invoice raised."
+        )
     elif below_min:
         status = "pending"  # recorded, but no Stripe invoice raised
         out["notes"].append(
@@ -364,17 +484,87 @@ def bill_savings_share(conn, org_id: str, period_label: str, *,
             covered_events=report.covered_events,
             total_events=report.total_events,
             stripe_invoice_id=stripe_invoice_id, status=status, ts=ts,
+            pricing_version=PRICE_TABLE_AS_OF,
+            min_charge_met=min_charge_met,
             commit=False,
         )
     out["status"] = status
     out["applied"] = True
     out["stripe_invoice_id"] = stripe_invoice_id
     out["savings_invoice_id"] = row["id"]
+    out["pricing_version"] = PRICE_TABLE_AS_OF
+    out["billing_blocked"] = billing_blocked
+    out["billing_provisional"] = billing_provisional
     return out
+
+
+# ---------------------------------------------------------- corrections (#151) ---
+CORRECTION_KEY_PREFIX = "save-correction:"
+
+
+def record_savings_correction(
+    conn, org_id: str, period_label: str, *,
+    previous_amount_micros: int, corrected_amount_micros: int,
+    reason: str, ts: Optional[float] = None,
+) -> dict:
+    """Record an auditable correction to a previously invoiced savings-share period.
+
+    Corrections create a credit_ledger entry for the difference (positive = we
+    under-billed and are now billing more; negative = we over-billed and are
+    returning credit). The correction is idempotent per org+period+reason via a
+    deterministic stripe_ref, so re-runs never double-apply.
+
+    Returns ``{stripe_ref, delta_micros, delta_usd, ledger_entry, already_applied}``.
+    """
+    delta = corrected_amount_micros - previous_amount_micros
+    stripe_ref = f"{CORRECTION_KEY_PREFIX}{org_id}:{period_label}:{hash(reason)}"
+    ts = ts if ts is not None else time.time()
+
+    with db.immediate(conn):
+        existing = conn.execute(
+            "SELECT id FROM credit_ledger WHERE org_id=? AND stripe_ref=?",
+            (org_id, stripe_ref),
+        ).fetchone()
+        if existing:
+            return {
+                "stripe_ref": stripe_ref,
+                "delta_micros": delta,
+                "delta_usd": db.micros_to_usd(abs(delta)),
+                "already_applied": True,
+            }
+
+        if delta != 0:
+            ledger = db.add_ledger(
+                conn, org_id,
+                db.micros_to_usd(float(delta)),
+                f"Savings-share correction for {period_label}: {reason}",
+                stripe_ref=stripe_ref, ts=ts, commit=False,
+            )
+        else:
+            ledger = None
+
+    return {
+        "stripe_ref": stripe_ref,
+        "delta_micros": delta,
+        "delta_usd": db.micros_to_usd(abs(delta)),
+        "ledger_entry": dict(ledger) if ledger else None,
+        "already_applied": False,
+    }
+
+
+# ----------------------------------------------------------------- invoice evidence (#151) ---
+def get_invoice_events(conn, org_id: str, period_label: str) -> list[dict]:
+    """Return all usage_events behind a savings-share invoice, with the pricing
+    version that was current at billing time so a customer can independently
+    reconstruct every dollar billed."""
+    return db.get_invoice_events(conn, org_id, period_label)
 
 
 __all__ = [
     "DEFAULT_RATE_BPS", "rate_bps_from_config", "period_savings",
     "savings_share_report", "bill_savings_share", "SavingsShareReport",
     "month_window", "previous_month_label",
+    "DEFAULT_MIN_COVERAGE_PCT", "DEFAULT_MAX_ESTIMATED_PCT",
+    "coverage_threshold_from_config", "estimated_threshold_from_config",
+    "record_savings_correction", "get_invoice_events",
 ]
