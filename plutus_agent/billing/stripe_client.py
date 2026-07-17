@@ -220,8 +220,29 @@ class StripeClient:
             cancel_url=self.billing.get("cancel_url", ""),
             metadata={"plutus_org_id": org_id, "kind": "team_subscription",
                       "seat_quantity": str(quantity)},
+            subscription_data={"metadata": {"plutus_org_id": org_id,
+                                             "kind": "team_subscription"}},
         )
         return {"id": session["id"], "url": session["url"]}
+
+    def sync_team_seats(self, conn, org_id: str) -> dict:
+        """Converge a Team subscription's quantity to active seat count."""
+        self._require()
+        org = db.get_org(conn, org_id)
+        subscription_id = org["stripe_subscription_id"] if org else None
+        if not subscription_id:
+            return {"updated": False, "reason": "no active Team subscription"}
+        sub = self._stripe.Subscription.retrieve(subscription_id)
+        items = (sub.get("items") or {}).get("data") or []
+        if not items:
+            raise BillingError("Team subscription has no subscription item")
+        quantity = max(1, db.active_seat_count(conn, org_id))
+        item = items[0]
+        if int(item.get("quantity") or 0) != quantity:
+            self._stripe.Subscription.modify(
+                subscription_id, items=[{"id": item["id"], "quantity": quantity}],
+            )
+        return {"updated": True, "quantity": quantity}
 
     def create_savings_invoice(self, conn, org_id: str, amount_usd: float,
                                period_label: str, description: str = "") -> dict:
@@ -376,9 +397,13 @@ def _apply_checkout_completed(conn, obj) -> dict:
         return {"status": "credited", "org_id": org_id, "amount_usd": usd,
                 "balance_after": float(row["balance_after"])}
     if kind == "team_subscription":
+        if obj.get("subscription"):
+            db.set_stripe_subscription(conn, org_id, obj["subscription"], commit=False)
         db.set_org_tier(conn, org_id, "team", commit=False)
         return {"status": "subscribed", "org_id": org_id, "tier": "team"}
     if kind == "subscription" or obj.get("mode") == "subscription":
+        if obj.get("subscription"):
+            db.set_stripe_subscription(conn, org_id, obj["subscription"], commit=False)
         db.set_org_tier(conn, org_id, "pro", commit=False)
         return {"status": "subscribed", "org_id": org_id, "tier": "pro"}
     return {"status": "ignored", "org_id": org_id}
@@ -395,6 +420,8 @@ def _apply_subscription_change(conn, obj) -> dict:
     # `subscription.deleted` (→ free) when dunning is exhausted.
     meta = obj.get("metadata") or {}
     is_team = meta.get("kind") == "team_subscription"
+    if obj.get("id"):
+        db.set_stripe_subscription(conn, org_id, obj["id"], commit=False)
     tier = "team" if is_team and status in ("active", "trialing") else (
         "pro" if status in ("active", "trialing") else "free")
     db.set_org_tier(conn, org_id, tier, commit=False)

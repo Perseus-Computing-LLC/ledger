@@ -1010,6 +1010,8 @@ class Handler(BaseHTTPRequestHandler):
         if limit is not None and db.active_seat_count(conn, org_id) >= limit:
             return self._json(409, {"error": "seat limit reached", "limit": limit})
         user = db.ensure_user(conn, org_id, email, (f.get("name") or "").strip() or None)
+        if org["tier"] == "team" and self.ctx.stripe.available:
+            self.ctx.stripe.sync_team_seats(conn, org_id)
         return self._json(201, {"user": dict(user),
                                 "active_seats": db.active_seat_count(conn, org_id)})
 
@@ -1019,6 +1021,9 @@ class Handler(BaseHTTPRequestHandler):
         user_id = (f.get("user_id") or "").strip()
         if not org_id or not user_id or not db.set_user_active(conn, user_id, org_id, False):
             return self._json(404, {"error": "user not found"})
+        org = db.get_org(conn, org_id)
+        if org["tier"] == "team" and self.ctx.stripe.available:
+            self.ctx.stripe.sync_team_seats(conn, org_id)
         return self._json(200, {"user_id": user_id, "active": False,
                                 "active_seats": db.active_seat_count(conn, org_id)})
 

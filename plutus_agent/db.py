@@ -47,7 +47,8 @@ from typing import Optional
 #     Nullable and hash-chained as an optional trailing field for the same reason.
 # 12 = adds nullable usage_events.user_id and users.active for Team attribution /
 #     seat billing. Both are additive; user_id is an optional chain field.
-SCHEMA_VERSION = 12
+# 13 = adds organizations.stripe_subscription_id for Team seat quantity sync.
+SCHEMA_VERSION = 13
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -445,6 +446,7 @@ CREATE TABLE IF NOT EXISTS organizations (
     slug               TEXT UNIQUE NOT NULL,
     tier               TEXT NOT NULL DEFAULT 'free',
     stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
     -- When 1, this org is exempt from the prepaid-credit hard-stop (#28): usage
     -- is always recorded and may drive the balance negative (track-only mode for
     -- trusted / internal orgs). 0 = enforce the hard-stop when it's enabled.
@@ -741,6 +743,7 @@ def _migrate_add_columns(conn) -> None:
     additions = [
         # (table, column, definition) — #28: per-org hard-stop exemption.
         ("organizations", "allow_negative_balance", "INTEGER NOT NULL DEFAULT 0"),
+        ("organizations", "stripe_subscription_id", "TEXT"),
         # #108: usage_events tamper-evidence chain. Nullable (no default) so the
         # chain starts at upgrade and pre-existing rows stay NULL = "unverifiable
         # (pre-chain)" rather than being back-filled with a hash we can't attest.
@@ -903,6 +906,14 @@ def org_by_stripe_customer(conn, customer_id: str) -> Optional[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM organizations WHERE stripe_customer_id=?", (customer_id,)
     ).fetchone()
+
+
+def set_stripe_subscription(conn, org_id: str, subscription_id: str,
+                            commit: bool = True) -> None:
+    conn.execute("UPDATE organizations SET stripe_subscription_id=? WHERE id=?",
+                 (subscription_id, org_id))
+    if commit:
+        conn.commit()
 
 
 # ------------------------------------------------------------------- users ---
