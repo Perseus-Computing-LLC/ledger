@@ -718,13 +718,19 @@ def cmd_close(args):
         sys.exit(1)
 
 
-def _savings_rate_bps(cfg, args) -> int:
-    """Resolve the savings-share rate: --rate (percent) overrides config."""
+def _savings_rate_bps(cfg, args, tier_key=None) -> int:
+    """Resolve the savings-share rate.
+
+    Explicit --rate wins. Otherwise Enterprise uses its canonical 10% contract;
+    other tiers use the configured default for backward-compatible reports.
+    """
     if getattr(args, "rate", None) is not None:
         pct = float(args.rate)
         if not (0.0 <= pct <= 100.0):
             sys.exit("plutus: --rate must be a percentage between 0 and 100")
-        return int(round(pct * 100))  # percent -> basis points
+        return int(round(pct * 100))
+    if tier_key and pricing.tier(tier_key).savings_share_bps:
+        return pricing.tier(tier_key).savings_share_bps
     return savings_mod.rate_bps_from_config(cfg)
 
 
@@ -759,7 +765,7 @@ def cmd_savings(args):
     conn = _conn()
     org = _resolve_org(conn, args.org)
     period = args.period or savings_mod.previous_month_label()
-    rate_bps = _savings_rate_bps(cfg, args)
+    rate_bps = _savings_rate_bps(cfg, args, org["tier"])
     if getattr(args, "window", None):
         rep = savings_mod.operational_savings_report(
             conn, org["id"], args.window, rate_bps=rate_bps
@@ -791,7 +797,7 @@ def cmd_bill_savings(args):
         sys.exit(f"plutus: won't bill savings-share on a '{org['tier']}' org — {why}. "
                  f"Mandatory billing is a Team feature. Pass --force to override.")
     period = args.period or savings_mod.previous_month_label()
-    rate_bps = _savings_rate_bps(cfg, args)
+    rate_bps = _savings_rate_bps(cfg, args, org["tier"])
     stripe_client = None
     if args.apply:
         from .billing import StripeClient

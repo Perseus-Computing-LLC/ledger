@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import io
 
-from .. import db, metering
+from .. import db, metering, pricing, savings
 
 
 def default_org_id(conn) -> str | None:
@@ -77,6 +77,35 @@ def _csv_safe(value):
     if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
         return "'" + value
     return value
+
+
+def audit_json(conn, org_id: str, *, hmac_key: str | None = None) -> dict:
+    """Return a compact, tier-independent proof receipt for Plutus savings."""
+    import time
+    period = time.strftime("%Y-%m", time.gmtime())
+    org = db.get_org(conn, org_id)
+    tier_key = org["tier"] if org else "free"
+    report = savings.savings_share_report(conn, org_id, period).as_dict()
+    integrity = db.verify_chain(conn, org_id=org_id, hmac_key=hmac_key)
+    checkpoints = db.list_checkpoints(conn, org_id)
+    donation = pricing.recommended_donation_usd(
+        tier_key, report.get("gross_savings_usd", 0.0)
+    )
+    return {
+        "org_id": org_id,
+        "tier": tier_key,
+        "period": period,
+        "savings": report,
+        "recommended_donation_usd": donation,
+        "recommended_donation_bps": pricing.tier(tier_key).donation_bps,
+        "ledger_integrity": integrity,
+        "latest_checkpoint": dict(checkpoints[-1]) if checkpoints else None,
+        "audit_access": pricing.tier(tier_key).audit_access,
+        "verification": {
+            "method": "hash-chained usage ledger plus optional retained checkpoint",
+            "authoritative_billing_required": report.get("billing_provisional") is not False,
+        },
+    }
 
 
 def export_csv(conn, org_id: str, since=None, until=None) -> str:

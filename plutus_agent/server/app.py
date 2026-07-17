@@ -398,6 +398,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not org_id:
                     return self._json(404, {"error": "no organizations"})
                 return self._json(200, api.summary_json(conn, org_id))
+            if path == "/api/audit":
+                org_id = self._authz_org(conn, q.get("org", [None])[0])
+                if not org_id:
+                    return self._json(404, {"error": "no organizations"})
+                return self._json(200, api.audit_json(
+                    conn, org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg)))
             if path == "/api/ledger":
                 org_id = self._authz_org(conn, q.get("org", [None])[0])
                 if not org_id:
@@ -555,6 +561,8 @@ class Handler(BaseHTTPRequestHandler):
             _rate = _sav.rate_bps_from_config(self.ctx.cfg)
             summary["savings_share"] = _sav.savings_share_report(
                 conn, org_id, _lbl, rate_bps=_rate).as_dict()
+            summary["audit"] = api.audit_json(
+                conn, org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg))
         except Exception:
             summary["savings_share"] = None
         integrity = db.verify_chain(  # #108: tamper-evidence tile for this org
