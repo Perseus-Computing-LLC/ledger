@@ -658,6 +658,11 @@ def _print_savings_report(d, org_name, mode):
     print(f"\n  savings-share {d['period']} for '{org_name}' — {mode}\n")
     cov = "" if d["coverage_pct"] is None else f" ({d['coverage_pct']:.0f}% coverage)"
     print(f"    events with a baseline : {d['covered_events']}/{d['total_events']}{cov}")
+    if d.get("window"):
+        print(f"    authoritative events   : {d.get('authoritative_events', 0)}")
+        print(f"    estimated events       : {d.get('estimated_events', 0)}")
+        print(f"    reconciliation         : {d.get('reconciliation_status', 'unknown')}")
+        print(f"    fresh at               : {d.get('freshness_ts')}")
     print(f"    billable (cost > $0)   : {d.get('billable_events', d['covered_events'])}")
     print(f"    baseline cost          : ${d['baseline_usd']:,.4f}")
     print(f"    actual cost (covered)  : ${d['cost_on_covered_usd']:,.4f}")
@@ -677,7 +682,12 @@ def cmd_savings(args):
     org = _resolve_org(conn, args.org)
     period = args.period or savings_mod.previous_month_label()
     rate_bps = _savings_rate_bps(cfg, args)
-    rep = savings_mod.savings_share_report(conn, org["id"], period, rate_bps=rate_bps)
+    if getattr(args, "window", None):
+        rep = savings_mod.operational_savings_report(
+            conn, org["id"], args.window, rate_bps=rate_bps
+        )
+    else:
+        rep = savings_mod.savings_share_report(conn, org["id"], period, rate_bps=rate_bps)
     conn.close()
     d = rep.as_dict()
     if args.json:
@@ -984,6 +994,8 @@ def build_parser():
         help="show verified savings + the savings-share due for a period (#7)")
     psv.add_argument("--org")
     psv.add_argument("--period", help="YYYY-MM (default: previous month)")
+    psv.add_argument("--window", choices=["today", "24h", "7d", "mtd", "billing"],
+                     help="live operational window; overrides --period")
     psv.add_argument("--rate", type=float,
                      help="savings-share percent (default: billing.savings_share_pct or 10)")
     psv.add_argument("--json", action="store_true")

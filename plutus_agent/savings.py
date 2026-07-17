@@ -29,6 +29,7 @@ writes happen in one serialized transaction.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -133,6 +134,13 @@ class SavingsShareReport:
     already_invoiced: bool = False
     stripe_invoice_id: Optional[str] = None
     notes: list = field(default_factory=list)
+    window: Optional[str] = None
+    window_start_ts: Optional[float] = None
+    window_end_ts: Optional[float] = None
+    authoritative_events: int = 0
+    estimated_events: int = 0
+    reconciliation_status: str = "unknown"
+    freshness_ts: Optional[float] = None
 
     @property
     def coverage_pct(self) -> Optional[float]:
@@ -156,7 +164,78 @@ class SavingsShareReport:
             "already_invoiced": self.already_invoiced,
             "stripe_invoice_id": self.stripe_invoice_id,
             "notes": self.notes,
+            "window": self.window,
+            "window_start_ts": self.window_start_ts,
+            "window_end_ts": self.window_end_ts,
+            "authoritative_events": self.authoritative_events,
+            "estimated_events": self.estimated_events,
+            "reconciliation_status": self.reconciliation_status,
+            "freshness_ts": self.freshness_ts,
         }
+
+
+def operational_window(window: str, now_ts: Optional[float] = None) -> tuple[str, float, float]:
+    """Resolve an operational reporting window in UTC."""
+    now = float(now_ts if now_ts is not None else time.time())
+    if window == "24h":
+        return "last-24h", now - 86400.0, now
+    if window == "7d":
+        return "last-7d", now - 7 * 86400.0, now
+    import datetime as dt
+    current = dt.datetime.fromtimestamp(now, dt.timezone.utc)
+    if window == "today":
+        start = dt.datetime(current.year, current.month, current.day, tzinfo=dt.timezone.utc).timestamp()
+        return "today", start, now
+    if window == "mtd":
+        start = dt.datetime(current.year, current.month, 1, tzinfo=dt.timezone.utc).timestamp()
+        return "mtd", start, now
+    if window == "billing":
+        label = current.strftime("%Y-%m")
+        start, end = month_window(label)
+        return label, start, min(end, now)
+    raise ValueError(f"unknown operational window: {window}")
+
+
+def operational_savings_report(conn, org_id: str, window: str, *,
+                               rate_bps: int = DEFAULT_RATE_BPS,
+                               now_ts: Optional[float] = None) -> SavingsShareReport:
+    """Evidence-aware report for live operational windows.
+
+    This is read-only and never invoices. ``estimated_events`` are events whose
+    cost was estimated rather than provider-authoritative; they remain visible
+    and prevent the report from being presented as fully reconciled.
+    """
+    label, start_ts, end_ts = operational_window(window, now_ts)
+    agg = period_savings(conn, org_id, start_ts, end_ts)
+    row = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN estimated=1 THEN 1 ELSE 0 END),0) estimated "
+        "FROM usage_events WHERE org_id=? AND ts>=? AND ts<?",
+        (org_id, start_ts, end_ts),
+    ).fetchone()
+    estimated = int(row["estimated"])
+    gross = int(agg["gross_savings_micros"])
+    report = SavingsShareReport(
+        org_id=org_id, period_label=label, rate_bps=rate_bps,
+        gross_savings_usd=db.micros_to_usd(gross),
+        billable_share_usd=db.micros_to_usd(_share_micros(gross, rate_bps)),
+        billable_events=agg["billable_events"],
+        covered_events=agg["covered_events"], total_events=agg["total_events"],
+        baseline_usd=db.micros_to_usd(agg["baseline_micros"]),
+        cost_on_covered_usd=db.micros_to_usd(agg["cost_on_covered_micros"]),
+        window=window, window_start_ts=start_ts, window_end_ts=end_ts,
+        authoritative_events=max(0, agg["total_events"] - estimated),
+        estimated_events=estimated,
+        reconciliation_status="estimated" if estimated else "authoritative",
+        freshness_ts=time.time(),
+    )
+    if estimated:
+        report.notes.append(
+            f"{estimated}/{agg['total_events']} events use estimated cost; "
+            "provider reconciliation is required before billing."
+        )
+    if not agg["total_events"]:
+        report.notes.append("no usage events were recorded in this window.")
+    return report
 
 
 def savings_share_report(conn, org_id: str, period_label: str, *,
