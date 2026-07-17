@@ -29,6 +29,7 @@ writes happen in one serialized transaction.
 """
 from __future__ import annotations
 
+import hashlib
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -517,7 +518,11 @@ def record_savings_correction(
     Returns ``{stripe_ref, delta_micros, delta_usd, ledger_entry, already_applied}``.
     """
     delta = corrected_amount_micros - previous_amount_micros
-    stripe_ref = f"{CORRECTION_KEY_PREFIX}{org_id}:{period_label}:{hash(reason)}"
+    # Use hashlib (not Python's built-in hash(), which is salted and
+    # non-deterministic across interpreter restarts) so the same correction
+    # reason always produces the same stripe_ref — essential for idempotency.
+    reason_digest = hashlib.sha256(reason.encode()).hexdigest()[:16]
+    stripe_ref = f"{CORRECTION_KEY_PREFIX}{org_id}:{period_label}:{reason_digest}"
     ts = ts if ts is not None else time.time()
 
     with db.immediate(conn):

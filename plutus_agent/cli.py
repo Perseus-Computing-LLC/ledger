@@ -743,6 +743,10 @@ def _print_savings_report(d, org_name, mode):
     print(f"    verified savings       : ${d['gross_savings_usd']:,.4f}")
     print(f"    share rate             : {d['rate_pct']:.1f}%")
     print(f"    ── billable share      : ${d['billable_share_usd']:,.4f}")
+    if d.get("billing_blocked"):
+        print("    ⛔ billing blocked     : coverage below minimum threshold")
+    if d.get("billing_provisional"):
+        print("    ⚠  billing provisional : estimated events exceed threshold")
     if d.get("already_invoiced"):
         print(f"\n    already invoiced (Stripe {d.get('stripe_invoice_id')})")
     for n in d.get("notes", []):
@@ -792,10 +796,13 @@ def cmd_bill_savings(args):
     if args.apply:
         from .billing import StripeClient
         stripe_client = StripeClient(cfg)
+    billing_cfg = cfg.get("billing", {})
     out = savings_mod.bill_savings_share(
         conn, org["id"], period, rate_bps=rate_bps,
         stripe_client=stripe_client, apply=args.apply,
-        min_charge_usd=cfg.get("billing", {}).get("savings_min_charge_usd", 0.50),
+        min_charge_usd=billing_cfg.get("savings_min_charge_usd", 0.50),
+        min_coverage_pct=savings_mod.coverage_threshold_from_config(cfg),
+        max_estimated_pct=savings_mod.estimated_threshold_from_config(cfg),
     )
     conn.close()
     if args.json:

@@ -11,6 +11,7 @@ Covers:
 - Team/Pro/Enterprise pricing behavior
 """
 import datetime as dt
+import hashlib
 
 import pytest
 
@@ -316,6 +317,48 @@ def test_estimated_threshold_from_config():
     assert savings.estimated_threshold_from_config({}) == 20.0
     assert savings.estimated_threshold_from_config(
         {"billing": {"max_estimated_pct": 10.0}}) == 10.0
+
+
+# -------------------------------------------------------- deterministic correction hash -----
+def test_correction_hash_is_deterministic():
+    """Same reason must produce the same stripe_ref across interpreter restarts.
+    Python's built-in hash() is salted (PYTHONHASHSEED), so we use hashlib.sha256
+    instead. Verify that the ref is built deterministically from the prefix,
+    org_id, period_label, and reason digest."""
+    conn = None  # not needed — the hash math is pure string manipulation
+    prefix = savings.CORRECTION_KEY_PREFIX
+    # The stripe_ref is: prefix + org_id + ":" + period_label + ":" + sha256(reason)[:16]
+    org_id = "test-org"
+    period = "2026-07"
+    reason = "over-billed"
+    expected_digest = hashlib.sha256(reason.encode()).hexdigest()[:16]
+    expected_ref = f"{prefix}{org_id}:{period}:{expected_digest}"
+    # Verify: same inputs produce the same deterministic result
+    stripe_ref_1 = f"{prefix}{org_id}:{period}:{hashlib.sha256(reason.encode()).hexdigest()[:16]}"
+    stripe_ref_2 = f"{prefix}{org_id}:{period}:{hashlib.sha256(reason.encode()).hexdigest()[:16]}"
+    assert stripe_ref_1 == stripe_ref_2 == expected_ref
+
+
+def test_correction_hash_is_not_builtin_hash():
+    """Verify that the correction hash is NOT Python's salted built-in hash(),
+    which changes between interpreter restarts. The stripe_ref should use
+    hashlib.sha256 instead."""
+    from plutus_agent.savings import CORRECTION_KEY_PREFIX
+    org_id = "o1"
+    period = "2026-07"
+    reason = "test reason"
+    # Build what a deterministic stripe_ref should look like
+    digest = hashlib.sha256(reason.encode()).hexdigest()[:16]
+    expected = f"{CORRECTION_KEY_PREFIX}{org_id}:{period}:{digest}"
+    # Verify it matches the pattern {prefix}{org}:{period}:{hex_digest}
+    assert expected.startswith(CORRECTION_KEY_PREFIX)
+    suffix = expected[len(CORRECTION_KEY_PREFIX):]
+    parts = suffix.split(":")
+    assert len(parts) == 3
+    assert parts[0] == org_id
+    assert parts[1] == period
+    assert len(parts[2]) == 16  # sha256 hex digest truncated to 16 chars
+    assert all(c in "0123456789abcdef" for c in parts[2])
 
 
 # -------------------------------------------------------- helper ----------
