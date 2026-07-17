@@ -411,7 +411,7 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                 f"of the {_usd(gross)} verified savings."
                 f"</span>"
                 f"<input class='amt' type='number' name='amount' value='{tip_amt}' min='1' step='1' style='width:80px'>"
-                f"<button class='btn ghost' type='submit'>Support Perseus →</button></form>")
+                f"<button class='btn ghost' type='submit'>Chip in 5% →</button></form>")
         elif tobj.savings_share == "waived":
             tip_html = ("<div class='muted' style='font-size:13px;margin-top:10px'>"
                         "You're on Pro — a flat $20/mo, no savings-share.</div>")
