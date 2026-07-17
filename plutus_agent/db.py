@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import secrets
 import sqlite3
 import time
@@ -48,7 +49,10 @@ from typing import Optional
 # 12 = adds nullable usage_events.user_id and users.active for Team attribution /
 #     seat billing. Both are additive; user_id is an optional chain field.
 # 13 = adds organizations.stripe_subscription_id for Team seat quantity sync.
-SCHEMA_VERSION = 13
+# 14 = adds api_keys.scope (JSON, org/workspace restrictions), api_keys.event_count
+#     (usage counter), api_keys.rotation_of (rotation chain ref), and the
+#     ingest_health table (per-source ingestion diagnostics). (#150)
+SCHEMA_VERSION = 14
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -566,6 +570,22 @@ CREATE TABLE IF NOT EXISTS ingest_idempotency (
 );
 CREATE INDEX IF NOT EXISTS ix_idem_ts ON ingest_idempotency(ts);
 
+-- #150: per-source ingestion health tracking. One row per (org, source) tuple,
+-- updated on every ingest attempt. Sources are integration names or API key
+-- prefixes. Rejection reasons are stored as text (not codes) so the dashboard
+-- can show actionable diagnostics without raw secret exposure.
+CREATE TABLE IF NOT EXISTS ingest_health (
+    org_id       TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    source       TEXT NOT NULL,             -- integration name, e.g. "claude_code_hook"
+    last_ts      REAL,                      -- most recent ingest attempt (success or fail)
+    last_ok      INTEGER,                   -- 1 = last attempt succeeded, 0 = failed
+    last_error   TEXT,                      -- last rejection reason (redacted, user-safe)
+    total_events INTEGER NOT NULL DEFAULT 0,
+    total_errors INTEGER NOT NULL DEFAULT 0,
+    since_ts     REAL NOT NULL,             -- when this health row was first created
+    PRIMARY KEY (org_id, source)
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
     token      TEXT PRIMARY KEY,        -- opaque random; lives in an HttpOnly cookie
     user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -582,7 +602,15 @@ CREATE TABLE IF NOT EXISTS api_keys (
     token_hash   TEXT NOT NULL UNIQUE,    -- sha256 of the full secret; raw never stored
     created_at   REAL NOT NULL,
     last_used_at REAL,
-    revoked_at   REAL
+    revoked_at   REAL,
+    -- #150: optional JSON scope restrictions, e.g. {"workspaces": ["prod"]}
+    -- When NULL the key has access to all workspaces in the org.
+    scope        TEXT,
+    -- #150: cumulative event count metered through this key (approximate).
+    event_count  INTEGER NOT NULL DEFAULT 0,
+    -- #150: when set, this key was created as part of a rotation chain —
+    -- references the key it replaced (from which it inherited active status).
+    rotation_of  TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_apikeys_org  ON api_keys(org_id);
 CREATE INDEX IF NOT EXISTS ix_apikeys_hash ON api_keys(token_hash);
@@ -765,6 +793,10 @@ def _migrate_add_columns(conn) -> None:
         # #136: nullable per-user attribution; old events remain unattributed.
         ("usage_events", "user_id", "TEXT"),
         ("users", "active", "INTEGER NOT NULL DEFAULT 1"),
+        # #150: api_keys scoping, event counter, and rotation chain
+        ("api_keys", "scope", "TEXT"),
+        ("api_keys", "event_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("api_keys", "rotation_of", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
@@ -1060,20 +1092,7 @@ def list_api_keys(conn, org_id: str, include_revoked: bool = False) -> list[sqli
     return conn.execute(q + " ORDER BY created_at DESC", (org_id,)).fetchall()
 
 
-def revoke_api_key(conn, key_id: str, org_id: Optional[str] = None) -> bool:
-    """Revoke a key (optionally scoped to an org). Returns True if one changed."""
-    if org_id:
-        cur = conn.execute(
-            "UPDATE api_keys SET revoked_at=? WHERE id=? AND org_id=? AND revoked_at IS NULL",
-            (time.time(), key_id, org_id))
-    else:
-        cur = conn.execute(
-            "UPDATE api_keys SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
-            (time.time(), key_id))
-    conn.commit()
-    return cur.rowcount > 0
-
-
+# ------------------------------------------------------------- LAST_USED ---
 LAST_USED_THROTTLE_S = 60  # don't rewrite last_used_at more than once a minute
 
 
@@ -1100,7 +1119,215 @@ def api_key_org(conn, secret: str) -> Optional[str]:
         conn.execute("UPDATE api_keys SET last_used_at=? WHERE id=?",
                      (now, row["id"]))
         conn.commit()
+    # #150: increment event count on every key use (not throttled — this is the
+    # authoritative counter; a hot key may be slightly behind on last_used_at but
+    # the event_count monotonic counter stays accurate)
+    conn.execute(
+        "UPDATE api_keys SET event_count = event_count + 1 WHERE id=?",
+        (row["id"],),
+    )
+    conn.commit()
     return row["org_id"]
+
+
+def api_key_row(conn, secret: str) -> Optional[sqlite3.Row]:
+    """#150: Resolve an API key secret to its full row, or None.
+
+    Like ``api_key_org`` but returns the entire row so the caller can inspect
+    scope, prefix, last_used_at, etc. Does NOT update last_used_at or
+    event_count — that is ``api_key_org``'s job.
+    """
+    if not secret or not secret.startswith(API_KEY_PREFIX):
+        return None
+    return conn.execute(
+        "SELECT * FROM api_keys WHERE token_hash=? AND revoked_at IS NULL",
+        (_hash_token(secret),),
+    ).fetchone()
+
+
+def create_api_key_scoped(conn, org_id: str,
+                          name: Optional[str] = None,
+                          scope: Optional[dict] = None,
+                          commit: bool = True) -> tuple[sqlite3.Row, str]:
+    """#150: Mint an API key with optional scope restrictions.
+
+    ``scope`` is an optional dict limiting the key's access, e.g.:
+    ``{"workspaces": ["prod"]}`` or ``{"org_id": "org_abc"}``.
+    When None, the key has unrestricted access within the org.
+    Returns ``(row, secret)`` like :func:`create_api_key`.
+    """
+    secret = API_KEY_PREFIX + secrets.token_urlsafe(24)
+    kid = new_id("key")
+    prefix = secret[:len(API_KEY_PREFIX) + 4]
+    scope_json = json.dumps(scope) if scope else None
+    conn.execute(
+        "INSERT INTO api_keys(id,org_id,name,prefix,token_hash,created_at,scope)"
+        " VALUES(?,?,?,?,?,?,?)",
+        (kid, org_id, name, prefix, _hash_token(secret), time.time(), scope_json),
+    )
+    if commit:
+        conn.commit()
+    return get_api_key(conn, kid), secret
+
+
+def rotate_api_key(conn, org_id: str, old_key_id: str,
+                   overlap_seconds: int = 300,
+                   name: Optional[str] = None,
+                   scope: Optional[dict] = None,
+                   commit: bool = True) -> tuple[sqlite3.Row, str, sqlite3.Row]:
+    """#150: Rotate an API key with a bounded overlap period.
+
+    Creates a new key (inheriting the old key's scope if none given) and records
+    the rotation chain. The old key is NOT immediately revoked — it remains valid
+    for ``overlap_seconds`` so in-flight requests can complete (zero-downtime).
+    The caller should schedule ``complete_key_rotation`` after the overlap.
+
+    Returns ``(new_key_row, new_secret, old_key_row)``.
+    """
+    old = get_api_key(conn, old_key_id)
+    if not old:
+        raise ValueError(f"key {old_key_id} not found")
+    if old["org_id"] != org_id:
+        raise ValueError("key does not belong to this org")
+    if old["revoked_at"] is not None:
+        raise ValueError("cannot rotate a revoked key")
+
+    # Inherit scope from old key if none specified
+    if scope is None and old["scope"]:
+        try:
+            scope = json.loads(old["scope"])
+        except (json.JSONDecodeError, TypeError):
+            scope = None
+
+    # Create new key with rotation_of pointing to the old key
+    new_row, secret = create_api_key_scoped(
+        conn, org_id, name=name or old["name"], scope=scope, commit=False)
+
+    # Record rotation chain: new key points to old key id
+    conn.execute(
+        "UPDATE api_keys SET rotation_of=? WHERE id=?",
+        (old_key_id, new_row["id"]),
+    )
+    if commit:
+        conn.commit()
+
+    old_refreshed = get_api_key(conn, old_key_id)
+    return get_api_key(conn, new_row["id"]), secret, old_refreshed
+
+
+def complete_key_rotation(conn, org_id: str, new_key_id: str,
+                          commit: bool = True) -> bool:
+    """#150: Complete a rotation by revoking the old key.
+
+    Given the NEW key's id, finds the old key in the rotation chain and
+    revokes it. Returns True if a key was revoked.
+    """
+    new_key = get_api_key(conn, new_key_id)
+    if not new_key or new_key["org_id"] != org_id:
+        return False
+    rotation_of = new_key["rotation_of"]
+    if not rotation_of:
+        return False
+    # rotation_of on the new key points to the old key id
+    return revoke_api_key(conn, rotation_of, org_id, commit=commit)
+
+
+def rotate_and_revoke(conn, org_id: str, old_key_id: str,
+                      overlap_seconds: int = 0,
+                      name: Optional[str] = None,
+                      scope: Optional[dict] = None,
+                      commit: bool = True) -> tuple[sqlite3.Row, str]:
+    """#150: Rotate and immediately revoke (no overlap — for emergency rotation).
+
+    Equivalent to calling rotate_api_key with overlap_seconds=0 followed by
+    complete_key_rotation. Returns ``(new_key_row, new_secret)``.
+    """
+    new_row, secret, old_row = rotate_api_key(
+        conn, org_id, old_key_id,
+        overlap_seconds=max(1, overlap_seconds) if overlap_seconds else 0,
+        name=name, scope=scope, commit=False)
+    if overlap_seconds <= 0:
+        revoke_api_key(conn, old_key_id, org_id, commit=False)
+    if commit:
+        conn.commit()
+    return get_api_key(conn, new_row["id"]), secret
+
+
+def revoke_api_key(conn, key_id: str, org_id: Optional[str] = None,
+                   commit: bool = True) -> bool:
+    """Revoke a key (optionally scoped to an org). Returns True if one changed."""
+    if org_id:
+        cur = conn.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE id=? AND org_id=? AND revoked_at IS NULL",
+            (time.time(), key_id, org_id))
+    else:
+        cur = conn.execute(
+            "UPDATE api_keys SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+            (time.time(), key_id))
+    if commit:
+        conn.commit()
+    return cur.rowcount > 0
+
+
+# ----------------------------------------------------------------- ingest health ---
+def record_ingest_health(conn, org_id: str, source: str,
+                         ok: bool, error: Optional[str] = None,
+                         ts: Optional[float] = None) -> None:
+    """#150: Record an ingest health event for an org+source.
+
+    Creates or updates the health row. ``source`` is the integration name
+    (e.g. ``"claude_code_hook"``, ``"api_key:plutus_sk_AbC1"``).
+    ``error`` is a user-safe rejection reason (never raw secrets).
+    """
+    now = ts if ts is not None else time.time()
+    conn.execute(
+        "INSERT INTO ingest_health(org_id,source,last_ts,last_ok,last_error,"
+        "total_events,total_errors,since_ts) "
+        "VALUES(?,?,?,?,?,1,?,?) "
+        "ON CONFLICT(org_id,source) DO UPDATE SET "
+        "last_ts=excluded.last_ts, last_ok=excluded.last_ok, "
+        "last_error=COALESCE(excluded.last_error, ingest_health.last_error), "
+        "total_events=ingest_health.total_events+1, "
+        "total_errors=ingest_health.total_errors+excluded.total_errors",
+        (org_id, source, now, 1 if ok else 0,
+         error, 0 if ok else 1, now),
+    )
+    conn.commit()
+
+
+def get_ingest_health(conn, org_id: str,
+                      limit: int = 50) -> list[dict]:
+    """#150: Ingestion health diagnostics for an org, by source.
+
+    Returns rows ordered by most recent ingest first, each containing:
+    source, last_ts, last_ok, last_error, total_events, total_errors.
+    """
+    rows = conn.execute(
+        "SELECT source, last_ts, last_ok, last_error, total_events, total_errors "
+        "FROM ingest_health WHERE org_id=? ORDER BY last_ts DESC LIMIT ?",
+        (org_id, int(limit)),
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["last_ok"] = bool(d["last_ok"])
+        out.append(d)
+    return out
+
+
+def all_ingest_health(conn, limit_per_org: int = 5) -> list[dict]:
+    """#150: Aggregated ingest health across all orgs for the admin dashboard.
+
+    Returns the health row per org+source, newest first per org.
+    """
+    rows = conn.execute(
+        "SELECT ih.org_id, o.name AS org_name, ih.source, ih.last_ts, "
+        "ih.last_ok, ih.last_error, ih.total_events, ih.total_errors "
+        "FROM ingest_health ih "
+        "LEFT JOIN organizations o ON o.id=ih.org_id "
+        "ORDER BY ih.last_ts DESC",
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ------------------------------------------------------------- workspaces ----

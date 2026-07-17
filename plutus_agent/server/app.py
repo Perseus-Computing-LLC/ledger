@@ -890,6 +890,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(409, {"error":
                 "a request with this Idempotency-Key is still in progress"})
 
+        # #150: record ingest health. Source is the API key prefix (first 16
+        # chars of the bearer token) so the operator can tie diagnostics to a
+        # specific key without exposing the raw secret.
+        source = f"key:{token[:16]}..."
+        ok = code < 400
+        error = None if ok else body.get("error", "ingest error")
+        db.record_ingest_health(conn, org_id, source, ok=ok, error=error)
+
         return self._json(code, body)
 
     # ---- admin API (token-scoped; #66) -------------------------------------
@@ -942,6 +950,17 @@ class Handler(BaseHTTPRequestHandler):
             report = db.verify_chain(
                 conn, org_id=org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg))
             return self._json(200, report)
+        if path == "/v1/admin/ingest-health":
+            # #150: ingestion health diagnostics across all orgs.
+            org_id = (q.get("org") or [None])[0]
+            if org_id and not db.get_org(conn, org_id):
+                return self._json(404, {"error": "unknown org"})
+            if org_id:
+                return self._json(200, {
+                    "org_id": org_id,
+                    "sources": db.get_ingest_health(conn, org_id),
+                })
+            return self._json(200, {"sources": db.all_ingest_health(conn)})
         return self._json(404, {"error": f"no admin route for {path}"})
 
     def _admin_post(self, conn, path):
@@ -986,17 +1005,46 @@ class Handler(BaseHTTPRequestHandler):
                                     "amount_usd": amount,
                                     "balance_after": float(row["balance_after"])})
 
-        if path == "/v1/admin/keys":
-            org_id = payload.get("org_id")
-            if not org_id or not db.get_org(conn, org_id):
-                return self._json(404, {"error": "unknown org"})
-            name = (payload.get("name") or "").strip() or None
-            key_row, secret = db.create_api_key(conn, org_id, name=name)
-            # The secret is returned ONCE and never recoverable afterward.
-            return self._json(201, {"id": key_row["id"], "org_id": org_id,
-                                    "name": name, "secret": secret})
+        if path in ("/v1/admin/keys", "/v1/admin/keys/rotate", "/v1/admin/keys/revoke"):
+            return self._admin_keys_post(conn, path, payload)
 
         return self._json(404, {"error": f"no admin route for {path}"})
+
+    def _admin_keys_post(self, conn, path, payload):
+        """#150: admin key operations (create, rotate, revoke)."""
+        org_id = payload.get("org_id")
+        if not org_id or not db.get_org(conn, org_id):
+            return self._json(404, {"error": "unknown org"})
+        if path == "/v1/admin/keys/rotate":
+            key_id = payload.get("key_id")
+            if not key_id:
+                return self._json(400, {"error": "key_id is required"})
+            overlap = int(payload.get("overlap_seconds", 300))
+            name = (payload.get("name") or "").strip() or None
+            try:
+                new_row, secret, old_row = db.rotate_api_key(
+                    conn, org_id, key_id, overlap_seconds=overlap, name=name)
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {
+                "new_key": {"id": new_row["id"], "prefix": new_row["prefix"]},
+                "old_key": {"id": old_row["id"], "revoked_after_s": overlap},
+                "secret": secret,
+            })
+        if path == "/v1/admin/keys/revoke":
+            key_id = payload.get("key_id")
+            if not key_id:
+                return self._json(400, {"error": "key_id is required"})
+            ok = db.revoke_api_key(conn, key_id, org_id)
+            if not ok:
+                return self._json(404, {"error": "key not found or already revoked"})
+            return self._json(200, {"revoked": key_id})
+        # Default: create a new key
+        name = (payload.get("name") or "").strip() or None
+        key_row, secret = db.create_api_key(conn, org_id, name=name)
+        # The secret is returned ONCE and never recoverable afterward.
+        return self._json(201, {"id": key_row["id"], "org_id": org_id,
+                                "name": name, "secret": secret})
 
     # ---- API keys (session-gated; created from the dashboard) --------------
     def _users_create(self, conn):
