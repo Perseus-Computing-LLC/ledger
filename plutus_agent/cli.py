@@ -770,6 +770,27 @@ def cmd_version(args):
     print(f"plutus v{__version__} — {__tagline__}")
 
 
+def cmd_backtest(args):
+    """Replay historical estimated events without mutating the ledger (#145)."""
+    from . import backtest
+    conn = _conn()
+    org = _resolve_org(conn, args.org)
+    report = backtest.replay(
+        conn, org["id"],
+        tolerance_micros=args.tolerance_micros,
+    )
+    conn.close()
+    if args.json:
+        print(json.dumps(report.as_dict(), indent=2))
+    else:
+        status = "PASS" if report.passed else "FAIL"
+        print(f"  backtest {status}: {report.checked} events, "
+              f"{report.mismatches} mismatches, "
+              f"tolerance {report.tolerance_micros} micros")
+    if not report.passed:
+        raise SystemExit(2)
+
+
 def cmd_pricing(args):
     print(f"\n  Plutus plans — {__tagline__}\n")
     for key in pricing.TIER_ORDER:
@@ -902,6 +923,15 @@ def build_parser():
                          "pass empty string to force plain SHA-256)")
     pv.add_argument("--json", action="store_true")
     pv.set_defaults(func=cmd_verify)
+
+    pbt = sub.add_parser(
+        "backtest",
+        help="replay estimated usage events against current billing logic (#145)")
+    pbt.add_argument("--org", help="organization id, slug, or name")
+    pbt.add_argument("--tolerance-micros", type=int, default=0,
+                     help="allowed absolute per-event delta in micro-dollars")
+    pbt.add_argument("--json", action="store_true")
+    pbt.set_defaults(func=cmd_backtest)
 
     pck = sub.add_parser(
         "checkpoint",

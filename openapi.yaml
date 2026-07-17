@@ -334,6 +334,7 @@ components:
         cache_read_tokens: { type: integer, default: 0 }
         cache_write_tokens: { type: integer, nullable: true, description: "Provider-reported cache creation/write tokens; priced separately when a cache-write rate is published." }
         reasoning_tokens: { type: integer, default: 0 }
+        user_id: { type: string, nullable: true, description: "Active organization user/seat responsible for the event (#136)." }
         cost_usd: { type: number, nullable: true, description: "Exact cost; omit to estimate from tokens. Must be >= 0." }
         baseline_cost_usd: { type: number, nullable: true, description: "Savings-share counterfactual in USD (#7): what this call would have cost without the optimization. Must be >= 0; omit for none." }
         baseline_model: { type: string, nullable: true, description: "Savings-share counterfactual model (#7): the same token counts priced at this model's published rate (model-substitution savings). When baseline_input_tokens/baseline_output_tokens are present, prices those counterfactual counts instead." }

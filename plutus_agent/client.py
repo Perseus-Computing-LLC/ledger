@@ -105,6 +105,7 @@ class Meter:
               baseline_model: Optional[str] = None,
               baseline_input_tokens: Optional[int] = None,
               baseline_output_tokens: Optional[int] = None,
+              user_id: Optional[str] = None,
               source: str = "sdk"):
         """Meter one call. Returns a :class:`metering.MeterResult`.
 
@@ -153,6 +154,8 @@ class Meter:
                 event["baseline_input_tokens"] = int(baseline_input_tokens)
             if baseline_output_tokens is not None:
                 event["baseline_output_tokens"] = int(baseline_output_tokens)
+            if user_id is not None:
+                event["user_id"] = user_id
             return self._track_remote(event)
 
         return metering.record_usage(
@@ -165,6 +168,7 @@ class Meter:
             baseline_cost_usd=baseline_cost_usd, baseline_model=baseline_model,
             baseline_input_tokens=baseline_input_tokens,
             baseline_output_tokens=baseline_output_tokens,
+            user_id=user_id,
             source=source,
             pricing_overrides=self.cfg.get("pricing", {}).get("overrides"),
             alert_cfg=self.cfg.get("alerts", {}),

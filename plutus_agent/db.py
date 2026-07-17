@@ -45,7 +45,10 @@ from typing import Optional
 #     trailing field, so pre-v10 rows still verify byte-identically.
 # 11 = adds usage_events.cache_write_tokens for provider cache-creation billing.
 #     Nullable and hash-chained as an optional trailing field for the same reason.
-SCHEMA_VERSION = 11
+# 12 = adds nullable usage_events.user_id and users.active for Team attribution /
+#     seat billing. Both are additive; user_id is an optional chain field.
+# 13 = adds organizations.stripe_subscription_id for Team seat quantity sync.
+SCHEMA_VERSION = 13
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -108,6 +111,8 @@ _CHAIN_FIELDS_OPTIONAL = (
     # form; a row that carries it hashes it, so a billed saving can't be
     # re-pointed to a different task undetected.
     "external_ref",
+    # #136: optional per-user attribution, trailing to preserve old chains.
+    "user_id",
     # Anthropic cache-creation input tokens (#135). Optional trailing field keeps
     # pre-v11 canonical forms unchanged while making cache-write usage immutable.
     "cache_write_tokens",
@@ -441,6 +446,7 @@ CREATE TABLE IF NOT EXISTS organizations (
     slug               TEXT UNIQUE NOT NULL,
     tier               TEXT NOT NULL DEFAULT 'free',
     stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
     -- When 1, this org is exempt from the prepaid-credit hard-stop (#28): usage
     -- is always recorded and may drive the balance negative (track-only mode for
     -- trusted / internal orgs). 0 = enforce the hard-stop when it's enabled.
@@ -454,6 +460,7 @@ CREATE TABLE IF NOT EXISTS users (
     email      TEXT NOT NULL,
     name       TEXT,
     role       TEXT NOT NULL DEFAULT 'owner',
+    active     INTEGER NOT NULL DEFAULT 1,
     created_at REAL NOT NULL,
     UNIQUE(org_id, email)
 );
@@ -483,6 +490,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
     -- provider/model-specific premium. Nullable for additive migration (#135).
     cache_write_tokens INTEGER,
     reasoning_tokens  INTEGER NOT NULL DEFAULT 0,
+    user_id           TEXT REFERENCES users(id) ON DELETE SET NULL,
     cost_micros       INTEGER NOT NULL DEFAULT 0,
     -- Counterfactual cost for savings-share billing (#7): what this same call
     -- would have cost without Perseus (same token counts, the customer's
@@ -735,6 +743,7 @@ def _migrate_add_columns(conn) -> None:
     additions = [
         # (table, column, definition) — #28: per-org hard-stop exemption.
         ("organizations", "allow_negative_balance", "INTEGER NOT NULL DEFAULT 0"),
+        ("organizations", "stripe_subscription_id", "TEXT"),
         # #108: usage_events tamper-evidence chain. Nullable (no default) so the
         # chain starts at upgrade and pre-existing rows stay NULL = "unverifiable
         # (pre-chain)" rather than being back-filled with a hash we can't attest.
@@ -753,6 +762,9 @@ def _migrate_add_columns(conn) -> None:
         # #135: provider cache-creation/write tokens. Nullable so old rows remain
         # semantically absent and pre-v11 chain canonical forms are preserved.
         ("usage_events", "cache_write_tokens", "INTEGER"),
+        # #136: nullable per-user attribution; old events remain unattributed.
+        ("usage_events", "user_id", "TEXT"),
+        ("users", "active", "INTEGER NOT NULL DEFAULT 1"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
@@ -765,6 +777,11 @@ def _migrate_add_columns(conn) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS ix_usage_extref "
             "ON usage_events(org_id, external_ref)"
+        )
+    if "user_id" in _table_columns(conn, "usage_events"):
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_usage_user "
+            "ON usage_events(org_id, user_id)"
         )
 
 
@@ -891,6 +908,14 @@ def org_by_stripe_customer(conn, customer_id: str) -> Optional[sqlite3.Row]:
     ).fetchone()
 
 
+def set_stripe_subscription(conn, org_id: str, subscription_id: str,
+                            commit: bool = True) -> None:
+    conn.execute("UPDATE organizations SET stripe_subscription_id=? WHERE id=?",
+                 (subscription_id, org_id))
+    if commit:
+        conn.commit()
+
+
 # ------------------------------------------------------------------- users ---
 def get_user(conn, user_id: str) -> Optional[sqlite3.Row]:
     return conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
@@ -932,6 +957,30 @@ def list_orgs_for_email(conn, email: str) -> list[sqlite3.Row]:
         "WHERE lower(u.email)=lower(?) ORDER BY o.created_at",
         (email,),
     ).fetchall()
+
+
+def list_users(conn, org_id: str, include_inactive: bool = False) -> list[sqlite3.Row]:
+    """List an org's seat roster, active users first."""
+    sql = "SELECT * FROM users WHERE org_id=?"
+    if not include_inactive:
+        sql += " AND active=1"
+    return conn.execute(sql + " ORDER BY created_at", (org_id,)).fetchall()
+
+
+def active_seat_count(conn, org_id: str) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) n FROM users WHERE org_id=? AND active=1", (org_id,)
+    ).fetchone()
+    return int(row["n"])
+
+
+def set_user_active(conn, user_id: str, org_id: str, active: bool) -> bool:
+    cur = conn.execute(
+        "UPDATE users SET active=? WHERE id=? AND org_id=?",
+        (1 if active else 0, user_id, org_id),
+    )
+    conn.commit()
+    return cur.rowcount == 1
 
 
 def email_in_org(conn, email: str, org_id: str) -> bool:
@@ -1206,7 +1255,8 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
     returned so an export can't exhaust memory."""
     sql = ("SELECT ue.id, ue.ts, ue.provider, ue.model, ue.task_type, "
            "w.name AS workspace, ue.input_tokens, ue.output_tokens, "
-           "ue.cache_read_tokens, ue.reasoning_tokens, ue.cost_micros, "
+           "ue.cache_read_tokens, ue.cache_write_tokens, ue.reasoning_tokens, "
+           "ue.user_id, ue.cost_micros, "
            "ue.baseline_micros, ue.optimal_micros, ue.external_ref, "
            "ue.estimated, ue.source "
            "FROM usage_events ue "
