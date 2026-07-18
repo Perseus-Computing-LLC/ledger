@@ -354,26 +354,21 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
             f"<div class='meta'>{_ago(ev['ts'])}</div></div></div>")
     feed_html = ("".join(feed) or "<div class='empty'>No calls metered yet.</div>")
 
-    # billing panel
+    # Free is intentionally a no-card experience for teams of up to ten. Stripe
+    # is only a voluntary thank-you path after Plutus can show verified savings.
     can_checkout = stripe_status["available"]
-    pro_disabled = "" if (can_checkout and stripe_status["has_pro_price"]) else "disabled"
     sb = stripe_status["mode"]
     if can_checkout:
-        billing = f"""
-        <form class="billing" method="post" action="/billing/checkout/credit">
-          <input type="hidden" name="org" value="{_e(org['id'])}">{csrf_field}
-          <span class="muted">Buy prepaid credit:</span>
-          <input class="amt" type="number" name="amount" value="50" min="5" step="5">
-          <button class="btn" type="submit">Top up →</button>
-          <button class="btn ghost" type="submit" formaction="/billing/checkout/pro" {pro_disabled}>Upgrade to Pro · $20/mo</button>
-          <button class="btn ghost" type="submit" formaction="/billing/portal">Manage billing</button>
-          <a class="muted" href="/pricing" style="margin-left:auto">Compare plans · Stripe: {_e(sb)}</a>
-        </form>"""
+        billing = """
+        <div class="billing">
+          <span class="muted">Free covers teams of up to 10 people. When Plutus can verify savings,
+          it will show an optional Stripe thank-you — never an automatic charge.</span>
+        </div>"""
     else:
         billing = f"""
         <div class="billing">
-          <span class="muted">Stripe is {_e(sb)}. Credit top-ups & Pro checkout activate once you set
-          <span class="num">STRIPE_SECRET_KEY</span>. Everything else runs fully offline.</span>
+          <span class="muted">Free covers teams of up to 10 people. Stripe is {_e(sb)}; the optional
+          savings thank-you link will appear after Stripe is connected and savings are verified.</span>
         </div>"""
 
     # Efficiency billboard — the headline stat, on every tier.
@@ -442,8 +437,8 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
             f"<div style='text-align:right'>{aside}</div>"
             f"</div>{tip_html}</div>")
 
-    # deep reporting is a paid feature — Free sees the headline number, paid
-    # tiers get the per-task ROI breakdown (and, later, leakage + export).
+    # Free keeps the savings and audit view; deeper task attribution can be
+    # introduced later without pressuring a Free team into a checkout flow.
     if tobj.full_reporting:
         task_panel = (
             '<div class="panel"><h2>Cost per task type <span class="hint">ROI lens</span></h2>'
@@ -451,12 +446,12 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
             f'<tbody>{task_table}</tbody></table></div>')
     else:
         task_panel = (
-            '<div class="panel"><h2>Cost per task type <span class="hint">Pro</span></h2>'
+            '<div class="panel"><h2>Cost per task type <span class="hint">coming later</span></h2>'
             '<div class="empty" style="padding:24px 14px;text-align:center">'
-            '<div style="font-size:15px;margin-bottom:6px">🔒 Full reporting is a Pro feature</div>'
-            '<div class="muted" style="font-size:13px;margin-bottom:14px">Per-task &amp; per-model '
-            'breakdowns, efficiency leakage, history and CSV/PDF export.</div>'
-            '<a class="btn" href="/pricing">See Pro →</a></div></div>')
+            '<div style="font-size:15px;margin-bottom:6px">Savings and audit stay available on Free</div>'
+            '<div class="muted" style="font-size:13px">Per-task breakdowns will arrive separately; '
+            'they are not required to track verified savings or optionally support Perseus.</div>'
+            '</div></div>')
 
     # optional live runway panel (from the monitor bridge)
     runway_panel = ""
