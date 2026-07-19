@@ -348,7 +348,16 @@ def load() -> dict:
     if env.get("PLUTUS_GOOGLE_CLIENT_SECRET"):
         cfg["auth"]["google_client_secret"] = env["PLUTUS_GOOGLE_CLIENT_SECRET"]
     if env.get("PLUTUS_BASE_URL"):
-        cfg["auth"]["base_url"] = env["PLUTUS_BASE_URL"]
+        base_url = env["PLUTUS_BASE_URL"].rstrip("/")
+        cfg["auth"]["base_url"] = base_url
+        # A public origin must also drive Stripe's return URLs. Otherwise the
+        # shipped localhost defaults leak into a remote Checkout Session.
+        billing = cfg["billing"]
+        defaults = DEFAULT_CONFIG["billing"]
+        if billing.get("success_url") == defaults["success_url"]:
+            billing["success_url"] = base_url + "/billing/success"
+        if billing.get("cancel_url") == defaults["cancel_url"]:
+            billing["cancel_url"] = base_url + "/billing/cancel"
     if env.get("PLUTUS_ALLOWED_EMAILS"):
         cfg["auth"]["allowed_emails"] = [
             e.strip() for e in env["PLUTUS_ALLOWED_EMAILS"].split(",") if e.strip()]
