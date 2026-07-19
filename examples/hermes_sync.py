@@ -18,9 +18,9 @@ double-count and a mid-run failure resumes cleanly.
     python3 hermes_sync.py               # sync new sessions (cron this)
     python3 hermes_sync.py --reset       # forget the watermark, re-sync all
 
-Env: PLUTUS_REMOTE_URL, PLUTUS_API_KEY (required); PLUTUS_STATE_DB (default the
-Hermes path below); PLUTUS_SYNC_STATE (watermark file); PLUTUS_WORKSPACE
-(default "hermes").
+Env: PLUTUS_REMOTE_URL, PLUTUS_API_KEY (required); PLUTUS_STATE_DB (default:
+``$HERMES_HOME/state.db`` when that exists, else the legacy path below);
+PLUTUS_SYNC_STATE (watermark file); PLUTUS_WORKSPACE (default "hermes").
 
 Savings-share (#7): tag each event with the baseline model — the flagship the
 customer would have run WITHOUT Perseus routing — so hosted Plutus prices the
@@ -47,6 +47,25 @@ import urllib.request
 
 DEFAULT_STATE_DB = "/opt/data/webui/minions-hermes-config/state.db"
 BATCH = 500
+
+
+def default_state_db(env) -> str:
+    """Resolve the Hermes state.db path (#171).
+
+    Precedence: ``PLUTUS_STATE_DB`` (explicit, highest) > ``$HERMES_HOME/
+    state.db`` when ``HERMES_HOME`` is set and the file exists > the legacy
+    hardcoded path above. A stock Hermes install keeps its sessions DB at
+    ``$HERMES_HOME/state.db``, so zero-config works there without exporting
+    ``PLUTUS_STATE_DB``.
+    """
+    if env.get("PLUTUS_STATE_DB"):
+        return env["PLUTUS_STATE_DB"]
+    home = env.get("HERMES_HOME")
+    if home:
+        cand = os.path.join(home, "state.db")
+        if os.path.exists(cand):
+            return cand
+    return DEFAULT_STATE_DB
 
 # Provider -> the flagship a customer would run WITHOUT Perseus routing. Mirrors
 # config.py `savings.baseline_models`; used only when PLUTUS_BASELINE=flagship.
@@ -296,7 +315,7 @@ def main(argv=None) -> int:
 
     remote = (os.environ.get("PLUTUS_REMOTE_URL") or "").rstrip("/")
     api_key = os.environ.get("PLUTUS_API_KEY")
-    state_db = os.environ.get("PLUTUS_STATE_DB", DEFAULT_STATE_DB)
+    state_db = default_state_db(os.environ)
     wm_path = os.environ.get("PLUTUS_SYNC_STATE",
                              os.path.expanduser("~/.plutus/hermes_sync.json"))
     workspace = os.environ.get("PLUTUS_WORKSPACE", "hermes")
