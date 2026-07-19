@@ -650,7 +650,7 @@ class TestThreeTierModel(unittest.TestCase):
                 html = self._render(conn, org)
                 self.assertIn("Perseus saved you", html)              # attributed
                 self.assertIn("verified by Plutus", html)
-                self.assertEqual("Pro feature" in html, not unlocked)  # reporting gate
+                self.assertEqual("Savings and audit stay available on Free" in html, not unlocked)
                 self.assertEqual("Chip in" in html, tier_key == "free")  # tip jar
         finally:
             drop_conn(conn)
