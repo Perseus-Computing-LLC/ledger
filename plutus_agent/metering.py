@@ -49,10 +49,14 @@ class MeterResult:
     over_free_limit: bool = False  # org is on a limited tier and past its monthly quota
     over_balance: bool = False  # Fix #28: org hit prepaid credit hard-stop
     unpriced: bool = False  # Fix #64: cost is an estimate with no exact model price
+    # #170: the caller named a workspace that doesn't exist and the tier cap
+    # (Free = 1) forced the event into the org's earliest workspace instead of
+    # creating a new one — the recorded attribution differs from what was sent.
+    workspace_folded: bool = False
 
 
 def _resolve_workspace(conn, org_id: str, workspace: Optional[str],
-                       commit: bool = True) -> Optional[str]:
+                       commit: bool = True) -> tuple[Optional[str], bool]:
     """Accept a workspace id, slug, or name; create-by-name if not found.
 
     Honors the org tier's workspace cap: once an org is at its limit (Free = 1),
@@ -60,28 +64,32 @@ def _resolve_workspace(conn, org_id: str, workspace: Optional[str],
     existing workspace instead of creating another. Tracking never breaks; the
     cap just stops the workspace count from growing.
 
+    Returns ``(workspace_id, folded)`` — ``folded`` is True only when that
+    cap-fold actually happened (#170), so the ingest response can flag that
+    the recorded workspace differs from the one the client sent.
+
     ``commit`` is forwarded to :func:`db.create_workspace` so that, inside a
     batch/transaction (``record_usage(commit=False)`` under ``db.immediate``),
     auto-creating a workspace does not commit the open transaction early.
     """
     if not workspace:
-        return None
+        return None, False
     ws = db.get_workspace(conn, workspace)
     if ws and ws["org_id"] == org_id:
-        return ws["id"]
+        return ws["id"], False
     row = conn.execute(
         "SELECT * FROM workspaces WHERE org_id=? AND (slug=? OR name=?)",
         (org_id, workspace, workspace),
     ).fetchone()
     if row:
-        return row["id"]
+        return row["id"], False
 
     existing = db.list_workspaces(conn, org_id)
     org = db.get_org(conn, org_id)
     cap = pricing.tier(org["tier"]).workspaces if org else None
     if cap is not None and len(existing) >= cap:
-        return existing[0]["id"] if existing else None
-    return db.create_workspace(conn, org_id, workspace, commit=commit)["id"]
+        return (existing[0]["id"] if existing else None), True
+    return db.create_workspace(conn, org_id, workspace, commit=commit)["id"], False
 
 
 def record_usage(conn, org_id: str, provider: str,
@@ -174,7 +182,8 @@ def record_usage(conn, org_id: str, provider: str,
             recorded=False, over_free_limit=True,
         )
 
-    workspace_id = _resolve_workspace(conn, org_id, workspace, commit=commit)
+    workspace_id, workspace_folded = _resolve_workspace(
+        conn, org_id, workspace, commit=commit)
 
     estimated = cost_usd is None
     unpriced = False
@@ -314,7 +323,7 @@ def record_usage(conn, org_id: str, provider: str,
                 cost_usd=cost_usd, estimated=estimated,
                 balance_after=balance, alerts=[],
                 recorded=False, over_free_limit=False, over_balance=True,
-                unpriced=unpriced,
+                unpriced=unpriced, workspace_folded=workspace_folded,
             )
 
     eid = db.new_id("evt")
@@ -380,6 +389,7 @@ def record_usage(conn, org_id: str, provider: str,
         optimal_usd=optimal_cost_usd, leaked_usd=leaked_usd,
         external_ref=external_ref,
         user_id=user_id,
+        workspace_folded=workspace_folded,
     )
 
 

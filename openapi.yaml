@@ -328,7 +328,7 @@ components:
         provider: { type: string, example: anthropic }
         model: { type: string, nullable: true, example: claude-opus-4-8 }
         task_type: { type: string, default: general }
-        workspace: { type: string, nullable: true, description: "id, slug, or name; auto-created within the tier's workspace cap." }
+        workspace: { type: string, nullable: true, description: "id, slug, or name; auto-created within the tier's workspace cap. If the cap (Free = 1) is already reached, the event instead folds into the org's earliest workspace and the result flags workspace_folded." }
         input_tokens: { type: integer, default: 0 }
         output_tokens: { type: integer, default: 0 }
         cache_read_tokens: { type: integer, default: 0 }
@@ -356,6 +356,8 @@ components:
         savings_usd: { type: number, description: "Per-event provable saving: max(0, baseline - cost); 0 when no baseline was recorded." }
         baseline_usd: { type: number, nullable: true, description: "Counterfactual cost the saving was computed against; null when no baseline was recorded." }
         leaked_usd: { type: number, description: "Per-event efficiency leakage vs the on-policy optimal (#8); 0 when no optimal was recorded." }
+        workspace_id: { type: string, nullable: true, description: "The workspace the event was actually attributed to." }
+        workspace_folded: { type: boolean, description: "True when the client-sent workspace did not exist and the tier's workspace cap (Free = 1) forced the event into the org's earliest workspace instead of creating a new one — the recorded attribution then differs from what was sent." }
     UsageResponse:
       type: object
       description: |
@@ -378,6 +380,7 @@ components:
         free_limit_blocked: { type: integer, description: "Batch only." }
         over_balance_blocked: { type: integer, description: "Batch only." }
         idempotent_replay: { type: boolean, description: "Present and true when this is a replayed response for a duplicate Idempotency-Key." }
+        workspace_note: { type: string, description: "Present when any event in the request was workspace-folded (see EventResult.workspace_folded): the tier cap redirected attribution to the org's earliest workspace." }
     ExportedEvent:
       type: object
       properties:

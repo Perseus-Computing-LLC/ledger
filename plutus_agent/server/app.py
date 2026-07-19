@@ -665,6 +665,14 @@ class Handler(BaseHTTPRequestHandler):
             "tier": st["tier"],
         }
         n_recorded = len(out) - n_blocked - n_over_balance
+        # #170: never let a workspace fold pass silently — when the tier cap
+        # (Free = 1 workspace) forced any event into the org's earliest
+        # workspace, say so at the top level in addition to the per-result flag.
+        if any(r.get("workspace_folded") for r in out):
+            body["workspace_note"] = (
+                "tier workspace cap reached: event(s) tagged with a new "
+                "workspace were attributed to the org's earliest workspace "
+                "instead (see workspace_folded / workspace_id per result)")
         if len(out) == 1:
             body.update(out[0])
         else:
@@ -866,6 +874,12 @@ class Handler(BaseHTTPRequestHandler):
                             "baseline_usd": res.baseline_usd,
                             "leaked_usd": res.leaked_usd,
                             "user_id": res.user_id,
+                            # #170: attribute verbatim — plus the signal that a
+                            # tier-capped workspace fold rewrote the client-sent
+                            # workspace, so per-source breakdowns never silently
+                            # collapse.
+                            "workspace_id": res.workspace_id,
+                            "workspace_folded": res.workspace_folded,
                         })
                     code, body = self._usage_response(
                         conn, org_id, out, n_blocked, n_over_balance, cfg)

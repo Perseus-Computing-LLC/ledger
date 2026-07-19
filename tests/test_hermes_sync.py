@@ -160,5 +160,30 @@ class TestPerModelSync(unittest.TestCase):
         self.assertEqual([[r for r, _ in c] for c in chunks], [[1, 1], [2]])
 
 
+class TestFoldedWarning(unittest.TestCase):
+    """#170: surface a server-side workspace fold from an ingest response."""
+
+    def test_single_event_folded(self):
+        resp = {"recorded": True, "workspace_folded": True,
+                "workspace_note": "tier workspace cap reached: ..."}
+        self.assertEqual(hermes_sync.folded_warning(resp),
+                         "tier workspace cap reached: ...")
+
+    def test_batch_one_folded(self):
+        resp = {"recorded": 2, "results": [
+            {"recorded": True, "workspace_folded": False},
+            {"recorded": True, "workspace_folded": True},
+        ]}
+        warn = hermes_sync.folded_warning(resp)
+        self.assertIsNotNone(warn)
+        self.assertIn("workspace", warn)
+
+    def test_no_fold_is_silent(self):
+        self.assertIsNone(hermes_sync.folded_warning(
+            {"recorded": True, "workspace_folded": False}))
+        self.assertIsNone(hermes_sync.folded_warning(
+            {"recorded": 1, "results": [{"recorded": True}]}))
+
+
 if __name__ == "__main__":
     unittest.main()
