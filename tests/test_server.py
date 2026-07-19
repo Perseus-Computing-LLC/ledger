@@ -622,6 +622,42 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertIn("&lt;script&gt;", html)
 
 
+class TestCheckoutHandoffPage(unittest.TestCase):
+    def test_renders_a_visible_new_tab_checkout_link(self):
+        from plutus_agent.server import views
+
+        url = "https://checkout.stripe.com/c/pay/cs_test_example"
+        page = views.checkout_handoff_page(url)
+
+        self.assertIn("Checkout ready", page)
+        self.assertIn("Open secure Stripe checkout", page)
+        self.assertIn(f'href="{url}"', page)
+        self.assertIn('target="_blank"', page)
+        self.assertIn('rel="noopener noreferrer"', page)
+        self.assertIn('referrerpolicy="no-referrer"', page)
+
+
+    def test_donation_checkout_returns_handoff_page_not_redirect(self):
+        class Stripe:
+            def donate_checkout(self, conn, org_id, amount):
+                return {"url": "https://checkout.stripe.com/c/pay/cs_test_example"}
+
+        sent = {}
+        fake = types.SimpleNamespace(
+            _form=lambda: {"org": "org_test", "amount": "1"},
+            _authz_org=lambda conn, org, strict: "org_test",
+            _redirect=lambda url: sent.update(redirect=url),
+            _send=lambda code, body: sent.update(code=code, body=body),
+            ctx=types.SimpleNamespace(stripe=Stripe()),
+        )
+
+        app.Handler._checkout_donate(fake, None)
+
+        self.assertNotIn("redirect", sent)
+        self.assertEqual(sent["code"], 200)
+        self.assertIn("Open secure Stripe checkout", sent["body"])
+
+
 class TestSameOrigin(unittest.TestCase):
     """Unit coverage for the same-origin check behind CSRF protection (Fix #32)."""
 

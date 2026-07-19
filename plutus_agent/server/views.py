@@ -742,11 +742,32 @@ def login_page(login_href: str) -> str:
 </div></div></body></html>"""
 
 
+def checkout_handoff_page(checkout_url: str) -> str:
+    """Render a visible handoff instead of relying solely on a cross-origin 303.
+
+    Some embedded browsers swallow a POST redirect to Stripe, leaving the
+    dashboard apparently unchanged even though Checkout was created. The
+    authenticated page provides an explicit, new-tab link as a reliable
+    fallback without logging or persisting the ephemeral Checkout URL.
+    """
+    url = html.escape(checkout_url, quote=True)
+    body = (
+        '<p>Stripe Checkout is ready. Open it in a new tab to complete your '
+        'optional one-time payment.</p>'
+        f'<p><a class="btn" href="{url}" target="_blank" '
+        'rel="noopener noreferrer" referrerpolicy="no-referrer">'
+        'Open secure Stripe checkout →</a></p>'
+        '<p style="font-size:12px">No automatic charge is created by opening '
+        'Checkout.</p>')
+    return simple_page("Checkout ready", "Checkout ready", body)
+
+
 def simple_page(title: str, heading: str, body_html: str, *, ok: bool = True) -> str:
     """Render a minimal status page. ``title`` and ``heading`` are auto-escaped,
     but ``body_html`` is inserted as RAW HTML — callers MUST pre-escape any
     untrusted/user-controlled data (e.g. ``html.escape(...)``) before passing it."""
     color = "var(--green)" if ok else "var(--coral)"
+
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Plutus — {_e(title)}</title>{FAVICON}
 <style>{CSS}</style></head><body><div class="wrap" style="max-width:620px">

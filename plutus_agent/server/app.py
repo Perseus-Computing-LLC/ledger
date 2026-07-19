@@ -1134,7 +1134,7 @@ class Handler(BaseHTTPRequestHandler):
             raise BillingError("no organization to bill")
         amount = _parse_credit_amount(f.get("amount"))
         sess = self.ctx.stripe.donate_checkout(conn, org_id, amount)
-        return self._redirect(sess["url"])
+        return self._send(200, views.checkout_handoff_page(sess["url"]))
 
     def _portal(self, conn):
         f = self._form()
