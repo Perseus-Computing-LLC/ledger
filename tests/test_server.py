@@ -74,7 +74,18 @@ class TestServer(unittest.TestCase):
         self.assertIn("Plutus", body)
         self.assertIn("Credit balance", body)
         self.assertIn("Spend by workspace", body)
-        self.assertIn("#0c0814", body)  # the brand bg color is present
+        self.assertIn("#0a1018", body)  # the monitor canvas color is present
+
+    def test_dashboard_uses_a_monitor_layout_with_clear_action_hierarchy(self):
+        """The primary dashboard is a dense monitor, not a stack of generic cards."""
+        status, body = self._get("/")
+        self.assertEqual(status, 200)
+        self.assertIn('<main class="dashboard wrap"', body)
+        self.assertIn('class="hero-metric"', body)
+        self.assertIn('class="section-title"', body)
+        self.assertIn('class="btn btn-primary"', body)
+        self.assertIn('font-variant-numeric:tabular-nums', body)
+        self.assertIn('aria-live="polite"', body)
 
     def test_pricing_page_public(self):
         status, body = self._get("/pricing")
