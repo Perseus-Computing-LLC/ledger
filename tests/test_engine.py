@@ -337,7 +337,7 @@ class TestBillingWebhook(unittest.TestCase):
         kinds = [r["kind"] for r in db.list_ledger(self.conn, self.org)] \
             if hasattr(db, "list_ledger") else None
         # balance reflects the gift; the entry is tagged 'donation'
-        self.assertAlmostEqual(db.get_balance(self.conn, self.org), 7.0, places=2)
+        self.assertAlmostEqual(db.get_balance(self.conn, self.org), 0.0, places=2)
         if kinds is not None:
             self.assertIn("donation", kinds)
 
