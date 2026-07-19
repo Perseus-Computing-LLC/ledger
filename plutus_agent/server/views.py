@@ -14,84 +14,31 @@ import html
 # coral problem), JetBrains-Mono-style numerals.
 CSS = """
 :root{
-  --bg:#0c0814; --bg2:#120c1d; --panel:#161020; --panel2:#1d1529;
-  --line:#2a2238; --line2:#372c4a;
-  --txt:#ece7f5; --dim:#9b91ad; --faint:#6f6682;
-  --amber:#f5b63f; --amber-dim:#7a6228;
-  --green:#54d38a; --green-dim:#2f6b4c;
-  --coral:#f26a52; --coral-dim:#7a3a30;
-  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --bg:#0a1018; --surface:#101a27; --surface-raised:#142133; --surface-soft:#0e1723;
+  --panel:var(--surface); --panel2:var(--surface-raised); --bg2:var(--surface-soft);
+  --line:#223248; --line-strong:#334861; --line2:var(--line-strong); --txt:#f3f7fb; --dim:#aab8c8; --faint:#738399;
+  --blue:#69a9ff; --blue-ink:#071525; --green:#54d39a; --green-soft:#123b32;
+  --coral:#ff7a6a; --coral-soft:#44241f; --coral-dim:#674139; --amber:#ffbf5f; --amber-soft:#3d301a; --amber-dim:#5d4c27; --green-dim:#28644f;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
 }
-*{box-sizing:border-box}
-body{margin:0;background:
-  radial-gradient(1200px 600px at 80% -10%, #1a1030 0%, transparent 60%),
-  radial-gradient(900px 500px at -10% 10%, #12182e 0%, transparent 55%),
-  var(--bg);
-  color:var(--txt);font:14px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
-  -webkit-font-smoothing:antialiased;min-height:100vh}
-a{color:var(--amber);text-decoration:none}
-.wrap{max-width:1180px;margin:0 auto;padding:26px 22px 64px}
-.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
-.brand{display:flex;align-items:center;gap:11px}
-.logo{font-size:22px;color:var(--amber)}
-.brand h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.3px}
-.brand .tag{color:var(--dim);font-size:12px;margin-top:1px}
-.pill{font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid var(--line2);color:var(--dim)}
-.pill.pro{color:var(--amber);border-color:var(--amber-dim);background:rgba(245,182,63,.08)}
-.pill.live{color:var(--green);border-color:var(--green-dim);background:rgba(84,211,138,.08)}
-.pill.demo{color:var(--coral);border-color:var(--coral-dim);background:rgba(242,106,82,.08)}
-.orgsel{background:var(--panel);color:var(--txt);border:1px solid var(--line2);border-radius:8px;padding:6px 10px;font-size:13px}
-.banner{margin:14px 0;border-radius:12px;border:1px solid var(--coral-dim);background:rgba(242,106,82,.08);
-  padding:11px 15px;color:#ffd9cf;font-size:13px;display:flex;gap:10px;align-items:flex-start}
-.banner .x{color:var(--coral);font-weight:700}
-.upsell{margin:14px 0;border-radius:12px;border:1px solid var(--amber-dim);
-  background:linear-gradient(180deg,rgba(245,182,63,.13),rgba(245,182,63,.05));
-  padding:14px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-.upsell .u-txt{flex:1;min-width:240px}
-.upsell .u-h{font-weight:700;color:var(--amber)}
-.upsell .u-s{color:var(--dim);font-size:12.5px;margin-top:2px}
-.upsell form{display:flex;gap:8px;align-items:center;margin:0}
-.grid{display:grid;gap:16px}
-.cards{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin:18px 0}
-.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
-  border-radius:14px;padding:16px 17px}
-.card .l{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--faint)}
-.card .v{font-size:27px;font-weight:800;font-family:var(--mono);margin-top:5px;letter-spacing:-.5px}
-.card .v.amber{color:var(--amber)} .card .v.green{color:var(--green)} .card .v.coral{color:var(--coral)}
-.card .s{font-size:12px;color:var(--dim);margin-top:3px}
-.cols{grid-template-columns:1fr 1fr}
-@media(max-width:860px){.cols{grid-template-columns:1fr}}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:4px 0 6px;overflow:hidden}
-.panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim);
-  margin:0;padding:14px 18px 10px;display:flex;justify-content:space-between;align-items:center}
-.panel h2 .hint{color:var(--faint);font-weight:400;text-transform:none;letter-spacing:0}
-table{width:100%;border-collapse:collapse}
-th,td{padding:9px 18px;text-align:right;border-top:1px solid var(--line)}
-th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--faint);font-weight:600}
-th:first-child,td:first-child{text-align:left}
-.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
-.name{font-weight:600}
-.bar{height:6px;border-radius:4px;background:var(--line2);overflow:hidden;margin-top:5px}
-.bar > i{display:block;height:100%;background:var(--amber)}
-.bar.warn > i{background:var(--coral)}
-.bar.ok > i{background:var(--green)}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:middle}
-.dot.healthy{background:var(--green);box-shadow:0 0 8px var(--green)}
-.dot.idle{background:var(--amber)} .dot.stale{background:var(--faint)}
-.muted{color:var(--dim)} .empty{color:var(--faint);padding:18px;text-align:center;font-style:italic}
-.feed{max-height:340px;overflow:auto}
-.feed .row{display:flex;justify-content:space-between;gap:12px;padding:8px 18px;border-top:1px solid var(--line);font-size:13px}
-.feed .row:first-child{border-top:none}
-.feed .meta{color:var(--dim);font-size:12px}
-.tag2{font-size:10px;padding:1px 6px;border-radius:5px;background:var(--bg2);border:1px solid var(--line2);color:var(--dim);margin-left:6px}
-.billing{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 18px}
-.btn{background:var(--amber);color:#1a1206;border:none;border-radius:9px;padding:9px 15px;font-weight:700;font-size:13px;cursor:pointer}
-.btn.ghost{background:transparent;color:var(--txt);border:1px solid var(--line2)}
-.btn:disabled{opacity:.45;cursor:not-allowed}
-.amt{width:96px;background:var(--bg2);border:1px solid var(--line2);color:var(--txt);border-radius:9px;padding:9px 11px;font-family:var(--mono)}
-.foot{margin-top:30px;color:var(--faint);font-size:12px;text-align:center}
-.spark{display:flex;gap:2px;align-items:flex-end;height:26px}
-.spark i{flex:1;background:var(--amber-dim);border-radius:1px;min-height:2px}
+*{box-sizing:border-box} html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 ui-sans-serif,system-ui,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;min-height:100vh} a{color:var(--blue);text-decoration:none} a:hover{text-decoration:underline}
+.wrap{max-width:1320px;margin:0 auto;padding:24px 28px 56px}.dashboard{display:grid;gap:16px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding-bottom:18px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px}.logo{font-size:20px;color:var(--blue)}.brand h1{font-size:18px;margin:0;font-weight:720;letter-spacing:-.02em}.brand .tag{color:var(--dim);font-size:12px;margin-top:1px}
+.pill{font-size:11px;padding:4px 8px;border-radius:999px;border:1px solid var(--line-strong);color:var(--dim);white-space:nowrap}.pill.pro{color:#cce0ff;border-color:#355984;background:#142943}.pill.live{color:#8ce2ba;border-color:#28644f;background:#102b25}.pill.demo{color:#ffc0b8;border-color:#6c4139;background:#30201f}
+.orgsel,.amt{background:var(--surface);color:var(--txt);border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;font:inherit}.amt{font-family:var(--mono)}
+.banner{margin:0;border-radius:10px;border:1px solid #674139;background:var(--coral-soft);padding:11px 14px;color:#ffd8d2;font-size:13px}.banner .x{color:var(--coral);font-weight:800}
+.upsell{border-radius:10px;border:1px solid #5d4c27;background:var(--amber-soft);padding:14px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}.upsell .u-txt{flex:1;min-width:240px}.upsell .u-h{font-weight:700;color:#ffda97}.upsell .u-s{color:#d6c69f;font-size:12.5px;margin-top:2px}.upsell form{display:flex;gap:8px;align-items:center;margin:0}
+.hero-metric{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,.42fr);gap:26px;align-items:end;background:var(--surface-raised);border:1px solid var(--line-strong);border-radius:12px;padding:24px}.hero-metric .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim);font-weight:750}.hero-metric .hero-value{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:42px;line-height:1.04;letter-spacing:-.06em;font-weight:720;margin:7px 0;color:#f8fbff}.hero-metric .hero-sub{color:var(--dim);font-size:13px}.hero-aside{border-left:1px solid var(--line);padding-left:24px;color:var(--dim)}
+.grid{display:grid;gap:16px}.stat-grid{grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:15px;min-height:126px}.card .l{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);font-weight:750}.card .v{font-size:24px;font-weight:760;font-family:var(--mono);font-variant-numeric:tabular-nums;margin-top:8px;letter-spacing:-.04em}.card .v.amber{color:var(--amber)}.card .v.green{color:var(--green)}.card .v.coral{color:var(--coral)}.card .s{font-size:12px;color:var(--dim);margin-top:5px;line-height:1.4}.compact-status .s{max-width:18ch}.cols{grid-template-columns:1fr 1fr}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}.section-title{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);margin:0;padding:15px 18px 11px;display:flex;justify-content:space-between;align-items:center;font-weight:750}.section-title .hint{color:var(--faint);font-weight:500;text-transform:none;letter-spacing:0}
+table{width:100%;border-collapse:collapse}th,td{padding:11px 18px;text-align:right;border-top:1px solid var(--line)}th{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);font-weight:750}th:first-child,td:first-child{text-align:left}.num{font-family:var(--mono);font-variant-numeric:tabular-nums}.name{font-weight:650;color:var(--txt)}.bar{height:4px;border-radius:99px;background:var(--line-strong);overflow:hidden;margin-top:7px}.bar>i{display:block;height:100%;background:var(--blue)}.bar.warn>i{background:var(--coral)}.bar.ok>i{background:var(--green)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:middle}.dot.healthy{background:var(--green)}.dot.idle{background:var(--amber)}.dot.stale{background:var(--faint)}.muted{color:var(--dim)}.empty{color:var(--faint);padding:18px;text-align:center}.feed{max-height:none}.feed .row{display:flex;justify-content:space-between;gap:12px;padding:11px 18px;border-top:1px solid var(--line);font-size:13px}.feed .row:first-child{border-top:none}.feed .meta{color:var(--dim);font-size:12px}.tag2{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--surface-soft);border:1px solid var(--line);color:var(--dim);margin-left:6px}
+.billing{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 18px}.btn{border-radius:8px;padding:9px 13px;font-weight:720;font-size:13px;cursor:pointer;line-height:1.2}.btn-primary{background:var(--blue);color:var(--blue-ink);border:1px solid var(--blue)}.btn.ghost{background:transparent;color:var(--txt);border:1px solid var(--line-strong)}.btn.danger{color:#ffaaa1;border-color:#704139}.btn:disabled{opacity:.45;cursor:not-allowed}.foot{margin-top:10px;color:var(--faint);font-size:12px;text-align:center}.spark{display:flex;gap:2px;align-items:flex-end;height:26px}.spark i{flex:1;background:var(--blue);border-radius:1px;min-height:2px}
+@media(max-width:1080px){.stat-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:760px){.wrap{padding:18px 16px 42px}.hero-metric,.cols{grid-template-columns:1fr}.hero-aside{border-left:none;border-top:1px solid var(--line);padding:15px 0 0}.stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}th,td{padding:10px 12px}.top{align-items:flex-start}}
+@media print{html,body{background:var(--bg)!important;color:var(--txt)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.wrap{max-width:none;padding:16px}.panel,.card,.hero-metric{break-inside:avoid}}
 """
 
 POLLER = """
@@ -155,14 +102,14 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
     org = summary["org"]
     tier = summary["tier"]
     w = summary["windows"]
-    bal = summary["balance"]
-    low = bal is not None and bal <= float(cfg.get("alerts", {}).get("low_balance_usd", 10.0))
-
-    # alerts banner
+    # The dashboard tracks spend and savings, not a prepaid-credit balance.
+    # Suppress legacy balance alerts from this surface.
     banner = ""
-    if summary["alerts"]:
+    visible_alerts = [a for a in summary["alerts"]
+                      if "credit balance" not in str(a.get("message", "")).lower()]
+    if visible_alerts:
         items = "".join(f"<div><span class='x'>▲</span> {_e(a['message'])}</div>"
-                        for a in summary["alerts"][:3])
+                        for a in visible_alerts[:3])
         banner = f"<div class='banner'><div>{items}</div></div>"
 
     # free-tier upgrade nudge — the conversion lever
@@ -187,10 +134,10 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
         if can_pro:
             cta = (f"<form method='post' action='/billing/checkout/pro'>"
                    f"<input type='hidden' name='org' value='{_e(org['id'])}'>{csrf_field}"
-                   f"<button class='btn' type='submit'>Upgrade to Pro →</button></form>"
+                   f"<button class='btn btn-primary' type='submit'>Upgrade to Pro →</button></form>"
                    f"<a class='btn ghost' href='/pricing'>Compare plans</a>")
         else:
-            cta = "<a class='btn' href='/pricing'>See plans →</a>"
+            cta = "<a class='btn btn-primary' href='/pricing'>See plans →</a>"
         upsell = (f"<div class='upsell'><div class='u-txt'>"
                   f"<div class='u-h'>{_e(head)}</div><div class='u-s'>{_e(sub)}</div></div>"
                   f"{cta}</div>")
@@ -275,17 +222,12 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                 "(<a href='/v1/checkpoints'>download</a>)</div></div>")
         else:
             checkpoint_card = (
-                "<div class='card'><div class='l'>Checkpoint anchor</div>"
+                "<div class='card compact-status'><div class='l'>Checkpoint anchor</div>"
                 "<div class='v'>—</div>"
-                "<div class='s'>no anchor yet — run <span class='num'>plutus "
-                "checkpoint</span> (auto on applied closes) and retain the "
-                "JSON out of band</div></div>")
+                "<div class='s'>No external checkpoint retained yet</div></div>")
 
     cards = f"""
-    <div class="grid cards">
-      <div class="card"><div class="l">Credit balance</div>
-        <div class="v {'coral' if low else 'green'}" id="v-balance">{_usd(bal)}</div>
-        <div class="s">{'⚠ low balance' if low else 'prepaid · auto-depletes'}</div></div>
+    <div class="grid stat-grid">
       <div class="card"><div class="l">Spend today</div>
         <div class="v amber" id="v-today">{_usd(w['today']['cost'])}</div>
         <div class="s">{w['today']['events']:,} calls</div></div>
@@ -427,26 +369,23 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                      "Getting the tokens you pay for? Reconcile metered spend against your "
                      "provider console. Add Perseus to route spend down.</div>")
         billboard = (
-            f"<div class='panel' style='background:linear-gradient(180deg,var(--bg2),transparent);"
-            f"border-color:var(--amber-dim)'>"
-            f"<div style='display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px'>"
-            f"<div><div class='muted' style='font-size:13px;text-transform:uppercase;letter-spacing:.05em'>"
-            f"{_e(label)}</div>"
-            f"<div class='amber' style='font-size:34px;font-weight:700;line-height:1.1'>{num}</div>"
-            f"<div class='muted' style='font-size:13px'>{sub}</div></div>"
-            f"<div style='text-align:right'>{aside}</div>"
-            f"</div>{tip_html}</div>")
+            f'<section class="hero-metric">'
+            f"<div><div class='hero-label'>{_e(label)}</div>"
+            f"<div class='hero-value'>{num}</div>"
+            f"<div class='hero-sub'>{sub}</div>{tip_html}</div>"
+            f"<div class='hero-aside'>{aside}</div>"
+            f"</section>")
 
     # Free keeps the savings and audit view; deeper task attribution can be
     # introduced later without pressuring a Free team into a checkout flow.
     if tobj.full_reporting:
         task_panel = (
-            '<div class="panel"><h2>Cost per task type <span class="hint">ROI lens</span></h2>'
+            '<div class="panel"><h2 class="section-title">Cost per task type <span class="hint">ROI lens</span></h2>'
             '<table><thead><tr><th>Task type</th><th>Cost</th><th>Calls</th><th>$/task</th></tr></thead>'
             f'<tbody>{task_table}</tbody></table></div>')
     else:
         task_panel = (
-            '<div class="panel"><h2>Cost per task type <span class="hint">coming later</span></h2>'
+            '<div class="panel"><h2 class="section-title">Cost per task type <span class="hint">coming later</span></h2>'
             '<div class="empty" style="padding:24px 14px;text-align:center">'
             '<div style="font-size:15px;margin-bottom:6px">Savings and audit stay available on Free</div>'
             '<div class="muted" style="font-size:13px">Per-task breakdowns will arrive separately; '
@@ -468,7 +407,7 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                       f"<td class='num'>{days_s}</td></tr>")
         runway_panel = f"""
         <div class="panel">
-          <h2>Provider runway <span class="hint">live, via plutus.py monitor</span></h2>
+          <h2 class="section-title">Provider runway <span class="hint">live, via plutus.py monitor</span></h2>
           <table><thead><tr><th>Provider</th><th>Balance</th><th>$/day</th><th>Runway</th></tr></thead>
           <tbody>{''.join(rr)}</tbody></table>
         </div>"""
@@ -494,14 +433,14 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
             f"\"input_tokens\":1200,\"output_tokens\":800,\"workspace\":\"prod\"}}'")
     keys_panel = f"""
     <div class="panel" style="margin-top:16px">
-      <h2>API keys <span class="hint">send usage to /v1/usage</span></h2>
+      <h2 class="section-title">API keys <span class="hint">send usage to /v1/usage</span></h2>
       <table><thead><tr><th>Name</th><th>Last used</th><th></th></tr></thead>
       <tbody>{keys_table}</tbody></table>
       <form class="billing" method="post" action="/keys/create">
         <input type="hidden" name="org" value="{_e(org['id'])}">{csrf_field}
         <span class="muted">New key:</span>
         <input class="amt" style="width:160px" type="text" name="name" placeholder="e.g. prod agent">
-        <button class="btn" type="submit">Create key →</button>
+        <button class="btn btn-primary" type="submit">Create key</button>
       </form>
       <pre style="margin:2px 18px 14px;padding:12px 14px;background:var(--bg2);border:1px solid var(--line2);
         border-radius:9px;overflow:auto;font-family:var(--mono);font-size:12px;color:var(--dim)">{_e(curl)}</pre>
@@ -511,14 +450,14 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
     from .. import __version__, __tagline__
     badges = (f"<span class='pill {tier['key']}'>{_e(tier['name'])} plan</span>"
               + ("<span class='pill demo'>DEMO DATA</span>" if demo else "")
-              + "<span class='pill live' id='pulse'>● live</span>")
+              + '<span class="pill live" id="pulse" aria-live="polite">● live</span>')
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Plutus — {_e(org['name'])} · spend dashboard</title>{FAVICON}
 <style>{CSS}
 #pulse{{transition:opacity .4s}}#pulse.off{{opacity:.4}}</style>
-</head><body><div class="wrap">
+</head><body><main class="dashboard wrap">
   <div class="top">
     <div class="brand"><div class="logo">◆</div>
       <div><h1>Plutus</h1><div class="tag">{_e(__tagline__)}</div></div></div>
@@ -529,23 +468,23 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
   {billboard}
   {cards}
   <div class="grid cols">
-    <div class="panel"><h2>Spend by workspace <span class="hint">budget caps</span></h2>
+    <div class="panel"><h2 class="section-title">Spend by workspace <span class="hint">budget caps</span></h2>
       <table><thead><tr><th>Workspace</th><th>Cost</th><th>Tokens</th><th>Calls</th></tr></thead>
       <tbody>{ws_table}</tbody></table></div>
-    <div class="panel"><h2>Providers <span class="hint">health · trailing $/day</span></h2>
+    <div class="panel"><h2 class="section-title">Providers <span class="hint">health · trailing $/day</span></h2>
       <table><thead><tr><th>Provider</th><th>Cost</th><th>$/day</th><th>Last call</th></tr></thead>
       <tbody>{prov_table}</tbody></table></div>
   </div>
   <div class="grid cols" style="margin-top:16px">
     {task_panel}
-    <div class="panel"><h2>Live activity</h2><div class="feed">{feed_html}</div></div>
+    <div class="panel"><h2 class="section-title">Live activity</h2><div class="feed">{feed_html}</div></div>
   </div>
   {runway_panel}
-  <div class="panel" style="margin-top:16px"><h2>Billing <span class="hint">prepaid credits · Stripe</span></h2>{billing}</div>
+  <div class="panel" style="margin-top:16px"><h2 class="section-title">Billing <span class="hint">prepaid credits · Stripe</span></h2>{billing}</div>
   {keys_panel}
   <div class="foot">Plutus v{__version__} · self-hosted · generated {gen} · live numbers refresh every 5s<br>
     Perseus Computing LLC · <a href="https://perseus.observer/plutus/">perseus.observer/plutus</a></div>
-</div>
+</main>
 <script>{POLLER}</script>
 </body></html>"""
 
@@ -582,7 +521,7 @@ def landing_page(*, signed_in: bool = False, savings_share_pct: float = 10.0) ->
 
 <div class="hero">
   <div class="pill pro" style="display:inline-block">verifiable efficiency, not a marketing slide</div>
-  <h2>See what your AI&nbsp;stack is <span class="amber">really worth</span>.</h2>
+  <h2 class="section-title">See what your AI&nbsp;stack is <span class="amber">really worth</span>.</h2>
   <p class="sub">Plutus meters your token usage across every provider and shows you the number that
   matters: how much your setup would cost at flagship API prices versus what you actually paid.
   Routing, local models, and subscriptions make that gap huge — and every dollar is on a
