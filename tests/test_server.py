@@ -805,3 +805,93 @@ class TestCheckpointEndpoints(unittest.TestCase):
         self.assertEqual((s1, s2), (200, 200))
         self.assertEqual(b1["checkpoint"]["through_rowid"],
                          b2["checkpoint"]["through_rowid"])
+
+
+class TestWorkspaceFoldSignal(unittest.TestCase):
+    """#170: client-sent attribution is honored verbatim, and a tier-capped
+    workspace fold is FLAGGED (workspace_folded + workspace_note) instead of
+    silently collapsing per-source breakdowns."""
+    @classmethod
+    def setUpClass(cls):
+        import dataclasses
+        from plutus_agent import pricing
+        fd, cls.dbpath = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        # Pin a workspace-capped Free variant (cap = 1) to force the fold.
+        cls._orig_free = pricing.TIERS["free"]
+        pricing.TIERS["free"] = dataclasses.replace(cls._orig_free, workspaces=1)
+        conn = db.connect(cls.dbpath)
+        db.init_schema(conn)
+        cls.org_id = db.create_org(conn, "Fold Co", tier="free")["id"]
+        _, cls.key = db.create_api_key(conn, cls.org_id)
+        cls.first_ws_id = db.create_workspace(conn, cls.org_id, "first")["id"]
+        conn.close()
+
+        ctx = app._Ctx(dict(DEFAULT_CONFIG), cls.dbpath, demo=False)
+        cls.httpd = app._Server(("127.0.0.1", 0), app.Handler, ctx)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        from plutus_agent import pricing
+        pricing.TIERS["free"] = cls._orig_free
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        for ext in ("", "-wal", "-shm"):
+            try:
+                os.unlink(cls.dbpath + ext)
+            except OSError:
+                pass
+
+    def _post(self, payload):
+        url = f"http://127.0.0.1:{self.port}/v1/usage"
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {self.key}"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode())
+
+    def test_new_workspace_beyond_cap_folds_and_flags(self):
+        status, body = self._post({"provider": "acme-sent", "input_tokens": 10,
+                                   "workspace": "second"})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["recorded"])
+        self.assertTrue(body["workspace_folded"])
+        self.assertEqual(body["workspace_id"], self.first_ws_id)
+        self.assertIn("workspace_note", body)
+        # …and provider lands verbatim — the server never rewrites it.
+        conn = db.connect(self.dbpath)
+        try:
+            row = conn.execute(
+                "SELECT provider, workspace_id FROM usage_events WHERE id=?",
+                (body["event_id"],)).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row["provider"], "acme-sent")
+        self.assertEqual(row["workspace_id"], self.first_ws_id)
+
+    def test_existing_workspace_does_not_fold(self):
+        status, body = self._post({"provider": "acme", "input_tokens": 10,
+                                   "workspace": "first"})
+        self.assertEqual(status, 200)
+        self.assertFalse(body["workspace_folded"])
+        self.assertEqual(body["workspace_id"], self.first_ws_id)
+        self.assertNotIn("workspace_note", body)
+
+    def test_batch_mixed_fold_flags_per_result(self):
+        status, body = self._post([
+            {"provider": "acme", "input_tokens": 10, "workspace": "third"},
+            {"provider": "acme", "input_tokens": 10, "workspace": "first"},
+        ])
+        self.assertEqual(status, 200)
+        self.assertEqual(body["recorded"], 2)
+        self.assertTrue(body["results"][0]["workspace_folded"])
+        self.assertFalse(body["results"][1]["workspace_folded"])
+        self.assertEqual(body["results"][0]["workspace_id"], self.first_ws_id)
+        self.assertIn("workspace_note", body)

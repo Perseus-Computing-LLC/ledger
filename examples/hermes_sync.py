@@ -22,6 +22,14 @@ Env: PLUTUS_REMOTE_URL, PLUTUS_API_KEY (required); PLUTUS_STATE_DB (default the
 Hermes path below); PLUTUS_SYNC_STATE (watermark file); PLUTUS_WORKSPACE
 (default "hermes").
 
+Attribution (#170): the server records each event's ``provider`` verbatim —
+per-model rows from ``session_model_usage`` carry their own billing_provider,
+so a mixed-provider session shows up mixed on the dashboard. ``workspace`` is
+also honored *within the tier's workspace cap* (Free = 1): a name beyond the
+cap folds into the org's earliest workspace, and the ingest response flags
+that per event (``workspace_folded``) plus a top-level ``workspace_note`` —
+this script prints a warning when a batch comes back folded.
+
 Savings-share (#7): tag each event with the baseline model — the flagship the
 customer would have run WITHOUT Perseus routing — so hosted Plutus prices the
 same tokens at that model and records the saving. Off unless you opt in:
@@ -260,6 +268,19 @@ def post_events(remote: str, api_key: str, events: list[dict], timeout: float = 
         return json.loads(resp.read().decode())
 
 
+def folded_warning(resp: dict) -> str | None:
+    """#170: the workspace-fold signal from one ingest response, or None.
+
+    The server returns 200 either way — without this check a tier-capped fold
+    would silently collapse every source into one workspace on the dashboard.
+    """
+    results = resp.get("results") or [resp]
+    if any(isinstance(r, dict) and r.get("workspace_folded") for r in results):
+        return (resp.get("workspace_note")
+                or "workspace folded into the org's earliest workspace (tier cap)")
+    return None
+
+
 def _batches(pairs, size):
     """Yield chunks of ~``size`` pairs, cutting only at a session (rowid)
     boundary so all of a session's per-model events land in the same batch — the
@@ -327,15 +348,21 @@ def main(argv=None) -> int:
         return 0
 
     sent = 0
+    fold_warned = False
     for chunk in _batches(pairs, BATCH):
         try:
-            post_events(remote, api_key, [e for _, e in chunk])
+            resp = post_events(remote, api_key, [e for _, e in chunk])
         except urllib.error.HTTPError as e:
             sys.exit(f"plutus: ingest failed HTTP {e.code}: "
                      f"{e.read().decode()[:200]} (watermark at {last}, not advanced)")
         except urllib.error.URLError as e:
             sys.exit(f"plutus: could not reach {remote}: {e.reason} "
                      f"(watermark at {last}, not advanced)")
+        if not fold_warned:
+            warn = folded_warning(resp)
+            if warn:
+                print(f"plutus: WARNING: {warn}", file=sys.stderr)
+                fold_warned = True
         sent += len(chunk)
         last = chunk[-1][0]
         _save_watermark(wm_path, last, sent)   # advance per batch → resumable
