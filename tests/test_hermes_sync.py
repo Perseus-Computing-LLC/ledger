@@ -127,6 +127,33 @@ def _make_pm_db():
     return path
 
 
+class TestDefaultStateDb(unittest.TestCase):
+    """#171: state.db default resolution — PLUTUS_STATE_DB > $HERMES_HOME/
+    state.db (when it exists) > the legacy hardcoded path."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.hh_db = os.path.join(self.tmp, "state.db")
+        open(self.hh_db, "w").close()
+
+    def test_explicit_env_wins(self):
+        env = {"PLUTUS_STATE_DB": "/explicit/x.db", "HERMES_HOME": self.tmp}
+        self.assertEqual(hermes_sync.default_state_db(env), "/explicit/x.db")
+
+    def test_hermes_home_state_db_when_present(self):
+        self.assertEqual(hermes_sync.default_state_db({"HERMES_HOME": self.tmp}),
+                         self.hh_db)
+
+    def test_hermes_home_without_file_falls_back(self):
+        os.unlink(self.hh_db)
+        self.assertEqual(hermes_sync.default_state_db({"HERMES_HOME": self.tmp}),
+                         hermes_sync.DEFAULT_STATE_DB)
+
+    def test_no_env_falls_back(self):
+        self.assertEqual(hermes_sync.default_state_db({}),
+                         hermes_sync.DEFAULT_STATE_DB)
+
+
 class TestPerModelSync(unittest.TestCase):
     def tearDown(self):
         for p in getattr(self, "_paths", []):
