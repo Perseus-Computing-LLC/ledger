@@ -102,14 +102,14 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
     org = summary["org"]
     tier = summary["tier"]
     w = summary["windows"]
-    bal = summary["balance"]
-    low = bal is not None and bal <= float(cfg.get("alerts", {}).get("low_balance_usd", 10.0))
-
-    # alerts banner
+    # The dashboard tracks spend and savings, not a prepaid-credit balance.
+    # Suppress legacy balance alerts from this surface.
     banner = ""
-    if summary["alerts"]:
+    visible_alerts = [a for a in summary["alerts"]
+                      if "credit balance" not in str(a.get("message", "")).lower()]
+    if visible_alerts:
         items = "".join(f"<div><span class='x'>▲</span> {_e(a['message'])}</div>"
-                        for a in summary["alerts"][:3])
+                        for a in visible_alerts[:3])
         banner = f"<div class='banner'><div>{items}</div></div>"
 
     # free-tier upgrade nudge — the conversion lever
@@ -222,17 +222,12 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
                 "(<a href='/v1/checkpoints'>download</a>)</div></div>")
         else:
             checkpoint_card = (
-                "<div class='card'><div class='l'>Checkpoint anchor</div>"
+                "<div class='card compact-status'><div class='l'>Checkpoint anchor</div>"
                 "<div class='v'>—</div>"
-                "<div class='s'>no anchor yet — run <span class='num'>plutus "
-                "checkpoint</span> (auto on applied closes) and retain the "
-                "JSON out of band</div></div>")
+                "<div class='s'>No external checkpoint retained yet</div></div>")
 
     cards = f"""
-    <div class="grid cards">
-      <div class="card"><div class="l">Credit balance</div>
-        <div class="v {'coral' if low else 'green'}" id="v-balance">{_usd(bal)}</div>
-        <div class="s">{'⚠ low balance' if low else 'prepaid · auto-depletes'}</div></div>
+    <div class="grid stat-grid">
       <div class="card"><div class="l">Spend today</div>
         <div class="v amber" id="v-today">{_usd(w['today']['cost'])}</div>
         <div class="s">{w['today']['events']:,} calls</div></div>

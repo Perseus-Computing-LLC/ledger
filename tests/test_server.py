@@ -86,6 +86,8 @@ class TestServer(unittest.TestCase):
         self.assertIn('class="btn btn-primary"', body)
         self.assertIn('font-variant-numeric:tabular-nums', body)
         self.assertIn('aria-live="polite"', body)
+        self.assertNotIn("Credit balance", body)
+        self.assertNotIn("Low credit balance", body)
 
     def test_pricing_page_public(self):
         status, body = self._get("/pricing")
