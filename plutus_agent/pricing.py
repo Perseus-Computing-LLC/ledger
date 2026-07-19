@@ -81,7 +81,7 @@ TIERS = {
             "Verify you're getting the tokens you pay for",
             "Live efficiency number (flagship-equivalent)",
             "Up to 10 team members · 1 workspace",
-            "Optional tip jar when Perseus saves you money",
+            "Optional 5% donation of verified savings — only when Perseus saves you money",
         ),
         blurb="Track your own AI spend and verify you're getting your tokens. Free, no card.",
     ),
