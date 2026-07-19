@@ -376,7 +376,7 @@ def _apply_checkout_completed(conn, obj) -> dict:
         usd = (float(amount_total) / 100.0 if amount_total is not None
                else float(meta.get("amount_usd") or 0.0))
         ref = obj.get("payment_intent") or obj.get("id")
-        db.add_ledger(conn, org_id, usd, "donation",
+        db.add_ledger(conn, org_id, 0.0, "donation",
                       reason="Voluntary savings-share — thank you!",
                       stripe_ref=ref, commit=False)
         return {"status": "donated", "org_id": org_id, "amount_usd": usd}
