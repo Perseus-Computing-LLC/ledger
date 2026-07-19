@@ -235,3 +235,13 @@ rather than importing it, so the two ship and run independently.
 ## License
 
 MIT — see [LICENSE](LICENSE). © Perseus Computing LLC.
+
+## Health endpoint
+
+`GET /healthz` — unauthenticated liveness probe, safe for public uptime monitors.
+
+- Success: HTTP 200, body `{"ok": true, "version": "<semver>", "demo": <bool>}`
+- Exposes no data, balances, orgs, or credentials (path is explicitly public in `server/app.py`).
+- `/health` (no `z`) is **not** the probe path — it redirects to login when auth is enabled.
+
+*Documented 2026-07-19 after live verification against production.*
