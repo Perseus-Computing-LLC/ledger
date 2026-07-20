@@ -1116,6 +1116,19 @@ class Handler(BaseHTTPRequestHandler):
         return self._redirect("/")
 
     # ---- billing -----------------------------------------------------------
+    def _subscriptions_gated(self):
+        """#175: recurring-billing gate. Pro/Team subscription checkout stays
+        off until the launch-readiness checks (#4/#164) pass; one-way money
+        paths (credit top-ups, donations) are unaffected. Returns a response
+        when gated, else None."""
+        if (self.ctx.cfg.get("billing") or {}).get("subscriptions_enabled"):
+            return None
+        return self._send(403, views.simple_page(
+            "Subscriptions", "Subscriptions open at launch",
+            "Recurring Pro/Team billing is temporarily gated while the "
+            "launch-readiness checks complete. Credit top-ups and donations "
+            "are available now.", ok=False))
+
     def _checkout_credit(self, conn):
         f = self._form()
         org_id = self._authz_org(conn, f.get("org"), strict=True)
@@ -1126,6 +1139,9 @@ class Handler(BaseHTTPRequestHandler):
         return self._redirect(sess["url"])
 
     def _checkout_pro(self, conn):
+        gated = self._subscriptions_gated()
+        if gated is not None:
+            return gated
         f = self._form()
         org_id = self._authz_org(conn, f.get("org"), strict=True)
         if not org_id:
@@ -1134,6 +1150,9 @@ class Handler(BaseHTTPRequestHandler):
         return self._redirect(sess["url"])
 
     def _checkout_team(self, conn):
+        gated = self._subscriptions_gated()
+        if gated is not None:
+            return gated
         f = self._form()
         org_id = self._authz_org(conn, f.get("org"), strict=True)
         if not org_id:
