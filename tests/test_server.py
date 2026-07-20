@@ -694,6 +694,7 @@ class TestSubscriptionGate(unittest.TestCase):
             _send=lambda code, body: sent.update(code=code, body=body),
             ctx=types.SimpleNamespace(stripe=Stripe(), cfg=cfg),
         )
+        fake._subscriptions_enabled = lambda: app.Handler._subscriptions_enabled(fake)
         fake._subscriptions_gated = lambda: app.Handler._subscriptions_gated(fake)
         return fake, sent
 
