@@ -5,6 +5,13 @@ All notable changes to Plutus are documented here.
 ## [Unreleased]
 
 ### Added
+- **`plutus reconcile-webhooks`** (#177). Diffs the Stripe event log (source
+  of truth) against the local `stripe_events` table to surface webhook
+  events dropped by deploy windows or restarts. Dry-run by default;
+  `--apply` replays gaps oldest-first through the idempotent app handler.
+  Flags: `--days` (default 7), `--types`, `--json`.
+
+### Added
 - **Recurring-billing gate** (#175). New `billing.subscriptions_enabled`
   config key + `PLUTUS_SUBSCRIPTIONS_ENABLED` env override (default OFF).
   While gated, `POST /billing/checkout/pro` and `/billing/checkout/team`

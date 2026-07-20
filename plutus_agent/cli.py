@@ -12,6 +12,7 @@ Subcommands:
     plutus topup ...            add prepaid credit
     plutus report ...           monthly PDF/HTML spend report
     plutus reconcile ...        true-up estimated cost to a provider's real billing
+    plutus reconcile-webhooks   detect + replay Stripe events missed in deploy windows
     plutus alerts [--test]      deliver pending low-balance/budget alerts
     plutus monitor              print live provider runway (monitor bridge)
 
@@ -503,6 +504,45 @@ def cmd_reconcile(args):
               f"{', '.join(rep.unreconciled_providers)}")
     _ok("adjust entries written" if args.apply else "no changes written (dry run)")
     conn.close()
+
+
+def cmd_reconcile_webhooks(args):
+    """#177: diff Stripe's event log vs stripe_events; replay gaps with --apply."""
+    from . import reconcile_webhooks as rw
+    cfg = cfgmod.load()
+    secret = (cfg.get("billing") or {}).get("stripe_secret_key") or \
+        os.environ.get("STRIPE_SECRET_KEY", "")
+    if not secret:
+        raise SystemExit(
+            "reconcile-webhooks: no Stripe key — set billing.stripe_secret_key "
+            "or the STRIPE_SECRET_KEY env var.")
+    types = [t.strip() for t in args.types.split(",") if t.strip()] \
+        if args.types else None
+    conn = _conn()
+    try:
+        report = rw.reconcile(conn, secret, days=args.days, types=types,
+                              apply=args.apply)
+    finally:
+        conn.close()
+
+    if args.json:
+        print(json.dumps(report, indent=2, default=str))
+        sys.exit(2 if report["missing"] and not args.apply else 0)
+
+    print(f"\n  stripe webhook reconciliation — last {report['window_days']:g}d\n")
+    print(f"    stripe events: {report['stripe_events_found']} | "
+          f"already applied: {report['already_processed']} | "
+          f"missing: {len(report['missing'])}")
+    for m in report["missing"]:
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(m["created"] or 0))
+        print(f"    MISSING {m['id']}  {m['type']}  {ts}")
+    for r in report["applied"]:
+        print(f"    APPLIED {r.get('id', '')}  {r.get('type', '')}  "
+              f"-> {r.get('status', '')}")
+    if report["missing"] and not args.apply:
+        print("\n  dry-run — pass --apply to replay via the app handler\n")
+    else:
+        print()
 
 
 def cmd_verify(args):
@@ -1031,6 +1071,18 @@ def build_parser():
                          "pass empty string to force plain SHA-256)")
     pv.add_argument("--json", action="store_true")
     pv.set_defaults(func=cmd_verify)
+
+    prw = sub.add_parser(
+        "reconcile-webhooks",
+        help="detect + replay Stripe webhook events missed in deploy windows (#177)")
+    prw.add_argument("--days", type=float, default=7.0,
+                     help="lookback window in days (default: 7)")
+    prw.add_argument("--apply", action="store_true",
+                     help="replay missing events via the app handler (default: dry-run)")
+    prw.add_argument("--types", default=None,
+                     help="comma-separated event types (default: all handled types)")
+    prw.add_argument("--json", action="store_true")
+    prw.set_defaults(func=cmd_reconcile_webhooks)
 
     pbt = sub.add_parser(
         "backtest",
