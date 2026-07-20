@@ -4,6 +4,14 @@ All notable changes to Plutus are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Recurring-billing gate** (#175). New `billing.subscriptions_enabled`
+  config key + `PLUTUS_SUBSCRIPTIONS_ENABLED` env override (default OFF).
+  While gated, `POST /billing/checkout/pro` and `/billing/checkout/team`
+  return 403 with a "Subscriptions open at launch" page; credit top-ups and
+  donations are unaffected. Flip on once the launch-readiness checks
+  (#4/#164) pass.
+
 ### Fixed
 - **Remote-mode `Meter.track` no longer drops the savings fields** (#143). The
   `/v1/usage` response has carried `savings_usd`/`leaked_usd` since #7/#134,
