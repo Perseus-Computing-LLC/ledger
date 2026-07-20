@@ -72,7 +72,7 @@ class TestServer(unittest.TestCase):
         status, body = self._get("/")
         self.assertEqual(status, 200)
         self.assertIn("Plutus", body)
-        self.assertIn("Credit balance", body)
+        self.assertIn("Your AI spend", body)
         self.assertIn("Spend by workspace", body)
         self.assertIn("#0a1018", body)  # the monitor canvas color is present
 
@@ -669,6 +669,64 @@ class TestCheckoutHandoffPage(unittest.TestCase):
         self.assertNotIn("redirect", sent)
         self.assertEqual(sent["code"], 200)
         self.assertIn("Open secure Stripe checkout", sent["body"])
+
+
+
+class TestSubscriptionGate(unittest.TestCase):
+    """#175: Pro/Team subscription checkout gated off until launch gates pass."""
+
+    def _fake(self, cfg):
+        sent = {}
+
+        class Stripe:
+            def pro_checkout(self, conn, org_id):
+                sent["pro_called"] = True
+                return {"url": "https://checkout.stripe.com/c/pay/cs_test_example"}
+
+            def team_checkout(self, conn, org_id):
+                sent["team_called"] = True
+                return {"url": "https://checkout.stripe.com/c/pay/cs_test_example"}
+
+        fake = types.SimpleNamespace(
+            _form=lambda: {"org": "org_test"},
+            _authz_org=lambda conn, org, strict: "org_test",
+            _redirect=lambda url: sent.update(redirect=url),
+            _send=lambda code, body: sent.update(code=code, body=body),
+            ctx=types.SimpleNamespace(stripe=Stripe(), cfg=cfg),
+        )
+        fake._subscriptions_enabled = lambda: app.Handler._subscriptions_enabled(fake)
+        fake._subscriptions_gated = lambda: app.Handler._subscriptions_gated(fake)
+        return fake, sent
+
+    def test_pro_checkout_blocked_when_gate_off(self):
+        fake, sent = self._fake({"billing": {}})
+        app.Handler._checkout_pro(fake, None)
+        self.assertEqual(sent["code"], 403)
+        self.assertIn("Subscriptions open at launch", sent["body"])
+        self.assertNotIn("redirect", sent)
+        self.assertNotIn("pro_called", sent)
+
+    def test_team_checkout_blocked_when_gate_off(self):
+        fake, sent = self._fake({"billing": {}})
+        app.Handler._checkout_team(fake, None)
+        self.assertEqual(sent["code"], 403)
+        self.assertIn("Subscriptions open at launch", sent["body"])
+        self.assertNotIn("redirect", sent)
+        self.assertNotIn("team_called", sent)
+
+    def test_pro_checkout_allowed_when_gate_on(self):
+        fake, sent = self._fake({"billing": {"subscriptions_enabled": True}})
+        app.Handler._checkout_pro(fake, None)
+        self.assertEqual(sent.get("redirect"),
+                         "https://checkout.stripe.com/c/pay/cs_test_example")
+        self.assertTrue(sent.get("pro_called"))
+
+    def test_team_checkout_allowed_when_gate_on(self):
+        fake, sent = self._fake({"billing": {"subscriptions_enabled": True}})
+        app.Handler._checkout_team(fake, None)
+        self.assertEqual(sent.get("redirect"),
+                         "https://checkout.stripe.com/c/pay/cs_test_example")
+        self.assertTrue(sent.get("team_called"))
 
 
 class TestSameOrigin(unittest.TestCase):

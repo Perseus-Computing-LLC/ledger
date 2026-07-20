@@ -296,7 +296,7 @@ class TestServerEnforcement(unittest.TestCase):
     def test_authenticated_dashboard(self):
         status, body = self._req("/", cookie=self.token)
         self.assertEqual(status, 200)
-        self.assertIn("Credit balance", body)
+        self.assertIn("Your AI spend", body)
         self.assertIn("Sign out", body)
 
     def test_cross_org_forbidden(self):

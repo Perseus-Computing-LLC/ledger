@@ -85,6 +85,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "stripe_publishable_key": "",   # or env STRIPE_PUBLISHABLE_KEY
         "stripe_webhook_secret": "",    # or env STRIPE_WEBHOOK_SECRET
         "stripe_price_pro": "",         # Price ID for the $20/mo Pro plan
+        # #175: recurring subscriptions (Pro/Team checkout) are gated OFF by
+        # default until the launch-readiness checks (#4/#164) pass. Flip on via
+        # config or the PLUTUS_SUBSCRIPTIONS_ENABLED env var. One-way money
+        # paths (credit top-ups, donations) are unaffected by this gate.
+        "subscriptions_enabled": False,
         "currency": "usd",
         "success_url": "http://localhost:8420/billing/success",
         "cancel_url": "http://localhost:8420/billing/cancel",
@@ -366,6 +371,11 @@ def load() -> dict:
     if env.get("PLUTUS_ALLOW_SIGNUP"):
         cfg["auth"]["allow_signup"] = env["PLUTUS_ALLOW_SIGNUP"].strip().lower() in (
             "1", "true", "yes", "on")
+    # #175: recurring Pro/Team subscription checkout gate (default off)
+    if env.get("PLUTUS_SUBSCRIPTIONS_ENABLED"):
+        cfg.setdefault("billing", {})["subscriptions_enabled"] = (
+            env["PLUTUS_SUBSCRIPTIONS_ENABLED"].strip().lower() in (
+                "1", "true", "yes", "on"))
     # #108: keyed-MAC secret for the ledger tamper-evidence chain.
     if env.get("PLUTUS_CHAIN_HMAC_KEY"):
         cfg.setdefault("ledger", {})["hmac_key"] = env["PLUTUS_CHAIN_HMAC_KEY"]
