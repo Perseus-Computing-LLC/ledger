@@ -71,7 +71,7 @@ class TestServer(unittest.TestCase):
     def test_dashboard_renders(self):
         status, body = self._get("/")
         self.assertEqual(status, 200)
-        self.assertIn("Plutus", body)
+        self.assertIn("Perseus Ledger", body)
         self.assertIn("Your AI spend", body)
         self.assertIn("Spend by workspace", body)
         self.assertIn("#0a1018", body)  # the monitor canvas color is present
