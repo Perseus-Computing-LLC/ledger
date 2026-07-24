@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the Hermes → Plutus sync bridge (examples/hermes_sync.py)."""
+import hashlib
+import json
 import os
 import sqlite3
 import sys
@@ -97,6 +99,43 @@ class TestCollectSessions(unittest.TestCase):
         _, ev = hermes_sync.collect_sessions(db, 0)[0]
         self.assertNotIn("model", ev)         # column absent → omitted
         self.assertEqual(ev["task_type"], "agent")  # default
+
+    def test_derives_hash_only_evidence_context_from_session_messages(self):
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        self._paths = getattr(self, "_paths", []) + [path]
+        conn = sqlite3.connect(path)
+        conn.execute("""CREATE TABLE sessions (
+            id TEXT PRIMARY KEY, billing_provider TEXT, model TEXT, task_type TEXT,
+            started_at REAL, actual_cost_usd REAL, estimated_cost_usd REAL,
+            input_tokens INT, output_tokens INT, cache_read_tokens INT,
+            reasoning_tokens INT, system_prompt TEXT, model_config TEXT)""")
+        conn.execute("""CREATE TABLE messages (
+            id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT)""")
+        conn.execute("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     ("s-ledger", "openai", "gpt-fixture", "analysis", 1000.0,
+                      0.10, 0.10, 10, 5, 0, 0, "policy text", '{"temperature":0}'))
+        conn.executemany("INSERT INTO messages(id,session_id,role,content) VALUES(?,?,?,?)", [
+            (1, "s-ledger", "user", "public source"),
+            (2, "s-ledger", "tool", "retrieved evidence"),
+            (3, "s-ledger", "assistant", "final conclusion"),
+        ])
+        conn.commit(); conn.close()
+
+        _, ev = hermes_sync.collect_sessions(path, 0)[0]
+        source_hashes = sorted([
+            hashlib.sha256(b"public source").hexdigest(),
+            hashlib.sha256(b"retrieved evidence").hexdigest(),
+        ])
+        policy_material = json.dumps(
+            {"model_config": '{"temperature":0}', "system_prompt": "policy text"},
+            sort_keys=True, separators=(",", ":"),
+        ).encode()
+        self.assertEqual(ev["external_ref"], "s-ledger")
+        self.assertEqual(ev["evidence_hashes"], source_hashes)
+        self.assertEqual(ev["result_hash"], hashlib.sha256(b"final conclusion").hexdigest())
+        self.assertEqual(ev["policy_version"],
+                         "hermes-policy/" + hashlib.sha256(policy_material).hexdigest()[:16])
 
 
 def _make_pm_db():

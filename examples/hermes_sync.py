@@ -30,6 +30,14 @@ cap folds into the org's earliest workspace, and the ingest response flags
 that per event (``workspace_folded``) plus a top-level ``workspace_note`` —
 this script prints a warning when a batch comes back folded.
 
+Evidence receipts: when the Hermes state DB has session messages, this sync
+attaches only SHA-256 hashes: user/tool message hashes as ``evidence_hashes``,
+the final assistant response as ``result_hash``, and a policy fingerprint of
+``system_prompt`` + ``model_config`` as ``policy_version``. The raw prompt,
+messages, tool outputs, and artifact text never leave ``state.db``. Every
+model event from a session shares its session ID as ``external_ref`` so the
+Ledger receipt reconstructs the full task trail.
+
 Savings-share (#7): tag each event with the baseline model — the flagship the
 customer would have run WITHOUT Perseus routing — so hosted Plutus prices the
 same tokens at that model and records the saving. Off unless you opt in:
@@ -45,6 +53,7 @@ a dollar amount, only the model name — so the figure stays reconstructable.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -180,8 +189,55 @@ def _allocate_cost(total: float, weights: list) -> list:
     return [float(total) * (w / s) for w in pos]
 
 
+def _session_evidence(conn, session_id, system_prompt=None, model_config=None) -> dict:
+    """Derive hash-only decision evidence from one completed Hermes session.
+
+    No message or source content leaves the Hermes state database: Ledger sees
+    only SHA-256 values. User inputs and tool results are source evidence; the
+    final assistant message is the result artifact. A stable policy identifier
+    commits to the exact system prompt + model configuration used for the run.
+    """
+    if not session_id:
+        return {}
+    evidence_hashes, result_hash = set(), None
+    if _has_table(conn, "messages"):
+        cols = _session_columns_for_table(conn, "messages")
+        if {"session_id", "role", "content"}.issubset(cols):
+            rows = conn.execute(
+                "SELECT role, content FROM messages WHERE session_id=? ORDER BY id",
+                (session_id,),
+            ).fetchall()
+            for role, content in rows:
+                if not isinstance(content, str) or not content:
+                    continue
+                digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                if role in ("user", "tool"):
+                    evidence_hashes.add(digest)
+                elif role == "assistant":
+                    result_hash = digest
+    policy_version = None
+    if system_prompt or model_config:
+        material = json.dumps(
+            {"model_config": model_config or "", "system_prompt": system_prompt or ""},
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        policy_version = "hermes-policy/" + hashlib.sha256(material).hexdigest()[:16]
+    event = {"external_ref": session_id}
+    if evidence_hashes:
+        event["evidence_hashes"] = sorted(evidence_hashes)
+    if result_hash:
+        event["result_hash"] = result_hash
+    if policy_version:
+        event["policy_version"] = policy_version
+    return event
+
+
+def _session_columns_for_table(conn, table: str) -> set:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def _event(provider, model, task, workspace, itok, otok, ctok, rtok, cost,
-           baseline_models=None) -> dict:
+           baseline_models=None, evidence=None) -> dict:
     ev = {
         "provider": provider,
         "task_type": task or "agent",
@@ -198,6 +254,8 @@ def _event(provider, model, task, workspace, itok, otok, ctok, rtok, cost,
     if bm:
         # Name the counterfactual model; the server prices the same tokens (#7).
         ev["baseline_model"] = bm
+    if evidence:
+        ev.update(evidence)
     return ev
 
 
@@ -222,6 +280,8 @@ def collect_sessions(state_db: str, last_rowid: int = 0,
         cols = _session_columns(conn)
         model_sel = "model" if "model" in cols else "NULL"
         task_sel = "task_type" if "task_type" in cols else "NULL"
+        prompt_sel = "system_prompt" if "system_prompt" in cols else "NULL"
+        config_sel = "model_config" if "model_config" in cols else "NULL"
         use_pm = "id" in cols and _has_table(conn, "session_model_usage")
 
         rows = conn.execute(
@@ -232,11 +292,16 @@ def collect_sessions(state_db: str, last_rowid: int = 0,
                    {task_sel} AS task_type,
                    coalesce(nullif(actual_cost_usd,0), estimated_cost_usd, 0) AS cost,
                    coalesce(input_tokens,0), coalesce(output_tokens,0),
-                   coalesce(cache_read_tokens,0), coalesce(reasoning_tokens,0)
+                   coalesce(cache_read_tokens,0), coalesce(reasoning_tokens,0),
+                   {prompt_sel} AS system_prompt, {config_sel} AS model_config
                 FROM sessions WHERE rowid > ? ORDER BY rowid""",
             (last_rowid,),
         ).fetchall()
 
+        evidence_by_session = {
+            row[1]: _session_evidence(conn, row[1], row[10], row[11])
+            for row in rows if row[1]
+        }
         by_session = {}
         if use_pm:
             for u in conn.execute(
@@ -252,7 +317,9 @@ def collect_sessions(state_db: str, last_rowid: int = 0,
         conn.close()
 
     out = []
-    for rowid, sid, provider, model, task, cost, itok, otok, ctok, rtok in rows:
+    for (rowid, sid, provider, model, task, cost, itok, otok, ctok, rtok,
+         system_prompt, model_config) in rows:
+        evidence = evidence_by_session.get(sid)
         urows = by_session.get(sid) if use_pm else None
         if urows:
             total = float(cost or 0)
@@ -262,13 +329,13 @@ def collect_sessions(state_db: str, last_rowid: int = 0,
             for u, c in zip(urows, _allocate_cost(total, weights)):
                 out.append((rowid, _event(u[2], u[1], task, workspace,
                                           u[3], u[4], u[5], u[6], c,
-                                          baseline_models)))
+                                          baseline_models, evidence)))
         else:
             # No per-model rows for this session (pre-v17 / un-backfilled) — emit
             # the aggregate, exactly as before.
             out.append((rowid, _event(provider, model, task, workspace,
                                       itok, otok, ctok, rtok, cost,
-                                      baseline_models)))
+                                      baseline_models, evidence)))
     return out
 
 
