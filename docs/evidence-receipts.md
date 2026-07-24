@@ -49,6 +49,18 @@ The endpoint uses the same organization authorization gate as `/api/audit`. The 
 
 Events are returned in ledger insertion order so each event's `prev_hash` can be compared directly to the prior event's `row_hash` when both belong to the receipt.
 
+## Decision context fields
+
+New events may carry the following optional, hash-covered fields through `POST /v1/usage`:
+
+- `evidence_hashes`: SHA-256 digests for source artifacts; Ledger canonicalizes this as a sorted, de-duplicated list.
+- `policy_version`: the policy/configuration identifier in effect for the action.
+- `result_hash`: SHA-256 digest of the output artifact or conclusion.
+- `human_review`: `approved`, `rejected`, or `corrected`.
+- `correction_ref`: opaque correction identifier, required for `corrected` events.
+
+These fields appear in `evidence` and `decision_context` on receipt events. They are optional and trailing in the canonical event form, so they do not alter verification of historical records.
+
 ## Interpretation and limits
 
 - `chain_ok` verifies the organization event chain, not only the selected receipt rows.

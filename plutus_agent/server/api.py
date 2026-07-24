@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 
 from .. import db, metering, pricing, savings
 
@@ -102,6 +103,16 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                 "action": row["task_type"],
                 "model_config": {"provider": row["provider"], "model": row["model"]},
                 "external_ref": row["external_ref"],
+                "evidence": {
+                    "source_hashes": json.loads(row["evidence_hashes"])
+                    if row["evidence_hashes"] else [],
+                },
+                "decision_context": {
+                    "policy_version": row["policy_version"],
+                    "result_hash": row["result_hash"],
+                    "human_review": row["human_review"],
+                    "correction_ref": row["correction_ref"],
+                },
                 "resource_allocation": {
                     "input_tokens": row["input_tokens"],
                     "output_tokens": row["output_tokens"],

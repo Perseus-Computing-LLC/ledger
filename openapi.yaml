@@ -341,6 +341,11 @@ components:
         baseline_input_tokens: { type: integer, nullable: true, description: "Token-reduction counterfactual (#134): input tokens this call would have sent without the optimization (e.g. the full-context prompt a recall replaced). Priced at baseline_model if given, else this event's model. Must be >= 0." }
         baseline_output_tokens: { type: integer, nullable: true, description: "Token-reduction counterfactual output tokens (#134). Must be >= 0." }
         external_ref: { type: string, nullable: true, description: "Per-task/per-question attribution id (e.g. an Invarium task_id) linking this event to the task that produced it." }
+        evidence_hashes: { type: array, nullable: true, items: { type: string, pattern: '^[0-9a-fA-F]{64}$' }, description: "SHA-256 hashes of source artifacts/evidence. Canonicalized, deduplicated, and hash-chained when supplied." }
+        policy_version: { type: string, nullable: true, description: "Identifier for the policy/configuration governing the decision." }
+        result_hash: { type: string, nullable: true, pattern: '^[0-9a-fA-F]{64}$', description: "SHA-256 hash of the resulting artifact or conclusion." }
+        human_review: { type: string, nullable: true, enum: [approved, rejected, corrected], description: "Human disposition for the autonomous action." }
+        correction_ref: { type: string, nullable: true, description: "Opaque identifier of the human correction; required for a corrected disposition." }
         source: { type: string, default: api }
     EventResult:
       type: object

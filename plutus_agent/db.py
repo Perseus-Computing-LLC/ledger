@@ -52,7 +52,10 @@ from typing import Optional
 # 14 = adds api_keys.scope (JSON, org/workspace restrictions), api_keys.event_count
 #     (usage counter), api_keys.rotation_of (rotation chain ref), and the
 #     ingest_health table (per-source ingestion diagnostics). (#150)
-SCHEMA_VERSION = 14
+# 15 = adds hash-covered decision-evidence fields to usage_events: canonical
+#     source hash list, policy version, result hash, and human review/correction
+#     linkage. All nullable and trailing so existing chain rows stay valid.
+SCHEMA_VERSION = 15
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -120,6 +123,13 @@ _CHAIN_FIELDS_OPTIONAL = (
     # Anthropic cache-creation input tokens (#135). Optional trailing field keeps
     # pre-v11 canonical forms unchanged while making cache-write usage immutable.
     "cache_write_tokens",
+    # v15 decision evidence. All trailing and optional to retain the canonical
+    # bytes of historical rows while making each supplied value tamper-evident.
+    "evidence_hashes",
+    "policy_version",
+    "result_hash",
+    "human_review",
+    "correction_ref",
 )
 
 
@@ -516,6 +526,14 @@ CREATE TABLE IF NOT EXISTS usage_events (
     -- undetected. Indexed via ix_usage_extref (created in _migrate_add_columns
     -- so it applies to upgraded DBs too).
     external_ref      TEXT,
+    -- v15: optional, canonical JSON list of SHA-256 source/artifact hashes and
+    -- the decision context associated with this autonomous action. Each is
+    -- hash-chained when present; historical rows remain byte-identical.
+    evidence_hashes   TEXT,
+    policy_version    TEXT,
+    result_hash       TEXT,
+    human_review      TEXT,
+    correction_ref    TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -806,6 +824,13 @@ def _migrate_add_columns(conn) -> None:
         # #151: savings-share pricing version and min-charge tracking.
         ("savings_invoices", "pricing_version", "TEXT"),
         ("savings_invoices", "min_charge_met", "INTEGER NOT NULL DEFAULT 0"),
+        # v15 decision evidence — all nullable so upgraded rows remain absent,
+        # and only new events carrying a value extend the hash canonical form.
+        ("usage_events", "evidence_hashes", "TEXT"),
+        ("usage_events", "policy_version", "TEXT"),
+        ("usage_events", "result_hash", "TEXT"),
+        ("usage_events", "human_review", "TEXT"),
+        ("usage_events", "correction_ref", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)

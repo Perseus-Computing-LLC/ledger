@@ -94,6 +94,25 @@ class TestServer(unittest.TestCase):
         self.assertEqual(receipt["external_ref"], "demo-artifact-1")
         self.assertEqual(receipt["events"][0]["action"], "artifact")
 
+    def test_usage_ingests_decision_evidence_for_receipts(self):
+        source_hash = "c" * 64
+        result_hash = "d" * 64
+        status, _ = self._post("/v1/usage", {
+            "provider": "openai", "model": "gpt-fixture", "task_type": "recommend",
+            "external_ref": "api-decision-1", "input_tokens": 1, "output_tokens": 1,
+            "cost_usd": 0.01, "evidence_hashes": [source_hash],
+            "policy_version": "policy/v1", "result_hash": result_hash,
+            "human_review": "approved",
+        }, token=self.key)
+        self.assertEqual(status, 200)
+
+        status, body = self._get(
+            f"/api/audit?org={self.org_id}&external_ref=api-decision-1")
+        receipt = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertEqual(receipt["events"][0]["evidence"]["source_hashes"], [source_hash])
+        self.assertEqual(receipt["events"][0]["decision_context"]["policy_version"], "policy/v1")
+
     def test_dashboard_uses_a_monitor_layout_with_clear_action_hierarchy(self):
         """The primary dashboard is a dense monitor, not a stack of generic cards."""
         status, body = self._get("/")

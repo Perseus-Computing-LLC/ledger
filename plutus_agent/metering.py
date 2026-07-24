@@ -18,6 +18,8 @@ month-to-date for billing periods.
 """
 from __future__ import annotations
 
+import json
+import re
 import time
 from dataclasses import dataclass, asdict
 from typing import Optional
@@ -25,6 +27,36 @@ from typing import Optional
 from . import db, pricing
 
 DAY = 86400
+_SHA256_HEX = re.compile(r"^[0-9a-fA-F]{64}$")
+_HUMAN_REVIEW_VALUES = {"approved", "rejected", "corrected"}
+
+
+def _canonical_evidence_hashes(hashes: Optional[list[str]]) -> Optional[str]:
+    """Validate and canonically serialize source/artifact SHA-256 hashes.
+
+    The stored JSON string is itself chain-covered. Sorting/deduplicating makes
+    equivalent source sets hash identically regardless of caller order.
+    """
+    if hashes is None:
+        return None
+    if not isinstance(hashes, (list, tuple)):
+        raise ValueError("evidence_hashes must be a list of SHA-256 hex digests")
+    normalized = []
+    for digest in hashes:
+        if not isinstance(digest, str) or not _SHA256_HEX.fullmatch(digest):
+            raise ValueError("evidence_hashes must contain 64-character SHA-256 hex digests")
+        normalized.append(digest.lower())
+    return json.dumps(sorted(set(normalized)), separators=(",", ":"))
+
+
+def _optional_text(value, field: str) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string when supplied")
+    if len(value) > 512:
+        raise ValueError(f"{field} exceeds 512 characters")
+    return value
 
 
 @dataclass
@@ -106,6 +138,11 @@ def record_usage(conn, org_id: str, provider: str,
                  optimal_cost_usd: Optional[float] = None,
                  optimal_model: Optional[str] = None,
                  external_ref: Optional[str] = None,
+                 evidence_hashes: Optional[list[str]] = None,
+                 policy_version: Optional[str] = None,
+                 result_hash: Optional[str] = None,
+                 human_review: Optional[str] = None,
+                 correction_ref: Optional[str] = None,
                  user_id: Optional[str] = None, source: str = "api",
                  pricing_overrides: Optional[dict] = None,
                  ts: Optional[float] = None,
@@ -153,6 +190,17 @@ def record_usage(conn, org_id: str, provider: str,
     follows the actual ``cost_usd``.
     """
     ts = ts if ts is not None else time.time()
+    evidence_hashes_json = _canonical_evidence_hashes(evidence_hashes)
+    policy_version = _optional_text(policy_version, "policy_version")
+    correction_ref = _optional_text(correction_ref, "correction_ref")
+    if result_hash is not None and (not isinstance(result_hash, str)
+                                    or not _SHA256_HEX.fullmatch(result_hash)):
+        raise ValueError("result_hash must be a 64-character SHA-256 hex digest")
+    result_hash = result_hash.lower() if result_hash else None
+    if human_review is not None and human_review not in _HUMAN_REVIEW_VALUES:
+        raise ValueError("human_review must be approved, rejected, or corrected")
+    if human_review == "corrected" and correction_ref is None:
+        raise ValueError("correction_ref is required when human_review is corrected")
 
     # Fix #80: never let a negative token count through — it would rewind the
     # month-to-date tracked total (bypassing the free-tier quota) and corrupt
@@ -349,18 +397,25 @@ def record_usage(conn, org_id: str, provider: str,
         "optimal_micros": optimal_micros,
         "external_ref": external_ref,
         "user_id": user_id,
+        "evidence_hashes": evidence_hashes_json,
+        "policy_version": policy_version,
+        "result_hash": result_hash,
+        "human_review": human_review,
+        "correction_ref": correction_ref,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
         "INSERT INTO usage_events(id,org_id,workspace_id,provider,model,task_type,"
         "input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,cost_micros,"
-        "baseline_micros,optimal_micros,external_ref,user_id,estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "baseline_micros,optimal_micros,external_ref,user_id,evidence_hashes,policy_version,"
+        "result_hash,human_review,correction_ref,estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
          int(reasoning_tokens), cost_micros, baseline_micros, optimal_micros,
-         external_ref, user_id, int(estimated), source, ts, prev_hash, row_hash),
+         external_ref, user_id, evidence_hashes_json, policy_version, result_hash,
+         human_review, correction_ref, int(estimated), source, ts, prev_hash, row_hash),
     )
 
     # Deplete prepaid credit (only when there's credit to deplete; orgs on the
