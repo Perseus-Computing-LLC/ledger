@@ -13,7 +13,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import Meter, db, demo
+from plutus_agent import Meter, db, demo, metering
 from plutus_agent.client import PlutusAuthError, PlutusError
 from plutus_agent.config import DEFAULT_CONFIG
 from plutus_agent.server import app
@@ -75,6 +75,24 @@ class TestServer(unittest.TestCase):
         self.assertIn("Your AI spend", body)
         self.assertIn("Spend by workspace", body)
         self.assertIn("#0a1018", body)  # the monitor canvas color is present
+
+    def test_api_evidence_receipt_by_external_ref(self):
+        conn = db.connect(self.dbpath)
+        metering.record_usage(
+            conn, self.org_id, provider="openai", model="gpt-fixture",
+            task_type="artifact", external_ref="demo-artifact-1",
+            input_tokens=1, output_tokens=1, cost_usd=0.01,
+        )
+        conn.close()
+
+        status, body = self._get(
+            f"/api/audit?org={self.org_id}&external_ref=demo-artifact-1")
+        receipt = json.loads(body)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(receipt["receipt_version"], "perseus-evidence-receipt/v1")
+        self.assertEqual(receipt["external_ref"], "demo-artifact-1")
+        self.assertEqual(receipt["events"][0]["action"], "artifact")
 
     def test_dashboard_uses_a_monitor_layout_with_clear_action_hierarchy(self):
         """The primary dashboard is a dense monitor, not a stack of generic cards."""

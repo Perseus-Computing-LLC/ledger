@@ -79,8 +79,53 @@ def _csv_safe(value):
     return value
 
 
-def audit_json(conn, org_id: str, *, hmac_key: str | None = None) -> dict:
-    """Return a compact, tier-independent proof receipt for Plutus savings."""
+def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
+               external_ref: str | None = None) -> dict:
+    """Return either an organization audit summary or one task evidence receipt.
+
+    ``external_ref`` selects the additive, task-scoped receipt path.  The ref is
+    already an optional hash-covered field on usage events, so this turns the
+    existing immutable chain into a portable evidence view without altering the
+    stable ingest contract.
+    """
+    if external_ref is not None:
+        org = db.get_org(conn, org_id)
+        integrity = db.verify_chain(conn, org_id=org_id, hmac_key=hmac_key)
+        org_chain = integrity["orgs"][0] if integrity["orgs"] else {}
+        rows = list(reversed(db.events_by_ref(conn, org_id, external_ref)))
+        events = []
+        for row in rows:
+            events.append({
+                "event_id": row["id"],
+                "ts": row["ts"],
+                "actor": row["user_id"],
+                "action": row["task_type"],
+                "model_config": {"provider": row["provider"], "model": row["model"]},
+                "external_ref": row["external_ref"],
+                "resource_allocation": {
+                    "input_tokens": row["input_tokens"],
+                    "output_tokens": row["output_tokens"],
+                    "cache_read_tokens": row["cache_read_tokens"],
+                    "cache_write_tokens": row["cache_write_tokens"],
+                    "reasoning_tokens": row["reasoning_tokens"],
+                    "cost_usd": db.micros_to_usd(row["cost_micros"]),
+                    "estimated": bool(row["estimated"]),
+                },
+                "prev_hash": row["prev_hash"],
+                "row_hash": row["row_hash"],
+            })
+        return {
+            "receipt_version": "perseus-evidence-receipt/v1",
+            "organization": {"id": org_id, "name": org["name"] if org else None},
+            "external_ref": external_ref,
+            "events": events,
+            "verification": {
+                "chain_ok": org_chain.get("status") == "ok",
+                "verified_events": org_chain.get("verified", 0),
+                "method": "per-organization SHA-256 hash chain",
+            },
+        }
+
     import time
     period = time.strftime("%Y-%m", time.gmtime())
     org = db.get_org(conn, org_id)

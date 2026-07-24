@@ -403,7 +403,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not org_id:
                     return self._json(404, {"error": "no organizations"})
                 return self._json(200, api.audit_json(
-                    conn, org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg)))
+                    conn, org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg),
+                    external_ref=q.get("external_ref", [None])[0]))
             if path == "/api/ledger":
                 org_id = self._authz_org(conn, q.get("org", [None])[0])
                 if not org_id:
