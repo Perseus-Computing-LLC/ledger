@@ -285,7 +285,7 @@ class TestServerEnforcement(unittest.TestCase):
         status, body = self._req("/")
         self.assertEqual(status, 200)
         self.assertIn("/auth/login", body)          # sign-in CTA present
-        self.assertIn("really worth", body)          # landing hero copy
+        self.assertIn("Know what your autonomous system", body)  # Ledger landing hero
         self.assertNotIn("Credit balance", body)     # not the dashboard
 
     def test_api_requires_auth(self):

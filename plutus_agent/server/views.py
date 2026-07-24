@@ -447,20 +447,20 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
     </div>"""
 
     gen = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    from .. import __version__, __tagline__
+    from .. import __version__, __tagline__, __product__
     badges = (f"<span class='pill {tier['key']}'>{_e(tier['name'])} plan</span>"
               + ("<span class='pill demo'>DEMO DATA</span>" if demo else "")
               + '<span class="pill live" id="pulse" aria-live="polite">● live</span>')
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Plutus — {_e(org['name'])} · spend dashboard</title>{FAVICON}
+<title>Perseus Ledger — {_e(org['name'])} · verifiable activity</title>{FAVICON}
 <style>{CSS}
 #pulse{{transition:opacity .4s}}#pulse.off{{opacity:.4}}</style>
 </head><body><main class="dashboard wrap">
   <div class="top">
     <div class="brand"><div class="logo">◆</div>
-      <div><h1>Plutus</h1><div class="tag">{_e(__tagline__)}</div></div></div>
+      <div><h1>{_e(__product__)}</h1><div class="tag">{_e(__tagline__)}</div></div></div>
     <div style="display:flex;gap:8px;align-items:center">{orgsel}{userchip}{badges}</div>
   </div>
   {banner}
@@ -480,21 +480,21 @@ def render_dashboard(summary: dict, *, orgs: list, cfg: dict,
     <div class="panel"><h2 class="section-title">Live activity</h2><div class="feed">{feed_html}</div></div>
   </div>
   {runway_panel}
-  <div class="panel" style="margin-top:16px"><h2 class="section-title">Billing <span class="hint">prepaid credits · Stripe</span></h2>{billing}</div>
+  <div class="panel" style="margin-top:16px"><h2 class="section-title">Settlement adapters <span class="hint">optional · prepaid credits · Stripe</span></h2>{billing}</div>
   {keys_panel}
-  <div class="foot">Plutus v{__version__} · self-hosted · generated {gen} · live numbers refresh every 5s<br>
-    Perseus Computing LLC · <a href="https://perseus.observer/plutus/">perseus.observer/plutus</a></div>
+  <div class="foot">Perseus Ledger v{__version__} · self-hosted · generated {gen} · live numbers refresh every 5s<br>
+    Perseus Computing LLC · <a href="https://perseus.observer/ledger/">perseus.observer/ledger</a></div>
 </main>
 <script>{POLLER}</script>
 </body></html>"""
 
 
 def landing_page(*, signed_in: bool = False, savings_share_pct: float = 10.0) -> str:
-    """Public marketing landing shown at ``/`` to logged-out visitors.
+    """Public product landing shown at ``/`` to logged-out visitors.
 
-    Leads with the efficiency value proposition (API-equivalent value vs. actual
-    cost) and a real, attributed proof point, then the on-ramps and a Google
-    sign-in CTA that provisions a free org (when ``auth.allow_signup`` is on)."""
+    Leads with independently verifiable provenance—not spend analytics—and makes
+    the compatibility ingestion path available without recasting Ledger as a
+    billing product. Hermes Cloud is the Spend Intelligence surface."""
     cta = ('<a class="btn" href="/">Open dashboard →</a>' if signed_in
            else '<a class="btn" href="/auth/login">Start free with Google →</a>')
     step = ("border:1px solid var(--line2);border-radius:11px;padding:16px 18px;"
@@ -504,7 +504,7 @@ def landing_page(*, signed_in: bool = False, savings_share_pct: float = 10.0) ->
               "border-radius:7px;padding:2px 8px;margin:2px 4px 2px 0")
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Plutus — see what your AI stack is really worth</title>{FAVICON}
+<title>Perseus Ledger — verifiable provenance for autonomous systems</title>{FAVICON}
 <style>{CSS}
 .hero{{text-align:center;padding:34px 0 10px}}
 .hero h2{{font-size:34px;line-height:1.15;margin:8px 0 10px;letter-spacing:-.5px}}
@@ -516,53 +516,52 @@ def landing_page(*, signed_in: bool = False, savings_share_pct: float = 10.0) ->
 .foot2{{color:var(--faint);font-size:12px;text-align:center;margin-top:30px;line-height:1.7}}</style>
 </head><body><div class="wrap" style="max-width:900px">
 <div class="top"><div class="brand"><div class="logo">◆</div>
-  <div><h1>Plutus</h1><div class="tag">the billing layer for AI agents</div></div></div>
-  <a class="pill" href="/pricing">Pricing</a></div>
+  <div><h1>Perseus Ledger</h1><div class="tag">verifiable provenance for autonomous systems</div></div></div>
+  <a class="pill" href="/pricing">Deployment</a></div>
 
 <div class="hero">
-  <div class="pill pro" style="display:inline-block">verifiable efficiency, not a marketing slide</div>
-  <h2 class="section-title">See what your AI&nbsp;stack is <span class="amber">really worth</span>.</h2>
-  <p class="sub">Plutus meters your token usage across every provider and shows you the number that
-  matters: how much your setup would cost at flagship API prices versus what you actually paid.
-  Routing, local models, and subscriptions make that gap huge — and every dollar is on a
-  tamper-evident chain you can recompute yourself.</p>
+  <div class="pill pro" style="display:inline-block">evidence before assertion</div>
+  <h2 class="section-title">Know what your autonomous system <span class="amber">did—and prove it.</span></h2>
+  <p class="sub">Perseus Ledger records agent activity as an append-only, hash-chained record of
+  actor, boundary, configuration, action, result, and optional resource allocation. It answers
+  what happened, under what authority and evidence, and whether the history verifies.</p>
   {cta}
 </div>
 
 <div class="proof">
-  <div class="muted" style="font-size:13px;margin-bottom:6px">Our own stack, measured (July, dogfooded)</div>
-  <div class="big">22×</div>
+  <div class="muted" style="font-size:13px;margin-bottom:6px">The decision-evidence boundary</div>
+  <div class="big">Verify</div>
   <div style="color:var(--dim);font-size:14px;margin-top:4px">
-    <b class="amber">$4,144</b> of flagship-equivalent value delivered for <b class="amber">~$185</b> actual —
-    token-derived, reconstructable, verifiable.</div>
+    Preserve the <b class="amber">event chain</b>, not just a dashboard aggregate—
+    reproducible, independently checkable, and yours.</div>
 </div>
 
 <div class="steps">
-  <div style="{step}"><div class="l amber">1 · Connect</div>
-    <div class="s" style="color:var(--dim)">Drop in the on-ramp that fits — nothing to change in your stack.</div>
+  <div style="{step}"><div class="l amber">1 · Record</div>
+    <div class="s" style="color:var(--dim)">Send activity through the stable ingestion contract.
+    Each event is placed inside an immutable, hash-chained ledger boundary.</div>
     <div style="margin-top:10px">
-      <span style="{onramp}">Claude Code plugin</span>
       <span style="{onramp}">POST /v1/usage</span>
+      <span style="{onramp}">Hermes integration</span>
       <span style="{onramp}">provider adapters</span></div></div>
-  <div style="{step}"><div class="l amber">2 · Meter</div>
-    <div class="s" style="color:var(--dim)">Every call is recorded to an append-only, hash-chained ledger —
-    auditable, tamper-evident, yours.</div></div>
-  <div style="{step}"><div class="l amber">3 · See your efficiency</div>
-    <div class="s" style="color:var(--dim)">Live dashboard: spend by provider — verify you're getting
-    the tokens you pay for, and see what Perseus routing saves once it's in the loop.</div></div>
+  <div style="{step}"><div class="l amber">2 · Link</div>
+    <div class="s" style="color:var(--dim)">Associate the actor, workspace, model/provider,
+    task, external reference, and optional allocation with the recorded event.</div></div>
+  <div style="{step}"><div class="l amber">3 · Verify</div>
+    <div class="s" style="color:var(--dim)">Recompute ledger integrity and retain checkpoints so
+    operational activity can support audit, review, and post-action analysis.</div></div>
 </div>
 
 <div style="text-align:center;margin:26px 0 8px">
   <div style="color:var(--dim);font-size:14px;margin-bottom:14px">
-    <b>Free for small teams.</b> $20/mo beyond that. Optional {savings_share_pct:.0f}% share of the
-    savings <b>Perseus</b> provably delivers — verified by Plutus, never a blanket percentage,
-    never an automatic charge.</div>
+    <b>Hermes Cloud owns Spend Intelligence.</b> Perseus Ledger supplies the evidence layer beneath
+    autonomous decisions. Stripe and allocation remain optional settlement adapters.</div>
   {cta}
-  &nbsp;<a class="btn ghost" href="/pricing">Compare plans</a>
+  &nbsp;<a class="btn ghost" href="/pricing">Deployment options</a>
 </div>
 
-<div class="foot2">Self-hostable · single binary · MCP-native · works offline.<br>
-  Perseus Computing LLC · <a href="https://perseus.observer/plutus/">perseus.observer/plutus</a></div>
+<div class="foot2">Self-hostable · hash-chained · API-compatible during transition · works offline.<br>
+  Perseus Computing LLC · <a href="https://perseus.observer/ledger/">perseus.observer/ledger</a></div>
 </div></body></html>"""
 
 

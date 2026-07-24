@@ -1,17 +1,13 @@
-"""Plutus — the billing layer for AI agents.
+"""Perseus Ledger — verifiable provenance for autonomous systems.
 
-Self-hosted, Stripe-integrated usage metering and prepaid-credit billing for
-LLM / AI-agent spend. Multi-tenant (organizations → workspaces → users), meters
-usage per workspace / provider / task-type, depletes prepaid credits as calls
-route through, and serves a dark-themed real-time dashboard at :8420.
+Perseus Ledger records usage and agent activity as append-only, hash-chained
+evidence. Each record can carry an actor, workspace boundary, model/provider,
+task, resource allocation, and external references so an organization can prove
+what happened and independently verify the event history.
 
-Everything except Stripe works fully offline. State lives in SQLite
-(``~/.plutus/plutus.db`` by default); configuration in ``~/.plutus/config.yaml``.
-
-This package is the *monetization engine*. The original credit monitor and
-runway router (``plutus.py`` / ``plutus_route.py`` at the repo root) remain the
-live FinOps tools; the engine bridges to them via ``plutus_agent.bridge`` rather
-than importing them, so the two can ship and run independently.
+The stable ``plutus_agent`` package, ``plutus`` CLI, database paths, and ``/v1``
+API remain compatibility contracts during the transition. Stripe billing is an
+optional settlement adapter; it is not the product boundary.
 """
 
 __version__ = "1.1.0"
@@ -21,10 +17,10 @@ __version__ = "1.1.0"
 # (additive = minor, breaking = major). `test_version_single_source.py` pins
 # `openapi.yaml` to this value so the two can never silently drift.
 __api_version__ = "1.0.0"
-__product__ = "Plutus"
-__tagline__ = "The billing layer for AI agents."
+__product__ = "Perseus Ledger"
+__tagline__ = "Verifiable provenance for autonomous systems."
 __company__ = "Perseus Computing LLC"
-__homepage__ = "https://perseus.observer/plutus/"
+__homepage__ = "https://perseus.observer/ledger/"
 __default_port__ = 8420
 
 __all__ = [

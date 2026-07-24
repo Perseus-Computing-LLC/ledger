@@ -7,7 +7,7 @@ name = "plutus-agent"
 # Single-sourced from plutus_agent.__version__ (#57) so the wheel metadata and
 # `plutus version` can never drift apart.
 dynamic = ["version"]
-description = "The billing layer for AI agents — self-hosted, Stripe-integrated usage metering and prepaid-credit billing for LLM/agent spend."
+description = "Perseus Ledger: verifiable, hash-chained provenance for autonomous-system events and resource allocation."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
