@@ -47,3 +47,34 @@ def test_evidence_receipt_links_external_ref_to_hash_chained_events(tmp_path):
     assert receipt["events"][1]["prev_hash"] == receipt["events"][0]["row_hash"]
     assert receipt["events"][0]["resource_allocation"]["cost_usd"] == 0.1
     conn.close()
+
+
+def test_evidence_receipt_includes_hash_covered_decision_context(tmp_path):
+    conn = db.connect(str(tmp_path / "decision-context.db"))
+    db.init_schema(conn)
+    org_id = db.create_org(conn, "decision-context", tier="free")["id"]
+    source_hash = "a" * 64
+    result_hash = "b" * 64
+    metering.record_usage(
+        conn, org_id, provider="openai", model="gpt-fixture",
+        task_type="recommend", external_ref="decision-9",
+        input_tokens=10, output_tokens=5, cost_usd=0.1,
+        evidence_hashes=[source_hash], policy_version="routing-policy/v3",
+        result_hash=result_hash, human_review="corrected",
+        correction_ref="correction-9", ts=time.time(),
+    )
+
+    receipt = audit_json(conn, org_id, external_ref="decision-9")
+    event = receipt["events"][0]
+
+    assert event["evidence"]["source_hashes"] == [source_hash]
+    assert event["decision_context"] == {
+        "policy_version": "routing-policy/v3",
+        "result_hash": result_hash,
+        "human_review": "corrected",
+        "correction_ref": "correction-9",
+    }
+    conn.execute("UPDATE usage_events SET policy_version='tampered' WHERE id=?",
+                 (event["event_id"],))
+    assert db.verify_chain(conn, org_id)["ok"] is False
+    conn.close()
