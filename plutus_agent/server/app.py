@@ -802,6 +802,14 @@ class Handler(BaseHTTPRequestHandler):
             uid = ev.get("user_id")
             if uid is not None and not isinstance(uid, str):
                 return self._json(400, {"error": "user_id must be a string"})
+            # v15 decision evidence is validated authoritatively by
+            # metering.record_usage before it can enter the hash chain. Keep the
+            # HTTP boundary explicit so malformed JSON shapes get a clear 400.
+            if ev.get("evidence_hashes") is not None and not isinstance(ev["evidence_hashes"], list):
+                return self._json(400, {"error": "evidence_hashes must be a list"})
+            for field in ("policy_version", "result_hash", "human_review", "correction_ref"):
+                if ev.get(field) is not None and not isinstance(ev[field], str):
+                    return self._json(400, {"error": f"{field} must be a string"})
 
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
@@ -848,6 +856,11 @@ class Handler(BaseHTTPRequestHandler):
                             optimal_cost_usd=ev.get("optimal_cost_usd"),
                             optimal_model=ev.get("optimal_model"),
                             external_ref=ev.get("external_ref"),
+                            evidence_hashes=ev.get("evidence_hashes"),
+                            policy_version=ev.get("policy_version"),
+                            result_hash=ev.get("result_hash"),
+                            human_review=ev.get("human_review"),
+                            correction_ref=ev.get("correction_ref"),
                             user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
