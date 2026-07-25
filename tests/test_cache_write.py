@@ -16,7 +16,7 @@ def _org(tmp_path):
 
 def test_schema_v11_and_cache_write_is_stored_and_chained(tmp_path):
     conn, org = _org(tmp_path)
-    assert db.get_schema_version(conn) == 15
+    assert db.get_schema_version(conn) == 16
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(usage_events)")}
     assert "cache_write_tokens" in cols
 

@@ -34,7 +34,7 @@ def _meter(conn, org_id, cost, external_ref=None, baseline=None, ts=None):
 # --- schema / migration -----------------------------------------------------
 def test_schema_is_v10_and_has_external_ref(tmp_path):
     conn, _ = _org(tmp_path)
-    assert db.get_schema_version(conn) == 15
+    assert db.get_schema_version(conn) == 16
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(usage_events)")}
     assert "external_ref" in cols
 
@@ -48,7 +48,7 @@ def test_external_ref_index_exists(tmp_path):
 def test_init_schema_is_idempotent(tmp_path):
     conn, _ = _org(tmp_path)
     db.init_schema(conn)  # second run must not raise or double-add
-    assert db.get_schema_version(conn) == 15
+    assert db.get_schema_version(conn) == 16
 
 
 # --- round-trip + join ------------------------------------------------------
