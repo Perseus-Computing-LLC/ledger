@@ -58,6 +58,12 @@ New events may carry the following optional, hash-covered fields through `POST /
 - `result_hash`: SHA-256 digest of the output artifact or conclusion.
 - `human_review`: `approved`, `rejected`, or `corrected`.
 - `correction_ref`: opaque correction identifier, required for `corrected` events.
+- `action_authorization`: optional authority-manifest reference, trusted scope
+  anchor, intent digest, lifecycle status, agent identity, and approval reference
+  for an Authorized Action Receipt. When action provenance is supplied, `agent_id`,
+  manifest reference, scope anchor, intent digest, and lifecycle status are
+  required together; `approval_ref` is required only for `approved`, `denied`,
+  and `expired` statuses.
 
 These fields appear in `evidence` and `decision_context` on receipt events. They are optional and trailing in the canonical event form, so they do not alter verification of historical records.
 

@@ -55,7 +55,11 @@ from typing import Optional
 # 15 = adds hash-covered decision-evidence fields to usage_events: canonical
 #     source hash list, policy version, result hash, and human review/correction
 #     linkage. All nullable and trailing so existing chain rows stay valid.
-SCHEMA_VERSION = 15
+# 16 = adds optional Authorized Action Receipt provenance: agent identity,
+#     authority-manifest reference, trusted scope anchor, action intent hash,
+#     lifecycle status, and approval references. Vault remains the enforcement
+#     authority; Ledger records only supplied, hash-covered evidence.
+SCHEMA_VERSION = 16
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -130,6 +134,14 @@ _CHAIN_FIELDS_OPTIONAL = (
     "result_hash",
     "human_review",
     "correction_ref",
+    # v16 Authorized Action Receipt provenance. Trailing and nullable so existing
+    # rows retain their original canonical bytes; supplied values are hash-covered.
+    "agent_id",
+    "authority_manifest_ref",
+    "scope_anchor",
+    "action_intent_hash",
+    "action_status",
+    "approval_ref",
 )
 
 
@@ -534,6 +546,15 @@ CREATE TABLE IF NOT EXISTS usage_events (
     result_hash       TEXT,
     human_review      TEXT,
     correction_ref    TEXT,
+    -- v16 Authorized Action Receipt provenance. Each supplied value is folded
+    -- into the per-org event hash as a trailing optional field. Values are
+    -- opaque references/hashes only; Vault owns policy enforcement and raw data.
+    agent_id          TEXT,
+    authority_manifest_ref TEXT,
+    scope_anchor      TEXT,
+    action_intent_hash TEXT,
+    action_status     TEXT,
+    approval_ref      TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -831,6 +852,15 @@ def _migrate_add_columns(conn) -> None:
         ("usage_events", "result_hash", "TEXT"),
         ("usage_events", "human_review", "TEXT"),
         ("usage_events", "correction_ref", "TEXT"),
+        # v16 Authorized Action Receipt provenance. Nullable preserves both old
+        # rows and their historical hash canonical form; only supplied values
+        # extend the chain. Vault validates the authority lifecycle itself.
+        ("usage_events", "agent_id", "TEXT"),
+        ("usage_events", "authority_manifest_ref", "TEXT"),
+        ("usage_events", "scope_anchor", "TEXT"),
+        ("usage_events", "action_intent_hash", "TEXT"),
+        ("usage_events", "action_status", "TEXT"),
+        ("usage_events", "approval_ref", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)

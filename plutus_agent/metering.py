@@ -29,6 +29,10 @@ from . import db, pricing
 DAY = 86400
 _SHA256_HEX = re.compile(r"^[0-9a-fA-F]{64}$")
 _HUMAN_REVIEW_VALUES = {"approved", "rejected", "corrected"}
+_ACTION_STATUS_VALUES = {
+    "intent", "approval_requested", "approved", "denied", "expired",
+    "executed", "failed", "cancelled",
+}
 
 
 def _canonical_evidence_hashes(hashes: Optional[list[str]]) -> Optional[str]:
@@ -143,6 +147,12 @@ def record_usage(conn, org_id: str, provider: str,
                  result_hash: Optional[str] = None,
                  human_review: Optional[str] = None,
                  correction_ref: Optional[str] = None,
+                 agent_id: Optional[str] = None,
+                 authority_manifest_ref: Optional[str] = None,
+                 scope_anchor: Optional[str] = None,
+                 action_intent_hash: Optional[str] = None,
+                 action_status: Optional[str] = None,
+                 approval_ref: Optional[str] = None,
                  user_id: Optional[str] = None, source: str = "api",
                  pricing_overrides: Optional[dict] = None,
                  ts: Optional[float] = None,
@@ -201,6 +211,30 @@ def record_usage(conn, org_id: str, provider: str,
         raise ValueError("human_review must be approved, rejected, or corrected")
     if human_review == "corrected" and correction_ref is None:
         raise ValueError("correction_ref is required when human_review is corrected")
+    agent_id = _optional_text(agent_id, "agent_id")
+    authority_manifest_ref = _optional_text(authority_manifest_ref, "authority_manifest_ref")
+    scope_anchor = _optional_text(scope_anchor, "scope_anchor")
+    approval_ref = _optional_text(approval_ref, "approval_ref")
+    if action_intent_hash is not None and (
+        not isinstance(action_intent_hash, str)
+        or not _SHA256_HEX.fullmatch(action_intent_hash)
+    ):
+        raise ValueError("action_intent_hash must be a 64-character SHA-256 hex digest")
+    action_intent_hash = action_intent_hash.lower() if action_intent_hash else None
+    if action_status is not None and action_status not in _ACTION_STATUS_VALUES:
+        raise ValueError(
+            "action_status must be one of " + ", ".join(sorted(_ACTION_STATUS_VALUES))
+        )
+    if any((authority_manifest_ref, scope_anchor, action_intent_hash, action_status, approval_ref)):
+        if not agent_id:
+            raise ValueError("agent_id is required when action provenance is supplied")
+        if not authority_manifest_ref or not scope_anchor or not action_intent_hash or not action_status:
+            raise ValueError(
+                "authority_manifest_ref, scope_anchor, action_intent_hash, and action_status "
+                "are required together for action provenance"
+            )
+    if action_status in {"approved", "denied", "expired"} and not approval_ref:
+        raise ValueError("approval_ref is required for an approval decision status")
 
     # Fix #80: never let a negative token count through — it would rewind the
     # month-to-date tracked total (bypassing the free-tier quota) and corrupt
@@ -402,20 +436,29 @@ def record_usage(conn, org_id: str, provider: str,
         "result_hash": result_hash,
         "human_review": human_review,
         "correction_ref": correction_ref,
+        "agent_id": agent_id,
+        "authority_manifest_ref": authority_manifest_ref,
+        "scope_anchor": scope_anchor,
+        "action_intent_hash": action_intent_hash,
+        "action_status": action_status,
+        "approval_ref": approval_ref,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
         "INSERT INTO usage_events(id,org_id,workspace_id,provider,model,task_type,"
         "input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,cost_micros,"
         "baseline_micros,optimal_micros,external_ref,user_id,evidence_hashes,policy_version,"
-        "result_hash,human_review,correction_ref,estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "result_hash,human_review,correction_ref,agent_id,authority_manifest_ref,scope_anchor,"
+        "action_intent_hash,action_status,approval_ref,estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
          int(reasoning_tokens), cost_micros, baseline_micros, optimal_micros,
          external_ref, user_id, evidence_hashes_json, policy_version, result_hash,
-         human_review, correction_ref, int(estimated), source, ts, prev_hash, row_hash),
+         human_review, correction_ref, agent_id, authority_manifest_ref, scope_anchor,
+         action_intent_hash, action_status, approval_ref, int(estimated), source, ts,
+         prev_hash, row_hash),
     )
 
     # Deplete prepaid credit (only when there's credit to deplete; orgs on the
