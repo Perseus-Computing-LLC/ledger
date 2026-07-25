@@ -807,7 +807,9 @@ class Handler(BaseHTTPRequestHandler):
             # HTTP boundary explicit so malformed JSON shapes get a clear 400.
             if ev.get("evidence_hashes") is not None and not isinstance(ev["evidence_hashes"], list):
                 return self._json(400, {"error": "evidence_hashes must be a list"})
-            for field in ("policy_version", "result_hash", "human_review", "correction_ref"):
+            for field in ("policy_version", "result_hash", "human_review", "correction_ref",
+                          "agent_id", "authority_manifest_ref", "scope_anchor",
+                          "action_intent_hash", "action_status", "approval_ref"):
                 if ev.get(field) is not None and not isinstance(ev[field], str):
                     return self._json(400, {"error": f"{field} must be a string"})
 
@@ -861,6 +863,12 @@ class Handler(BaseHTTPRequestHandler):
                             result_hash=ev.get("result_hash"),
                             human_review=ev.get("human_review"),
                             correction_ref=ev.get("correction_ref"),
+                            agent_id=ev.get("agent_id"),
+                            authority_manifest_ref=ev.get("authority_manifest_ref"),
+                            scope_anchor=ev.get("scope_anchor"),
+                            action_intent_hash=ev.get("action_intent_hash"),
+                            action_status=ev.get("action_status"),
+                            approval_ref=ev.get("approval_ref"),
                             user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
