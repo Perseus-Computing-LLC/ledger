@@ -305,6 +305,154 @@ class TestServerEnforcement(unittest.TestCase):
         self.assertEqual(cm.exception.code, 403)
 
 
+class TestBearerAuditReceipt(unittest.TestCase):
+    """Org-scoped API-key access to /api/audit evidence receipts (auth on).
+
+    Agent acceptance flows (no browser session) post usage to /v1/usage with
+    an API key and must be able to fetch the resulting evidence receipt the
+    same way. The key strictly scopes the receipt: another org's receipt is
+    unreachable, and a missing/invalid key is a 401.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        fd, cls.dbpath = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        conn = db.connect(cls.dbpath)
+        db.init_schema(conn)
+        cls.org_id = db.create_org(conn, "Receipt Org")["id"]
+        cls.other_org = db.create_org(conn, "Other Org")["id"]
+        key_row, cls.api_key = db.create_api_key(conn, cls.org_id, name="acceptance")
+        _, cls.other_key = db.create_api_key(conn, cls.other_org, name="other")
+        conn.close()
+
+        ctx = app._Ctx(_auth_cfg(), cls.dbpath, demo=True)
+        assert ctx.auth_on, "auth should be enabled for this test"
+        cls.httpd = app._Server(("127.0.0.1", 0), app.Handler, ctx)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        for ext in ("", "-wal", "-shm"):
+            try:
+                os.unlink(cls.dbpath + ext)
+            except OSError:
+                pass
+
+    def _req(self, path, *, method="GET", key=None, payload=None, headers=None):
+        url = f"http://127.0.0.1:{self.port}{path}"
+        h = dict(headers or {})
+        if key:
+            h["Authorization"] = f"Bearer {key}"
+        data = json.dumps(payload).encode() if payload is not None else None
+        if data is not None:
+            h["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=h, method=method)
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read().decode())
+
+    def test_bearer_key_fetches_its_orgs_evidence_receipt(self):
+        event = {"provider": "perseus", "model": "live-acceptance",
+                 "task_type": "context-receipt-acceptance",
+                 "input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
+                 "external_ref": "bearer-receipt-1",
+                 "context_render_schema": "perseus-context-render-trace/v1",
+                 "context_render_hash": "a" * 64,
+                 "served_memory_provenance_hash": "b" * 64,
+                 "action_receipt_hash": "c" * 64}
+        status, _ = self._req("/v1/usage", method="POST", key=self.api_key,
+                              payload=event, headers={"Idempotency-Key": "bearer-receipt-1"})
+        self.assertEqual(status, 200)
+
+        status, receipt = self._req(
+            f"/api/audit?org={self.org_id}&external_ref=bearer-receipt-1",
+            key=self.api_key)
+        self.assertEqual(status, 200)
+        self.assertEqual(receipt["receipt_version"], "perseus-evidence-receipt/v1")
+        self.assertEqual(len(receipt["events"]), 1)
+        binding = receipt["events"][0]["context_render_binding"]
+        self.assertEqual(binding["render_hash"], "a" * 64)
+        self.assertEqual(binding["action_receipt_hash"], "c" * 64)
+        self.assertTrue(receipt["verification"]["chain_ok"])
+
+    def test_bearer_key_cannot_read_another_orgs_receipt(self):
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self._req(f"/api/audit?org={self.org_id}&external_ref=bearer-receipt-1",
+                      key=self.other_key)
+        self.assertEqual(cm.exception.code, 403)
+
+    def test_missing_or_invalid_bearer_is_401(self):
+        for key in (None, "plutus_sk_not_a_real_key"):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                self._req(f"/api/audit?org={self.org_id}", key=key)
+            self.assertEqual(cm.exception.code, 401)
+
+
+class TestAdminKeyLifecyclePublicPaths(unittest.TestCase):
+    """Admin-token key lifecycle routes stay reachable when auth is on.
+
+    /v1/admin/keys/rotate and /v1/admin/keys/revoke are admin-token routes
+    like /v1/admin/keys; the session gate must not 401 them first.
+    """
+
+    ADMIN = "test-admin-token"
+
+    @classmethod
+    def setUpClass(cls):
+        fd, cls.dbpath = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        conn = db.connect(cls.dbpath)
+        db.init_schema(conn)
+        cls.org_id = db.create_org(conn, "Lifecycle Org")["id"]
+        conn.close()
+
+        ctx = app._Ctx(_auth_cfg(), cls.dbpath, demo=True)
+        ctx.cfg.setdefault("admin", {})["token"] = cls.ADMIN
+        cls.httpd = app._Server(("127.0.0.1", 0), app.Handler, ctx)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        for ext in ("", "-wal", "-shm"):
+            try:
+                os.unlink(cls.dbpath + ext)
+            except OSError:
+                pass
+
+    def _admin(self, path, payload):
+        url = f"http://127.0.0.1:{self.port}{path}"
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode(), method="POST",
+            headers={"Authorization": f"Bearer {self.ADMIN}",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read().decode())
+
+    def test_create_then_revoke_key_via_admin_token(self):
+        status, created = self._admin("/v1/admin/keys",
+                                      {"org_id": self.org_id, "name": "lifecycle"})
+        self.assertEqual(status, 201)
+        status, revoked = self._admin("/v1/admin/keys/revoke",
+                                      {"org_id": self.org_id, "key_id": created["id"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(revoked["revoked"], created["id"])
+        # Revoked key no longer authenticates.
+        url = f"http://127.0.0.1:{self.port}/api/audit?org={self.org_id}"
+        req = urllib.request.Request(
+            url, headers={"Authorization": f"Bearer {created['secret']}"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(cm.exception.code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()
 

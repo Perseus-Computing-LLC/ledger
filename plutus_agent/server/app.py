@@ -30,7 +30,9 @@ _PUBLIC_PATHS = {"/", "/index.html",  # public landing for logged-out visitors
                  "/v1/usage",  # authenticated by its own Bearer API key, not a session
                  "/v1/usage/export.csv", "/v1/usage/export.json",  # Bearer-auth (#66)
                  "/v1/checkpoints",  # Bearer-auth tamper-evidence anchors (#121)
+                 "/api/audit",  # Bearer-auth evidence receipts (org-scoped API key)
                  "/v1/admin/orgs", "/v1/admin/credits", "/v1/admin/keys",  # admin-token (#66)
+                 "/v1/admin/keys/rotate", "/v1/admin/keys/revoke",  # admin-token key lifecycle
                  "/v1/admin/verify",  # ledger tamper-evidence (#108), admin-token
                  "/auth/login", "/auth/callback", "/auth/logout"}
 
@@ -399,9 +401,22 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(404, {"error": "no organizations"})
                 return self._json(200, api.summary_json(conn, org_id))
             if path == "/api/audit":
-                org_id = self._authz_org(conn, q.get("org", [None])[0])
-                if not org_id:
-                    return self._json(404, {"error": "no organizations"})
+                # Session users keep the dashboard path. Without a session the
+                # receipt is org-scoped by the caller's API key (same model as
+                # /v1/usage exports) so agent acceptance flows can fetch their
+                # evidence receipt without a browser session. A key for org A
+                # can never read org B's receipt.
+                if self._user is None and self.ctx.auth_on:
+                    org_id = self._bearer_org(conn)
+                    if not org_id:
+                        return self._json(401, {"error": "invalid or missing API key"})
+                    requested = q.get("org", [None])[0]
+                    if requested and requested != org_id:
+                        return self._json(403, {"error": "API key not authorized for org"})
+                else:
+                    org_id = self._authz_org(conn, q.get("org", [None])[0])
+                    if not org_id:
+                        return self._json(404, {"error": "no organizations"})
                 return self._json(200, api.audit_json(
                     conn, org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg),
                     external_ref=q.get("external_ref", [None])[0]))
