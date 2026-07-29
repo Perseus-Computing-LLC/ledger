@@ -447,9 +447,17 @@ class TestConfigSecretHandling(unittest.TestCase):
 
     def test_load_base_has_no_env(self):
         from plutus_agent import config as cfgmod
-        os.environ["STRIPE_SECRET_KEY"] = "sk_live_env_only"
+        os.environ["STRIPE_SECRET_KEY"] = "«redacted:sk_live_…»"
         self.assertEqual(cfgmod.load_base()["billing"]["stripe_secret_key"], "")
-        self.assertEqual(cfgmod.load()["billing"]["stripe_secret_key"], "sk_live_env_only")
+        self.assertEqual(cfgmod.load()["billing"]["stripe_secret_key"], "«redacted:sk_live_…»")
+
+    def test_load_does_not_mutate_defaults_or_later_base_reads(self):
+        from plutus_agent import config as cfgmod
+        os.environ["STRIPE_SECRET_KEY"] = "«redacted:sk_live_…»"
+        runtime = cfgmod.load()
+        self.assertEqual(runtime["billing"]["stripe_secret_key"], "«redacted:sk_live_…»")
+        self.assertEqual(cfgmod.load_base()["billing"]["stripe_secret_key"], "")
+        self.assertEqual(cfgmod.DEFAULT_CONFIG["billing"]["stripe_secret_key"], "")
 
 
 class TestClaudeHook(unittest.TestCase):

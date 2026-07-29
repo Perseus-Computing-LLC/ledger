@@ -7,6 +7,7 @@ minimal built-in reader so ``plutus`` still runs.
 """
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -296,7 +297,9 @@ def _minimal_yaml_read(path: Path) -> dict:
 
 # ----------------------------------------------------------------- merging ---
 def _deep_merge(base: dict, over: dict) -> dict:
-    out = dict(base)
+    # Runtime environment overrides must never mutate DEFAULT_CONFIG or leak
+    # into load_base(), which is the source eligible for persistence.
+    out = copy.deepcopy(base)
     for k, v in (over or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
             out[k] = _deep_merge(out[k], v)
