@@ -10,7 +10,7 @@ API remain compatibility contracts during the transition. Stripe billing is an
 optional settlement adapter; it is not the product boundary.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 # The frozen `/v1` HTTP API contract version (SemVer), tracked in `openapi.yaml`.
 # Intentionally INDEPENDENT of `__version__`: the package ships fixes/features on
 # its own cadence, but the wire contract only bumps on an actual `/v1` change
