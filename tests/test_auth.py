@@ -392,6 +392,67 @@ class TestBearerAuditReceipt(unittest.TestCase):
             self.assertEqual(cm.exception.code, 401)
 
 
+class TestAdminKeyLifecyclePublicPaths(unittest.TestCase):
+    """Admin-token key lifecycle routes stay reachable when auth is on.
+
+    /v1/admin/keys/rotate and /v1/admin/keys/revoke are admin-token routes
+    like /v1/admin/keys; the session gate must not 401 them first.
+    """
+
+    ADMIN = "test-admin-token"
+
+    @classmethod
+    def setUpClass(cls):
+        fd, cls.dbpath = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        conn = db.connect(cls.dbpath)
+        db.init_schema(conn)
+        cls.org_id = db.create_org(conn, "Lifecycle Org")["id"]
+        conn.close()
+
+        ctx = app._Ctx(_auth_cfg(), cls.dbpath, demo=True)
+        ctx.cfg.setdefault("admin", {})["token"] = cls.ADMIN
+        cls.httpd = app._Server(("127.0.0.1", 0), app.Handler, ctx)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        for ext in ("", "-wal", "-shm"):
+            try:
+                os.unlink(cls.dbpath + ext)
+            except OSError:
+                pass
+
+    def _admin(self, path, payload):
+        url = f"http://127.0.0.1:{self.port}{path}"
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode(), method="POST",
+            headers={"Authorization": f"Bearer {self.ADMIN}",
+                     "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read().decode())
+
+    def test_create_then_revoke_key_via_admin_token(self):
+        status, created = self._admin("/v1/admin/keys",
+                                      {"org_id": self.org_id, "name": "lifecycle"})
+        self.assertEqual(status, 201)
+        status, revoked = self._admin("/v1/admin/keys/revoke",
+                                      {"org_id": self.org_id, "key_id": created["id"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(revoked["revoked"], created["id"])
+        # Revoked key no longer authenticates.
+        url = f"http://127.0.0.1:{self.port}/api/audit?org={self.org_id}"
+        req = urllib.request.Request(
+            url, headers={"Authorization": f"Bearer {created['secret']}"})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(cm.exception.code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()
 

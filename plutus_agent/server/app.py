@@ -32,6 +32,7 @@ _PUBLIC_PATHS = {"/", "/index.html",  # public landing for logged-out visitors
                  "/v1/checkpoints",  # Bearer-auth tamper-evidence anchors (#121)
                  "/api/audit",  # Bearer-auth evidence receipts (org-scoped API key)
                  "/v1/admin/orgs", "/v1/admin/credits", "/v1/admin/keys",  # admin-token (#66)
+                 "/v1/admin/keys/rotate", "/v1/admin/keys/revoke",  # admin-token key lifecycle
                  "/v1/admin/verify",  # ledger tamper-evidence (#108), admin-token
                  "/auth/login", "/auth/callback", "/auth/logout"}
 
