@@ -59,6 +59,13 @@ Issues = "https://github.com/Perseus-Computing-LLC/plutus/issues"
 [project.scripts]
 plutus = "plutus_agent.cli:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests", "test_plutus.py"]
+addopts = "--strict-markers"
+markers = [
+  "integration: tests that exercise optional external integrations",
+]
+
 [tool.setuptools.dynamic]
 version = { attr = "plutus_agent.__version__" }
 
