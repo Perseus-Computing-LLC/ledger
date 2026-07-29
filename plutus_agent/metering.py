@@ -153,6 +153,10 @@ def record_usage(conn, org_id: str, provider: str,
                  action_intent_hash: Optional[str] = None,
                  action_status: Optional[str] = None,
                  approval_ref: Optional[str] = None,
+                 context_render_schema: Optional[str] = None,
+                 context_render_hash: Optional[str] = None,
+                 served_memory_provenance_hash: Optional[str] = None,
+                 action_receipt_hash: Optional[str] = None,
                  user_id: Optional[str] = None, source: str = "api",
                  pricing_overrides: Optional[dict] = None,
                  ts: Optional[float] = None,
@@ -235,6 +239,22 @@ def record_usage(conn, org_id: str, provider: str,
             )
     if action_status in {"approved", "denied", "expired"} and not approval_ref:
         raise ValueError("approval_ref is required for an approval decision status")
+
+    context_render_schema = _optional_text(context_render_schema, "context_render_schema")
+    context_hashes = {
+        "context_render_hash": context_render_hash,
+        "served_memory_provenance_hash": served_memory_provenance_hash,
+        "action_receipt_hash": action_receipt_hash,
+    }
+    if any(value is not None for value in context_hashes.values()) and not context_render_schema:
+        raise ValueError("context_render_schema is required with context-render evidence")
+    for field, digest in context_hashes.items():
+        if digest is not None and (not isinstance(digest, str) or not _SHA256_HEX.fullmatch(digest)):
+            raise ValueError(f"{field} must be a 64-character SHA-256 hex digest")
+    context_render_hash = context_render_hash.lower() if context_render_hash else None
+    served_memory_provenance_hash = (served_memory_provenance_hash.lower()
+                                     if served_memory_provenance_hash else None)
+    action_receipt_hash = action_receipt_hash.lower() if action_receipt_hash else None
 
     # Fix #80: never let a negative token count through — it would rewind the
     # month-to-date tracked total (bypassing the free-tier quota) and corrupt
@@ -442,6 +462,10 @@ def record_usage(conn, org_id: str, provider: str,
         "action_intent_hash": action_intent_hash,
         "action_status": action_status,
         "approval_ref": approval_ref,
+        "context_render_schema": context_render_schema,
+        "context_render_hash": context_render_hash,
+        "served_memory_provenance_hash": served_memory_provenance_hash,
+        "action_receipt_hash": action_receipt_hash,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
@@ -449,16 +473,18 @@ def record_usage(conn, org_id: str, provider: str,
         "input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,cost_micros,"
         "baseline_micros,optimal_micros,external_ref,user_id,evidence_hashes,policy_version,"
         "result_hash,human_review,correction_ref,agent_id,authority_manifest_ref,scope_anchor,"
-        "action_intent_hash,action_status,approval_ref,estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "action_intent_hash,action_status,approval_ref,context_render_schema,context_render_hash,"
+        "served_memory_provenance_hash,action_receipt_hash,estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
          int(reasoning_tokens), cost_micros, baseline_micros, optimal_micros,
          external_ref, user_id, evidence_hashes_json, policy_version, result_hash,
          human_review, correction_ref, agent_id, authority_manifest_ref, scope_anchor,
-         action_intent_hash, action_status, approval_ref, int(estimated), source, ts,
-         prev_hash, row_hash),
+         action_intent_hash, action_status, approval_ref, context_render_schema,
+         context_render_hash, served_memory_provenance_hash, action_receipt_hash,
+         int(estimated), source, ts, prev_hash, row_hash),
     )
 
     # Deplete prepaid credit (only when there's credit to deplete; orgs on the

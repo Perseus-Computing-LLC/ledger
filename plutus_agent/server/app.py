@@ -809,7 +809,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "evidence_hashes must be a list"})
             for field in ("policy_version", "result_hash", "human_review", "correction_ref",
                           "agent_id", "authority_manifest_ref", "scope_anchor",
-                          "action_intent_hash", "action_status", "approval_ref"):
+                          "action_intent_hash", "action_status", "approval_ref",
+                          "context_render_schema", "context_render_hash",
+                          "served_memory_provenance_hash", "action_receipt_hash"):
                 if ev.get(field) is not None and not isinstance(ev[field], str):
                     return self._json(400, {"error": f"{field} must be a string"})
 
@@ -869,6 +871,10 @@ class Handler(BaseHTTPRequestHandler):
                             action_intent_hash=ev.get("action_intent_hash"),
                             action_status=ev.get("action_status"),
                             approval_ref=ev.get("approval_ref"),
+                            context_render_schema=ev.get("context_render_schema"),
+                            context_render_hash=ev.get("context_render_hash"),
+                            served_memory_provenance_hash=ev.get("served_memory_provenance_hash"),
+                            action_receipt_hash=ev.get("action_receipt_hash"),
                             user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),

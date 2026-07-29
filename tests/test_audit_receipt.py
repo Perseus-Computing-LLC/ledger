@@ -123,3 +123,34 @@ def test_evidence_receipt_includes_hash_covered_decision_context(tmp_path):
                  (event["event_id"],))
     assert db.verify_chain(conn, org_id)["ok"] is False
     conn.close()
+
+
+def test_context_render_binding_is_hash_covered_and_receipt_safe(tmp_path):
+    conn = db.connect(str(tmp_path / "context-render-binding.db"))
+    db.init_schema(conn)
+    org_id = db.create_org(conn, "context-render-binding", tier="free")["id"]
+    render_hash = "d" * 64
+    provenance_hash = "e" * 64
+    action_receipt_hash = "f" * 64
+    metering.record_usage(
+        conn, org_id, provider="openai", model="gpt-fixture",
+        task_type="acceptance", external_ref="acceptance-42",
+        input_tokens=10, output_tokens=5, cost_usd=0.1,
+        context_render_schema="perseus-context-render-trace/v1",
+        context_render_hash=render_hash,
+        served_memory_provenance_hash=provenance_hash,
+        action_receipt_hash=action_receipt_hash,
+    )
+
+    receipt = audit_json(conn, org_id, external_ref="acceptance-42")
+    event = receipt["events"][0]
+    assert event["context_render_binding"] == {
+        "schema_version": "perseus-context-render-trace/v1",
+        "render_hash": render_hash,
+        "served_memory_provenance_hash": provenance_hash,
+        "action_receipt_hash": action_receipt_hash,
+    }
+    assert "raw context" not in str(event)
+    conn.execute("UPDATE usage_events SET context_render_hash='0' WHERE id=?", (event["event_id"],))
+    assert db.verify_chain(conn, org_id)["ok"] is False
+    conn.close()
