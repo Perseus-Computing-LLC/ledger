@@ -142,6 +142,13 @@ _CHAIN_FIELDS_OPTIONAL = (
     "action_intent_hash",
     "action_status",
     "approval_ref",
+    # v17 cross-product context-render evidence. Hash-only commitments bind the
+    # rendered Perseus context and served-memory/AAR projection without storing
+    # raw prompts or memory bodies.
+    "context_render_schema",
+    "context_render_hash",
+    "served_memory_provenance_hash",
+    "action_receipt_hash",
 )
 
 
@@ -555,6 +562,12 @@ CREATE TABLE IF NOT EXISTS usage_events (
     action_intent_hash TEXT,
     action_status     TEXT,
     approval_ref      TEXT,
+    -- v17: hash-only cross-product context-render evidence. Never raw context
+    -- or memory content; every supplied field extends the ledger commitment.
+    context_render_schema TEXT,
+    context_render_hash TEXT,
+    served_memory_provenance_hash TEXT,
+    action_receipt_hash TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -861,6 +874,12 @@ def _migrate_add_columns(conn) -> None:
         ("usage_events", "action_intent_hash", "TEXT"),
         ("usage_events", "action_status", "TEXT"),
         ("usage_events", "approval_ref", "TEXT"),
+        # v17 cross-product context-render commitments. Nullable preserves all
+        # existing rows and their pre-v17 chain canonical form.
+        ("usage_events", "context_render_schema", "TEXT"),
+        ("usage_events", "context_render_hash", "TEXT"),
+        ("usage_events", "served_memory_provenance_hash", "TEXT"),
+        ("usage_events", "action_receipt_hash", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)

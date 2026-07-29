@@ -113,6 +113,12 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                     "human_review": row["human_review"],
                     "correction_ref": row["correction_ref"],
                 },
+                "context_render_binding": {
+                    "schema_version": row["context_render_schema"],
+                    "render_hash": row["context_render_hash"],
+                    "served_memory_provenance_hash": row["served_memory_provenance_hash"],
+                    "action_receipt_hash": row["action_receipt_hash"],
+                },
                 "action_authorization": {
                     "agent_id": row["agent_id"],
                     "authority_manifest_ref": row["authority_manifest_ref"],
