@@ -1,8 +1,10 @@
-# Privacy — Plutus metering for Claude Code
+# Privacy — Perseus Ledger integration for Claude Code
 
-This plugin is a self-hosted integration. It is **separate from Anthropic** and
-is not endorsed, reviewed, or operated by Anthropic. Your Plutus instance is your
-responsibility; Anthropic does not host, monitor, or have access to it.
+This plugin is an optional self-hosted Perseus Ledger integration. It is
+**separate from Anthropic** and is not endorsed, reviewed, or operated by
+Anthropic. Your Ledger instance is your responsibility; Anthropic does not host,
+monitor, or have access to it. Legacy `plutus*` identifiers remain in the
+integration configuration during the transition.
 
 ## What is sent, and where
 

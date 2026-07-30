@@ -1,5 +1,5 @@
 {
-  "description": "Meter each Claude Code turn's token usage to a self-hosted Plutus ledger at session end.",
+  "description": "Record each Claude Code turn's token-usage metadata in a self-hosted Perseus Ledger instance at session end.",
   "hooks": {
     "Stop": [
       {
