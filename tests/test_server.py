@@ -72,6 +72,9 @@ class TestServer(unittest.TestCase):
         status, body = self._get("/")
         self.assertEqual(status, 200)
         self.assertIn("Perseus Ledger", body)
+        self.assertIn("verifiable activity", body)
+        self.assertNotIn("Hermes Cloud", body)
+        self.assertNotIn("Hermes Agent", body)
         self.assertIn("Your AI spend", body)
         self.assertIn("Spend by workspace", body)
         self.assertIn("#0a1018", body)  # the monitor canvas color is present
