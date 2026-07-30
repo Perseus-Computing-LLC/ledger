@@ -1,52 +1,66 @@
-# Launch assets — Plutus public launch
+# Launch assets — Perseus Ledger public launch
+
+> **Status:** draft copy only. These assets must be fact-checked against the
+> release and reviewed before any outward post. The stable package, CLI, and API
+> retain their legacy `plutus*` names during the transition.
 
 ## Show HN post
 
-**Title:** Show HN: Plutus — self-hosted billing for AI agents (MIT, Stripe-integrated)
+**Title:** Show HN: Perseus Ledger — self-hosted, verifiable event provenance for autonomous systems
 
 **Body:**
 
-Plutus is a billing layer for AI agents. It meters every LLM call, tracks spend per provider/model/workspace, and proves how much money your context engine saved — on a tamper-evident hash chain.
+Autonomous systems need more than aggregate observability: they need to answer
+what happened, under what authority and evidence, and whether that history can
+be verified later.
 
-The pitch: if you're building an AI agent that costs real money to run, you need to bill your users. Plutus gives you that — self-hosted, MIT-licensed, Stripe-integrated.
+Perseus Ledger is a self-hosted, MIT-licensed event and provenance layer. It
+records activity in an append-only, hash-chained ledger with optional links to
+actor, workspace, provider/model configuration, external evidence, authority
+references, and resource allocation. It runs offline with SQLite and works with
+any runtime or application.
 
-What it does:
-- Drop-in metering: `plutus meter --provider anthropic --model claude-opus --cost 0.14`
-- REST API for agent frameworks: `POST /v1/usage` with API key auth
-- Prepaid credit ledger: users top up via Stripe, Plutus debits as calls happen
-- Savings-share billing: prove how much your routing saved, bill 10% of verified savings
-- Hash-chained tamper evidence: every event is cryptographically linked; modifying history breaks `plutus verify`
-- Dark-themed dashboard at :8420 with real-time spend, per-provider breakdowns, efficiency billboard
-- Five tiers: Free (unlimited metering) → Pro ($20/mo) → Pro Team ($50/mo, 5 seats) → Team ($10/seat + savings-share) → Enterprise
+What it does today:
+- HTTP ingestion at `POST /v1/usage` and a Python SDK
+- Per-organization hash chains with local verification and optional retained checkpoints
+- Opaque, hash-covered evidence and action-authority references
+- Optional provider/model/token/cost allocation and reconciliation
+- Optional Stripe settlement adapters; Stripe is not required or the product boundary
+- Self-hosted dashboard and API at `:8420`
 
-Stack: Python, SQLite, Stripe SDK. Zero external dependencies beyond Stripe. Works fully offline without a Stripe key.
+The installed compatibility package remains `plutus-agent` and the CLI remains
+`plutus` during transition; the product is Perseus Ledger.
 
 Open source (MIT): https://github.com/Perseus-Computing-LLC/plutus
-Docs: https://perseus.observer/plutus
-PyPI: `pip install plutus-agent`
+Docs: https://perseus.observer/ledger/
+PyPI compatibility package: `pip install plutus-agent`
 
 ---
 
 ## r/LocalLLaMA post
 
-**Title:** I built a billing layer for local AI agents — self-hosted, MIT, no cloud dependency
+**Title:** Perseus Ledger: a self-hosted, verifiable event record for local and autonomous systems
 
 **Body:**
 
-Been running AI agents locally for a while, and the one thing nobody talks about is: how do you charge for them? If you build an agent that costs real compute to run (even local models burn electricity/GPU time), you need billing.
+I wanted a local-first way to preserve an auditable record of autonomous-system
+activity without making a hosted platform or a specific agent runtime part of
+the trust boundary.
 
-Built Plutus to solve this. It's MIT-licensed, runs on SQLite, and integrates with Stripe for payments. But the Stripe part is optional — the metering, dashboards, and spend tracking all work fully offline.
+Perseus Ledger is MIT-licensed, runs with SQLite, and records activity in an
+append-only hash chain. It can carry resource allocation where useful, but it is
+not a billing product first: the core question is what happened, under what
+evidence and authority, and can the record be verified later?
 
-Key features for the local-first crowd:
-- Zero cloud dependency for metering. All data stays in your SQLite DB.
-- Hash-chained usage events — every metered call is cryptographically linked. You can prove to a customer exactly what they spent.
-- Local dashboard at localhost:8420 — dark theme, real-time updates.
-- Savings-share billing: if you use Perseus context engine to reduce token usage, Plutus proves the savings and lets you bill a share of it.
+- No cloud dependency for local operation
+- Hash-chained records with local verification and optional external checkpoints
+- HTTP ingestion and Python SDK
+- Optional metering, reconciliation, and Stripe settlement adapters
+- Dashboard at `localhost:8420`
 
-Stack: Python 3.9+, SQLite, optional Stripe. No Docker required (though there's a GHCR image). `pip install plutus-agent` and you're done.
+Install remains `pip install plutus-agent` during the compatibility transition.
 
 Repo: https://github.com/Perseus-Computing-LLC/plutus
-Would love feedback, especially from anyone who's wrestled with agent billing before.
 
 ---
 
@@ -54,28 +68,33 @@ Would love feedback, especially from anyone who's wrestled with agent billing be
 
 **X thread:**
 
-1/ I built a billing layer for AI agents. It's called Plutus. MIT license, self-hosted, Stripe-integrated. `pip install plutus-agent`
+1/ Introducing Perseus Ledger: a self-hosted, verifiable event and provenance layer for autonomous systems. MIT licensed. Runtime-neutral.
 
-2/ The problem: if your AI agent costs real money to run, how do you bill for it? Existing tools (Helicone, Langfuse) are great for observability but don't do billing — charging end users for the agent's compute.
+2/ The question is not only “what did the system cost?” It is: what happened, under what authority and evidence, and can we verify the history later?
 
-3/ Plutus solves this with a prepaid credit ledger. Users top up via Stripe → Plutus meters every LLM call → debits from their balance. Hash-chained so every event is cryptographically verifiable.
+3/ Ledger records append-only, hash-chained events with optional actor, workspace, provider/model, evidence, authority, and allocation metadata.
 
-4/ The differentiated play: savings-share billing. If you use Perseus context engine to reduce token costs by 90%, Plutus proves the savings and lets you bill 10% of what you saved the customer. The product pays for itself.
+4/ It works offline with SQLite, speaks HTTP, and does not require a particular agent framework or hosted service.
 
-5/ Free tier: unlimited metering, 1 seat. Pro: $20/mo flat. Pro Team: $50/mo for 5. Team: $10/seat + 10% savings-share. Enterprise: custom.
+5/ Metering, reconciliation, prepaid credit, and Stripe remain optional adapters—not the product boundary.
 
-6/ Everything is open source (MIT). Works offline without Stripe. Dashboard at :8420. REST API at /v1/usage.
+6/ Existing users keep the stable compatibility package and CLI: `pip install plutus-agent`; `plutus` remains supported during transition.
 
 7/ https://github.com/Perseus-Computing-LLC/plutus
-   https://perseus.observer/plutus
+   https://perseus.observer/ledger/
 
 **LinkedIn post:**
 
-I shipped Plutus, an open-source billing layer for AI agents. MIT license, Stripe-integrated, self-hosted.
+Perseus Ledger is an open-source, self-hosted event and provenance layer for
+autonomous systems. It preserves a hash-chained record of activity, evidence,
+authority references, and optional resource allocation so teams can reconstruct
+what happened and independently verify the resulting history.
 
-If you're building agentic products, you eventually need to charge for them. Plutus gives you metering, prepaid credits, and savings-based billing — out of the box. Hash-chained for auditability. Five pricing tiers from free to enterprise.
+It is runtime-neutral, works offline with SQLite, and exposes HTTP and Python
+interfaces. Metering, reconciliation, and settlement remain optional adapters.
 
-Stack: Python, SQLite, Stripe. `pip install plutus-agent`.
+The current compatibility install remains `pip install plutus-agent` while the
+product transition is completed.
 
 GitHub: https://github.com/Perseus-Computing-LLC/plutus
 
