@@ -1,10 +1,10 @@
 # Perseus Ledger
 
-> **Vault remembers. Ledger proves. Hermes executes.**
+> **Perseus resolves. Vault remembers. Ledger proves.**
 
 Perseus Ledger is the verifiable event and provenance layer for autonomous systems. It records **what happened, under what authority and evidence, and whether the history can be independently verified**.
 
-It is deliberately **not** an AI-spend dashboard. Hermes Cloud already provides Spend Intelligence for usage, tokens, funding, caps, and model-level cost analysis. Ledger complements that view with an append-only, hash-chained record that ties AI activity to the actor, boundary, evidence, configuration, action, result, and optional resource allocation behind it.
+It is deliberately **not** an AI-spend dashboard. Ledger provides an append-only, hash-chained record that ties activity to its actor, boundary, evidence, configuration, action, result, and optional resource allocation. It works independently with any agent runtime, application, internal tool, or offline deployment.
 
 ## What Ledger establishes
 
@@ -25,7 +25,7 @@ AI systems need more than observability. They need a defensible answer to:
 
 > What did the system know, what did it do, under which model and policy, what did it consume, and can we prove it later?
 
-Perseus Ledger provides the evidentiary layer for that answer. It can work beside Hermes Cloud, other agent frameworks, internal tools, offline environments, and federated deployments.
+Perseus Ledger provides the evidentiary layer for that answer. It can work beside any agent framework, application, internal tool, offline environment, or federated deployment.
 
 ### DoD and regulated-data relevance
 
@@ -36,14 +36,15 @@ Perseus Ledger provides the evidentiary layer for that answer. It can work besid
 
 This is a product and architecture position, not a claim of handling CUI or satisfying a particular compliance regime.
 
-## Architecture boundary
+## Perseus Computing product family
 
-| Component | Question it answers |
+| Product | Question it answers |
 |---|---|
-| **Hermes Cloud Spend Intelligence** | What did we spend and use? |
+| **Perseus** | What verified workspace state should be available before an agent acts? |
+| **Perseus Vault** | What durable, time-valid knowledge did the system have? |
 | **Perseus Ledger** | What happened, under what authority and evidence, and can we prove it? |
-| **Perseus Vault** | What durable, time-valid knowledge did the agent have? |
-| **Hermes Agent** | What work did the agent execute? |
+
+Each product is useful on its own and integrates through documented, runtime-neutral contracts. Ledger does not require Perseus, Vault, or any specific agent runtime.
 
 ## Quick start: record a verifiable event
 
@@ -80,9 +81,9 @@ Ledger integrity is not a marketing assertion. It is checked from the recorded c
 
 ## Transition principles
 
-1. **No broken integrations.** Package names, CLI commands, state paths, `/v1` routes, deployed domains, and existing keys remain stable until a separately announced migration.
-2. **No competing dashboard.** Hermes Cloud owns spend intelligence. Ledger surfaces integrity and evidence, not a replacement analytics product.
-3. **No billing-first story.** Resource allocation and Stripe reconciliation remain supported adapters beneath the ledger.
+1. **Runtime-neutral by design.** Ledger integrates with any agent runtime or application through its SDK and HTTP contracts; no Perseus product is required.
+2. **No broken integrations.** Legacy package names, CLI commands, state paths, `/v1` routes, deployed domains, and keys remain supported until a separately announced migration.
+3. **No billing-first story.** Resource allocation, billing, and Stripe reconciliation remain optional adapters beneath the ledger.
 4. **Evidence before claims.** The product must only claim provenance fields it actually records and can verify.
 
 ## License

@@ -494,7 +494,7 @@ def landing_page(*, signed_in: bool = False, savings_share_pct: float = 10.0) ->
 
     Leads with independently verifiable provenance—not spend analytics—and makes
     the compatibility ingestion path available without recasting Ledger as a
-    billing product. Hermes Cloud is the Spend Intelligence surface."""
+    billing product. The landing makes no runtime-specific assumption."""
     cta = ('<a class="btn" href="/">Open dashboard →</a>' if signed_in
            else '<a class="btn" href="/auth/login">Start free with Google →</a>')
     step = ("border:1px solid var(--line2);border-radius:11px;padding:16px 18px;"
@@ -542,7 +542,7 @@ def landing_page(*, signed_in: bool = False, savings_share_pct: float = 10.0) ->
     Each event is placed inside an immutable, hash-chained ledger boundary.</div>
     <div style="margin-top:10px">
       <span style="{onramp}">POST /v1/usage</span>
-      <span style="{onramp}">Hermes integration</span>
+      <span style="{onramp}">Python SDK</span>
       <span style="{onramp}">provider adapters</span></div></div>
   <div style="{step}"><div class="l amber">2 · Link</div>
     <div class="s" style="color:var(--dim)">Associate the actor, workspace, model/provider,
@@ -554,7 +554,7 @@ def landing_page(*, signed_in: bool = False, savings_share_pct: float = 10.0) ->
 
 <div style="text-align:center;margin:26px 0 8px">
   <div style="color:var(--dim);font-size:14px;margin-bottom:14px">
-    <b>Hermes Cloud owns Spend Intelligence.</b> Perseus Ledger supplies the evidence layer beneath
+    <b>Perseus Ledger is runtime-neutral.</b> It supplies an evidence layer beneath
     autonomous decisions. Stripe and allocation remain optional settlement adapters.</div>
   {cta}
   &nbsp;<a class="btn ghost" href="/pricing">Deployment options</a>

@@ -286,6 +286,9 @@ class TestServerEnforcement(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("/auth/login", body)          # sign-in CTA present
         self.assertIn("Know what your autonomous system", body)  # Ledger landing hero
+        self.assertIn("Perseus Ledger is runtime-neutral", body)
+        self.assertNotIn("Hermes Cloud", body)
+        self.assertNotIn("Hermes integration", body)
         self.assertNotIn("Credit balance", body)     # not the dashboard
 
     def test_api_requires_auth(self):
