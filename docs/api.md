@@ -1,7 +1,8 @@
-# Usage ingest API
+# Perseus Ledger usage ingest API
 
-Send agent/LLM usage to a Plutus instance over HTTP — no SDK, no shared database.
-This is how a self-serve org feeds the hosted dashboard.
+Send event and resource-allocation data to a Perseus Ledger instance over HTTP —
+no SDK or shared database required. The `/v1` route and `plutus_*` identifiers
+below remain supported legacy compatibility contracts during the transition.
 
 ## 1. Get an API key
 

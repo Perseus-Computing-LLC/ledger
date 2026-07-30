@@ -1,39 +1,37 @@
-# Plutus positioning — 2026-07
+# Perseus Ledger positioning — 2026-07
 
 ## One line
 
-**Plutus is the self-hosted billing layer for AI agents** — usage metering,
-prepaid-credit ledger, and Stripe billing you drop into your own stack, plus a
-runway-based model router that shifts traffic to the provider you can most afford
-to keep using.
+**Perseus Ledger is the self-hosted, verifiable event and provenance layer for
+autonomous systems.** It records what happened, under what authority and
+evidence, and whether the resulting history can be independently verified.
+
+Usage metering, resource allocation, reconciliation, prepaid credit, and Stripe
+settlement are optional adapters—not the product boundary.
 
 ## The problem
 
-Teams running agents burn money across several LLM providers at once and can't
-answer three questions in one place: *what did each call cost, how much credit is
-left, and which provider will run dry first?* The market is split — observability
-tools (Langfuse, Helicone) *watch* spend, gateways (LiteLLM, OpenRouter, Portkey)
-*route* calls, and Stripe *charges* customers — but nothing self-hosted ties
-metering, prepaid credit, and runway-aware routing together behind your own
-firewall.
+Teams operating autonomous systems need more than a dashboard aggregate. They
+need a defensible record of the actor, boundary, configuration, action, result,
+authority reference, evidence linkage, and allocation behind consequential work.
+Existing observability, gateway, billing, and workflow tools each solve part of
+that problem; Ledger supplies a portable, independently verifiable event record.
 
-## What makes Plutus different — the four-in-one
+## What makes Ledger different
 
-No open-source tool does all four of these. Plutus does:
+Ledger combines these runtime-neutral capabilities:
 
-1. **Live balance monitoring** — real per-provider balances (DeepSeek/OpenAI
-   live APIs) fused with a local cost ledger, on a dashboard at `:8420`.
-2. **Ledger spend** — an append-only, integer-micro-dollar credit ledger; the
-   balance is the sum of deltas, robust to out-of-order and concurrent inserts.
-3. **Self-calibrating budgets** — `--calibrate` back-solves a provider's budget
-   from real balance vs. recorded spend, so projections track reality instead of
-   a guess you set once.
-4. **Runway routing** — ranks providers by projected days-left and rewrites the
-   router so the highest-runway provider runs its flagship, with the others as
-   fallbacks. Billing *and* the credit runway gateways don't have.
+1. **Hash-chained event history** — append-only, independently verifiable
+   records with optional external checkpoints.
+2. **Evidence and authority references** — opaque, hash-covered links to the
+   action context, scope, approval, and result without storing raw secrets.
+3. **Resource allocation** — optional provider, model, token, and cost metadata
+   that can be reconciled against a system of record.
+4. **Portable operation** — self-hosted SQLite state, HTTP ingestion, and an SDK
+   usable with any runtime or application.
 
-Everything except Stripe runs fully offline. Single-file SQLite state, one-import
-SDK, MIT-licensed.
+Everything except optional settlement adapters runs fully offline. Single-file
+SQLite state, one-import SDK, MIT-licensed.
 
 ## The dogfooding narrative (lead with this)
 

@@ -1,9 +1,9 @@
-# Plutus — the billing layer for AI agents.
-# One-command self-hosted deploy:  docker run -p 8420:8420 plutus-agent
+# Perseus Ledger — verifiable provenance for autonomous systems.
+# One-command self-hosted deploy: docker run -p 8420:8420 plutus-agent
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.title="Plutus"
-LABEL org.opencontainers.image.description="The billing layer for AI agents — self-hosted usage metering + prepaid-credit billing."
+LABEL org.opencontainers.image.title="Perseus Ledger"
+LABEL org.opencontainers.image.description="Runtime-neutral, self-hosted, hash-chained event provenance for autonomous systems."
 LABEL org.opencontainers.image.source="https://github.com/Perseus-Computing-LLC/plutus"
 LABEL org.opencontainers.image.licenses="MIT"
 
