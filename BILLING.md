@@ -1,7 +1,12 @@
-# Billing setup — get Plutus accepting money in ~10 minutes
+# Optional Stripe settlement setup for Perseus Ledger
 
-Plutus runs fully offline until you add a Stripe key. This is the end-to-end
-flow to take a real (test-mode) payment and watch prepaid credit top up.
+Perseus Ledger runs fully offline without Stripe. This guide configures the
+optional settlement adapter for test-mode payments and prepaid-credit workflows.
+It is not required for event recording, chain verification, evidence receipts,
+or local operation.
+
+The stable package, CLI, config path, and lookup keys below retain `plutus*`
+names as compatibility contracts during the product transition.
 
 ## 0. Prerequisites
 ```bash
@@ -11,7 +16,7 @@ plutus init --org "Your Co" --tier pro
 Grab your **test-mode** keys from the Stripe dashboard (Developers → API keys).
 Always start in test mode (`sk_test_…`).
 
-## 1. Point Plutus at Stripe
+## 1. Point Ledger at Stripe
 ```bash
 export STRIPE_SECRET_KEY=sk_test_xxx
 export STRIPE_PUBLISHABLE_KEY=pk_test_xxx
@@ -23,10 +28,10 @@ Or put them in `~/.plutus/config.yaml` under `billing:` (env wins).
 ```bash
 plutus stripe-setup
 ```
-This creates a **Plutus Pro** product + a `$20/mo` recurring price (idempotent
-via the `plutus_pro_monthly` lookup key) and writes the price id into your
-config. Credit top-ups are priced dynamically per checkout, so nothing else to
-create.
+This creates the configured recurring product and price (idempotent via the
+legacy-compatible `plutus_pro_monthly` lookup key) and writes the price ID into
+your config. Credit top-ups are priced dynamically per checkout, so nothing else
+to create.
 
 ## 3. Run the server + forward webhooks
 ```bash
@@ -44,10 +49,10 @@ synthetic event:
 ```bash
 stripe trigger checkout.session.completed
 ```
-On `checkout.session.completed`, Plutus credits the org's ledger and the
-**Credit balance** card updates on the next 5-second refresh. "Upgrade to Pro"
-moves the org to the `pro` tier; the Customer Portal button manages the
-subscription.
+On `checkout.session.completed`, Ledger credits the organization's ledger and the
+**Credit balance** card updates on the next 5-second refresh. The existing
+upgrade flow moves the organization to the configured tier; the Customer Portal
+button manages the subscription.
 
 ## 5. Go live
 Swap `sk_test_…`/`pk_test_…`/`whsec_…` for live keys, register a production
