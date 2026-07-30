@@ -1,14 +1,15 @@
 openapi: 3.1.0
 info:
-  title: Plutus /v1 API
-  # Frozen `/v1` CONTRACT version (SemVer), pinned to plutus_agent.__api_version__.
+  title: Perseus Ledger /v1 API
+  # Frozen legacy-compatible `/v1` contract (SemVer), pinned to
+  # plutus_agent.__api_version__.
   # Intentionally independent of the package version: bump ONLY on a wire change
   # (additive = minor, breaking = major), NOT on every package release.
   # test_version_single_source.py asserts this equals __api_version__.
   version: "1.0.0"
   description: |
-    The Plutus `/v1` HTTP API — usage ingest, spend export, and operator admin
-    for the self-hostable LLM-spend billing engine.
+    The Perseus Ledger `/v1` HTTP API — event ingest, export, and operator
+    administration for a self-hostable, hash-chained evidence ledger.
 
     **This document is the frozen 1.0 contract.** Perseus and Perseus Vault build against
     it; within the 1.0 major line it changes only additively (new optional fields,
@@ -21,7 +22,8 @@ info:
       (minted in the dashboard or via the admin API).
     - **`/v1/admin/*`** — the single operator **admin token** as
       `Authorization: Bearer <admin token>` (config `admin.token` /
-      `PLUTUS_ADMIN_TOKEN`). Disabled (404) when no token is configured.
+      `PLUTUS_ADMIN_TOKEN`). Disabled (404) when no token is configured. The
+      `PLUTUS_*` name is a legacy compatibility contract.
     - The dashboard and `/webhook/stripe` use session cookies and Stripe
       signatures respectively and are out of scope for `/v1`.
 
@@ -29,7 +31,7 @@ info:
     **Unix epoch seconds (UTC)**.
 servers:
   - url: /
-    description: The Plutus server origin (default http://127.0.0.1:8420).
+    description: The Perseus Ledger server origin (default http://127.0.0.1:8420).
 
 tags:
   - name: usage
