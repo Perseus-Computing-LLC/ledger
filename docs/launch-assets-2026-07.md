@@ -1,196 +1,126 @@
-# Plutus launch assets — 2026-07
+# Perseus Ledger launch assets — 2026-07
 
-Draft copy and a launch checklist. All postable copy below is written to be
-pasted as-is (no em-dashes, no filler). The human (tcconnally) does every
-outward post; nothing here sends itself.
-
----
+Draft copy and a launch checklist. Nothing in this document posts externally.
+Every public asset must be verified against the release before use.
 
 ## Demo recording plan
 
-Goal: a 45-60 second loop that shows the four-in-one and the dogfooding fix.
+Goal: a 45–60 second loop that shows the evidence lifecycle.
 
-1. `plutus demo` then open `http://localhost:8420`. Let the dashboard load with a
-   month of sample data (balance, burn, per-provider breakdown, live feed).
-2. Show the SDK: three lines in a REPL, `track(...)`, then `balance()` drops.
-3. Show the monitor + router: `python plutus.py` table, then the before/after of
-   the attribution fix (a session that switched providers mid-flight; OpenAI goes
-   from invisible to correctly attributed).
-4. End on the dashboard's per-provider runway.
+1. Start a local Ledger demo with the stable compatibility command:
+   `plutus demo`, then open `http://localhost:8420`.
+2. Record an event through the SDK or `POST /v1/usage`.
+3. Show the event’s actor/boundary/configuration/allocation projection and its
+   place in the chain.
+4. Run integrity verification and show a retained checkpoint or evidence receipt.
+5. End with the distinction: Ledger records evidence; allocation and Stripe are
+   optional adapters.
 
-Capture: asciinema for the terminal steps (`asciinema rec`), a short screen GIF
-for the dashboard (the repo already ships `plutus-dashboard.png` for a static
-hero). Keep it silent with on-screen captions so it embeds anywhere.
+Capture terminal steps with asciinema and dashboard steps as a short silent GIF.
+Do not claim a field in demo copy unless the recording shows it.
 
-Assets to produce and where they live: `docs/media/plutus-demo.cast` (asciinema),
-`docs/media/plutus-dashboard.gif`. Link both from the README hero.
+## README polish
 
----
-
-## README polish (small, high-signal)
-
-- Add a one-line "why Plutus vs. a gateway/observability tool" note near the top:
-  it bills, it doesn't proxy; it complements LiteLLM/Langfuse/Helicone.
-- Add the four-in-one framing (live balance, ledger spend, self-calibrating
-  budgets, runway routing) as a short bullet list above the capability table.
-- Link `docs/POSITIONING-2026-07.md` and the demo media once recorded.
-- Add a "Meter Hermes Agent" subsection pointing at `examples/hermes_sync.py` and
-  noting the per-model attribution (schema v17) so the dogfooding story is
-  discoverable from the README.
-
----
+- Lead with **Perseus Ledger**, not legacy identifiers.
+- State the product question: what happened, under what authority and evidence,
+  and can the history be verified?
+- Describe `plutus-agent`, `plutus`, `plutus_agent`, `PLUTUS_*`, and `/v1` as
+  compatibility identifiers during migration.
+- Keep runtime integrations optional. Do not make Hermes or another agent
+  runtime part of Ledger’s product identity.
+- Link the product site, integrity documentation, API, migration guidance, and
+  demo media once recorded.
 
 ## Show HN draft
 
 Title:
-```
-Show HN: Plutus – self-hosted billing and prepaid credit for AI agents
+```text
+Show HN: Perseus Ledger – self-hosted, verifiable event provenance for autonomous systems
 ```
 
 Body:
-```
-I run agents across several LLM providers and could never answer three things in
-one place: what each call cost, how much credit was left, and which provider
-would run dry first. Observability tools watch spend, gateways route calls, and
-Stripe charges customers, but nothing self-hosted tied metering, prepaid credit,
-and runway-aware routing together.
+```text
+Autonomous systems need more than a dashboard aggregate. They need a defensible
+answer to what happened, under what authority and evidence, and whether the
+history can be verified later.
 
-Plutus is my attempt. It is a Python package (pip install plutus-agent) plus an
-optional HTTP API and dashboard. One import meters usage per provider, model,
-task, and workspace, writes an append-only credit ledger in integer
-micro-dollars, and depletes prepaid credit as calls land. A runway router ranks
-providers by projected days-left and shifts your flagship model to whichever
-provider you can most afford to keep using. Everything except Stripe runs offline,
-state is a single SQLite file, and it is MIT licensed.
+Perseus Ledger is a self-hosted, MIT-licensed event and provenance layer. It
+records append-only, hash-chained activity with optional actor, workspace,
+configuration, external evidence, authority-reference, and resource-allocation
+metadata. It works offline with SQLite and integrates through HTTP or Python,
+without requiring a particular agent framework.
 
-One thing I want to be honest about, because it is the reason I trust it with
-money: Plutus reads Hermes Agent's state.db for spend, and I found that a
-mid-session model switch attributed the whole session's cost to the wrong
-provider. I fixed that upstream in Hermes itself (a per-model usage table), then
-taught Plutus to consume it, allocating each session's real cost across the
-providers that actually served it. Before the fix, a provider quietly draining
-showed zero spend and the router sent it more traffic. After, spend lands where it
-belongs.
+The stable package and CLI remain `plutus-agent` and `plutus` during the
+migration. Metering, reconciliation, prepaid credit, and Stripe are supported
+optional adapters, not the product boundary.
 
-Repo, docs, and a 60-second demo in the README. Happy to answer anything about the
-ledger design, the Stripe reversal handling (refunds/disputes/failed payments
-reverse idempotently), or the router.
+Repo: https://github.com/Perseus-Computing-LLC/Ledger
+Product site: https://perseus.observer/ledger/
 ```
 
----
+## X thread draft
 
-## X / thread draft
+```text
+1/ Introducing Perseus Ledger: self-hosted, verifiable event provenance for
+autonomous systems. MIT licensed and runtime-neutral.
 
-```
-1/ Plutus: the self-hosted billing layer for AI agents.
+2/ The question is not only “what did the system cost?” It is: what happened,
+under what authority and evidence, and can the history be verified later?
 
-Meter every call, bill against prepaid credit, and route to the provider you can
-most afford to keep using. pip install plutus-agent. MIT.
+3/ Ledger records append-only, hash-chained events with optional actor,
+workspace, configuration, evidence, authority, and allocation metadata.
 
-2/ Four things in one, which no OSS tool does together:
-- live per-provider balance
-- append-only credit ledger (integer micro-dollars)
-- self-calibrating budgets
-- runway routing (shift your flagship to the provider with the most days left)
+4/ It works offline with SQLite, HTTP, and Python. It does not require a
+particular agent framework or hosted service.
 
-3/ The part I care about most: it is correct about money.
+5/ Metering, reconciliation, prepaid credit, and Stripe are optional adapters.
 
-Plutus reads Hermes Agent for spend. A mid-session model switch was attributing a
-whole session's cost to the wrong provider.
+6/ Existing users retain the stable compatibility package and CLI:
+`pip install plutus-agent`; `plutus` remains supported during transition.
 
-4/ So we fixed it at the source, in Hermes itself, and then consumed the fix in
-Plutus.
-
-Before: a draining provider showed $0 and the router sent it MORE traffic.
-After: cost lands on the provider that actually served each call.
-
-5/ Everything except Stripe runs offline. Single SQLite file. One import in your
-agent hot path.
-
-Repo + 60s demo: <link>
+7/ https://github.com/Perseus-Computing-LLC/Ledger
+   https://perseus.observer/ledger/
 ```
 
----
+## Blog outline
 
-## dev.to / blog draft (outline + intro)
+Working title: **“An audit trail is a product boundary: building a verifiable
+record for autonomous systems”**
 
-Working title: **"A billing bug is a trust bug: how we fixed our spend numbers in
-someone else's codebase"**
+1. The operational question: reconstruct what happened, not merely an aggregate.
+2. Chain integrity, external checkpoints, and the limits of self-attestation.
+3. Evidence and authority references without retaining raw prompts or secrets.
+4. Runtime-neutral ingestion and local-first operation.
+5. Allocation, metering, and settlement as optional adapters.
+6. Compatibility transition from the `plutus*` install surface to Perseus Ledger.
 
-Intro:
-```
-A billing tool has one job: be right about money. So when our numbers looked
-slightly off, we did not paper over it in our own code. We followed it upstream,
-found the root cause in the tool we read spend from, fixed it there in the open,
-and then consumed the fix. Here is the whole trail, because the trail is the
-point.
-```
+## Submission-ready blurb
 
-Sections:
-1. What Plutus is and why per-provider accuracy drives real decisions (the runway
-   router).
-2. The symptom: a provider draining but showing zero spend.
-3. The root cause in Hermes: session cost attributed to the initial model, not the
-   model live at each call.
-4. The upstream fix (session_model_usage, issue #51607) and why we sent it there
-   instead of patching around it.
-5. Consuming it in Plutus: allocate the authoritative session cost across
-   providers so totals never regress. Show the before/after table.
-6. The takeaway: trust a billing layer that chases wrong numbers to their source.
-
----
-
-## Submission-ready blurb (directories, newsletters, one-liners)
-
-```
-Plutus is the self-hosted billing layer for AI agents: usage metering, an
-append-only prepaid-credit ledger, Stripe billing, and a runway-based model
-router, all behind your own firewall. Drop the one-import Python SDK into your
-agent to see every call's cost live and bill against prepaid credit, or run the
-HTTP API and dashboard for a full multi-tenant setup. Everything except Stripe
-runs offline. MIT licensed. pip install plutus-agent.
+```text
+Perseus Ledger is a self-hosted, runtime-neutral event and provenance layer for
+autonomous systems. It records hash-chained activity, evidence links, authority
+references, and optional resource allocation so teams can reconstruct what
+happened and independently verify the resulting history. SQLite local-first,
+HTTP and Python interfaces, MIT licensed. Existing installs use the compatible
+`plutus-agent` package and `plutus` CLI during transition.
 ```
 
----
+## Release and public-launch gates
 
-## Release checklist (v1.0.x)
+- [ ] Canonical product site and legacy compatibility route both verified live.
+- [ ] Repository, README, package metadata, images, and registry listings agree.
+- [ ] Canonical Ledger aliases/migration guide ship before any compatibility
+      deprecation announcement.
+- [ ] External security review and outstanding security scope are resolved or
+      accurately disclosed.
+- [ ] Demo records only fields Ledger actually persists and verifies.
+- [ ] Human approves and performs outward posts, marketplace listings, and any
+      Stripe-account action.
 
-Status verified 2026-07-11. Most is already done; the outward gates remain.
+## Explicit human/outward gates
 
-- [x] Package version single-sourced (`plutus_agent.__version__` = 1.0.1) into
-      wheel metadata.
-- [x] Tag pushed (`v1.0.0`, `v1.0.1`) and GitHub Releases published.
-- [x] PyPI: `plutus-agent` 1.0.1 live.
-- [x] GHCR image published.
-- [ ] **External security review** (the standing pre-public-launch gate; scope
-      includes the hand-rolled OIDC RS256 verifier — see `docs/REVIEW-2026-07.md`
-      P5). **Human/outward gate.**
-- [ ] Close review punch-list P1-P7 (`docs/REVIEW-2026-07.md`) before the
-      Perseus / Perseus-Vault convergence.
-- [ ] Record demo media and wire into the README (see plan above).
-- [ ] **Outward posts** (Show HN, X, dev.to, directory submissions) — drafts
-      above; **human posts.**
+- Posting to Show HN, X, LinkedIn, dev.to, directories, or marketplaces.
+- Commissioning or accepting an external security review.
+- Creating or altering Stripe products, prices, or marketplace submissions.
 
-### Left explicitly to the human (outward-facing)
-
-- Posting anything public (Show HN, X, dev.to, marketplace/directory listings).
-- Commissioning/accepting the external security review.
-- Any Stripe App Marketplace submission that requires the Perseus Stripe account.
-
----
-
-## Recurring cadence (propose as a Hermes cron, not host cron)
-
-Two things want a heartbeat once the push starts. Per house policy these should
-be **Hermes Agent cron jobs**, alongside the existing Plutus credit-refresh /
-balance check-in jobs, not host crontab entries:
-
-1. **Partner-pipeline monitor** (weekly) — re-check the top listing surfaces in
-   `partner-targets-2026-07.csv` for status changes (new submission forms, dead
-   links, review outcomes) and open a short digest.
-2. **Awareness cadence** (weekly during launch) — remind to advance one drafted
-   asset (Show HN / X / dev.to / one directory) so the push doesn't stall on a
-   single big post.
-
-Proposed, not created — wiring a cron is a Hermes-side change and an outward
-commitment for the human to approve.
+These are drafts only; they create no external commitment.
