@@ -6,6 +6,7 @@ the Perseus counterfactual baseline.
 """
 
 import json
+import time
 
 from plutus_agent import db, metering, savings
 
@@ -57,7 +58,8 @@ def test_provider_usage_baseline_idempotency_and_report(tmp_path):
     ).fetchone()["n"]
     assert count == 1
 
-    report = savings.savings_share_report(conn, org_id, "2026-07", rate_bps=1000)
+    period = time.strftime("%Y-%m", time.gmtime())
+    report = savings.savings_share_report(conn, org_id, period, rate_bps=1000)
     assert report.total_events == 1
     assert report.covered_events == 1
     assert report.coverage_pct == 100.0
