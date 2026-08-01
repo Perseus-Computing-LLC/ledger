@@ -54,6 +54,18 @@ plutus demo
 # → opens the local Ledger console on http://localhost:8420
 ```
 
+### Container image
+
+The canonical GHCR image is `ghcr.io/perseus-computing-llc/ledger`:
+
+```bash
+docker pull ghcr.io/perseus-computing-llc/ledger:latest
+docker run --rm -p 8420:8420 ghcr.io/perseus-computing-llc/ledger:latest
+```
+
+The `plutus-agent` package, `plutus` CLI, and `PLUTUS_*` environment variables
+remain compatibility interfaces for existing integrations.
+
 ```python
 from plutus_agent import Meter
 

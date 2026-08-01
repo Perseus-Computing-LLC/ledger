@@ -52,9 +52,9 @@ all = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "invarium>=0.3; py
 dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "pytest>=7.0,<10", "invarium>=0.3"]
 
 [project.urls]
-Homepage = "https://perseus.observer/plutus/"
-Repository = "https://github.com/Perseus-Computing-LLC/plutus"
-Issues = "https://github.com/Perseus-Computing-LLC/plutus/issues"
+Homepage = "https://perseus.observer/ledger/"
+Repository = "https://github.com/Perseus-Computing-LLC/ledger"
+Issues = "https://github.com/Perseus-Computing-LLC/ledger/issues"
 
 [project.scripts]
 plutus = "plutus_agent.cli:main"
