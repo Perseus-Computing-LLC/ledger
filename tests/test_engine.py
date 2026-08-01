@@ -637,7 +637,9 @@ class TestThreeTierModel(unittest.TestCase):
         from plutus_agent.server import views
         s = metering.org_summary(conn, org)
         s["efficiency"] = effm.org_efficiency(conn, org, period_label=None).as_dict()
-        s["savings_share"] = savm.savings_share_report(conn, org, "2026-07").as_dict()
+        s["savings_share"] = savm.savings_share_report(
+            conn, org, time.strftime("%Y-%m", time.gmtime())
+        ).as_dict()
         return views.render_dashboard(
             s, orgs=[dict(db.get_org(conn, org))], cfg={},
             stripe_status={"available": True, "has_pro_price": True,
