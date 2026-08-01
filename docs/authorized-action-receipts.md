@@ -2,7 +2,7 @@
 
 Status: implementation slice
 Date: 2026-07-25
-Tracks: [perseus-vault#768](https://github.com/Perseus-Computing-LLC/perseus-vault/issues/768) · [plutus#183](https://github.com/Perseus-Computing-LLC/plutus/issues/183) · [hermes-plugin-perseus-vault#4](https://github.com/Perseus-Computing-LLC/hermes-plugin-perseus-vault/issues/4)
+Tracks: [perseus-vault#768](https://github.com/Perseus-Computing-LLC/perseus-vault/issues/768) · [ledger#183](https://github.com/Perseus-Computing-LLC/ledger/issues/183) · [hermes-plugin-perseus-vault#4](https://github.com/Perseus-Computing-LLC/hermes-plugin-perseus-vault/issues/4)
 
 ## Overview
 
@@ -34,7 +34,7 @@ projection:
 {
   "agent_id": "hermes-prod",
   "authority_manifest_ref": "auth-42@3",
-  "scope_anchor": "github:Perseus-Computing-LLC/plutus",
+  "scope_anchor": "github:Perseus-Computing-LLC/ledger",
   "action_intent_hash": "sha256 hex digest",
   "status": "executed",
   "approval_ref": null
