@@ -157,6 +157,8 @@ def record_usage(conn, org_id: str, provider: str,
                  context_render_hash: Optional[str] = None,
                  served_memory_provenance_hash: Optional[str] = None,
                  action_receipt_hash: Optional[str] = None,
+                 resource_constraints_version: Optional[str] = None,
+                 resource_constraints_hash: Optional[str] = None,
                  user_id: Optional[str] = None, source: str = "api",
                  pricing_overrides: Optional[dict] = None,
                  ts: Optional[float] = None,
@@ -255,6 +257,11 @@ def record_usage(conn, org_id: str, provider: str,
     served_memory_provenance_hash = (served_memory_provenance_hash.lower()
                                      if served_memory_provenance_hash else None)
     action_receipt_hash = action_receipt_hash.lower() if action_receipt_hash else None
+    if resource_constraints_version is not None and not isinstance(resource_constraints_version, str):
+        raise ValueError("resource_constraints_version must be a string")
+    if resource_constraints_hash is not None and not _SHA256_HEX.fullmatch(resource_constraints_hash):
+        raise ValueError("resource_constraints_hash must be a 64-character SHA-256 hex digest")
+    resource_constraints_hash = resource_constraints_hash.lower() if resource_constraints_hash else None
 
     # Fix #80: never let a negative token count through — it would rewind the
     # month-to-date tracked total (bypassing the free-tier quota) and corrupt
@@ -466,6 +473,8 @@ def record_usage(conn, org_id: str, provider: str,
         "context_render_hash": context_render_hash,
         "served_memory_provenance_hash": served_memory_provenance_hash,
         "action_receipt_hash": action_receipt_hash,
+        "resource_constraints_version": resource_constraints_version,
+        "resource_constraints_hash": resource_constraints_hash,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
@@ -474,8 +483,8 @@ def record_usage(conn, org_id: str, provider: str,
         "baseline_micros,optimal_micros,external_ref,user_id,evidence_hashes,policy_version,"
         "result_hash,human_review,correction_ref,agent_id,authority_manifest_ref,scope_anchor,"
         "action_intent_hash,action_status,approval_ref,context_render_schema,context_render_hash,"
-        "served_memory_provenance_hash,action_receipt_hash,estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "served_memory_provenance_hash,action_receipt_hash,resource_constraints_version,resource_constraints_hash,estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
@@ -484,6 +493,7 @@ def record_usage(conn, org_id: str, provider: str,
          human_review, correction_ref, agent_id, authority_manifest_ref, scope_anchor,
          action_intent_hash, action_status, approval_ref, context_render_schema,
          context_render_hash, served_memory_provenance_hash, action_receipt_hash,
+         resource_constraints_version, resource_constraints_hash,
          int(estimated), source, ts, prev_hash, row_hash),
     )
 
