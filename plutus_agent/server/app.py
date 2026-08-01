@@ -826,7 +826,8 @@ class Handler(BaseHTTPRequestHandler):
                           "agent_id", "authority_manifest_ref", "scope_anchor",
                           "action_intent_hash", "action_status", "approval_ref",
                           "context_render_schema", "context_render_hash",
-                          "served_memory_provenance_hash", "action_receipt_hash"):
+                          "served_memory_provenance_hash", "action_receipt_hash",
+                          "resource_constraints_version", "resource_constraints_hash"):
                 if ev.get(field) is not None and not isinstance(ev[field], str):
                     return self._json(400, {"error": f"{field} must be a string"})
 
@@ -890,6 +891,8 @@ class Handler(BaseHTTPRequestHandler):
                             context_render_hash=ev.get("context_render_hash"),
                             served_memory_provenance_hash=ev.get("served_memory_provenance_hash"),
                             action_receipt_hash=ev.get("action_receipt_hash"),
+                            resource_constraints_version=ev.get("resource_constraints_version"),
+                            resource_constraints_hash=ev.get("resource_constraints_hash"),
                             user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),

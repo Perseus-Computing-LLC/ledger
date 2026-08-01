@@ -149,6 +149,8 @@ _CHAIN_FIELDS_OPTIONAL = (
     "context_render_hash",
     "served_memory_provenance_hash",
     "action_receipt_hash",
+    "resource_constraints_version",
+    "resource_constraints_hash",
 )
 
 
@@ -568,6 +570,8 @@ CREATE TABLE IF NOT EXISTS usage_events (
     context_render_hash TEXT,
     served_memory_provenance_hash TEXT,
     action_receipt_hash TEXT,
+    resource_constraints_version TEXT,
+    resource_constraints_hash TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -880,6 +884,8 @@ def _migrate_add_columns(conn) -> None:
         ("usage_events", "context_render_hash", "TEXT"),
         ("usage_events", "served_memory_provenance_hash", "TEXT"),
         ("usage_events", "action_receipt_hash", "TEXT"),
+        ("usage_events", "resource_constraints_version", "TEXT"),
+        ("usage_events", "resource_constraints_hash", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
