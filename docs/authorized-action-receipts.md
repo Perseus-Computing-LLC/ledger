@@ -16,6 +16,11 @@ references and hashes and commits them to the organization event chain. This
 keeps raw prompts, secrets, tool output, and policy bodies outside the Ledger
 while preserving an independently verifiable evidence trail.
 
+For the related memory retention, admission, deletion, curation, and recall
+posture mapping, see [Memory governance and Ledger provenance](memory-governance-provenance.md).
+The [local Perseus + Vault + Ledger integration guide](local-perseus-vault-ledger.md)
+shows the same boundary in a scratch deployment.
+
 ## Roles
 
 | System | Responsibility |

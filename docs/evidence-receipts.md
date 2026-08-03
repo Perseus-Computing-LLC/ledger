@@ -1,5 +1,10 @@
 # Perseus Evidence Receipts
 
+For the cross-product mapping from memory lifecycle and recall posture to these
+hash-only fields, see [Memory governance and Ledger provenance](memory-governance-provenance.md).
+For a local Perseus + Vault + Ledger walkthrough, see
+[the local integration guide](local-perseus-vault-ledger.md).
+
 An evidence receipt is a task-scoped, machine-readable view of hash-chained Ledger events. It answers a bounded question:
 
 > For this externally identified task or artifact, which recorded autonomous-system actions exist, what resource allocation accompanied them, and does their containing organization ledger verify?
