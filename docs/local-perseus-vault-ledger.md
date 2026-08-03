@@ -116,9 +116,9 @@ under compatibility paths; this guide deliberately bypasses that discovery.
 
 ## 3. Initialize and check encrypted Vault
 
-`keygen` writes a raw 32-byte AES-256-GCM key file. `init` creates the database,
-enables encryption, and writes the encryption canary. The key is never put in
-SQLite or in this document.
+`keygen` writes a base64-encoded 32-byte AES-256-GCM key file. `init` creates the
+database, enables encryption, and writes the encryption canary. The key is never
+put in SQLite or in this document.
 
 ```bash
 # Never generate a replacement key for an existing database.
@@ -249,24 +249,30 @@ Then exercise the Vault binary directly over MCP stdio. This sends only
 protocol metadata and a health request; it does not write a memory entity.
 
 ```bash
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"local-ledger-check","version":"1"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"perseus_vault_health","arguments":{}}}' \
-| "$VAULT_BIN" serve --db "$VAULT_DB" --encryption-key "$VAULT_KEY" \
-| "$ROOT/.venv/bin/python" -c '
+set -euo pipefail
+cat >"$ROOT/vault-mcp-request.jsonl" <<'JSONL'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"local-ledger-check","version":"1"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"perseus_vault_health","arguments":{}}}
+JSONL
+
+"$VAULT_BIN" serve --db "$VAULT_DB" --encryption-key "$VAULT_KEY" \
+  <"$ROOT/vault-mcp-request.jsonl" >"$ROOT/vault-mcp-response.jsonl"
+
+"$ROOT/.venv/bin/python" - "$ROOT/vault-mcp-response.jsonl" <<'PY'
 import json
 import sys
 
 responses = {}
-for line in sys.stdin:
-    try:
-        item = json.loads(line)
-    except json.JSONDecodeError:
-        continue
-    if "id" in item:
-        responses[item["id"]] = item
+with open(sys.argv[1], encoding="utf-8") as stream:
+    for line in stream:
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if "id" in item:
+            responses[item["id"]] = item
 
 if "error" in responses.get(1, {}):
     raise SystemExit("Vault initialize failed")
@@ -278,7 +284,7 @@ health = responses.get(3, {}).get("result")
 if not isinstance(health, dict) or health.get("isError"):
     raise SystemExit("Vault health call failed")
 print(f"Vault MCP: {len(names)} tools advertised; health call returned")
-'
+PY
 ```
 
 Finally render the context from the workspace. An empty result from a healthy
@@ -321,6 +327,7 @@ operator enables auth, use the normal org-scoped API key out of band rather than
 putting it in a workspace file.
 
 ```bash
+set -euo pipefail
 LEDGER_PORT="${LEDGER_PORT:-18420}"
 plutus serve --host 127.0.0.1 --port "$LEDGER_PORT" \
   >"$LEDGER_ROOT/server.log" 2>&1 &
@@ -343,13 +350,16 @@ while [ "$i" -lt 50 ]; do
 done
 test "$ready" -eq 1
 
+RECEIPT_PATH="$ROOT/ledger-receipt.json"
 curl -fsS "http://127.0.0.1:${LEDGER_PORT}/api/audit?external_ref=${RECEIPT_REF}" \
-| RECEIPT_REF="$RECEIPT_REF" "$ROOT/.venv/bin/python" -c '
+  >"$RECEIPT_PATH"
+RECEIPT_REF="$RECEIPT_REF" "$ROOT/.venv/bin/python" - "$RECEIPT_PATH" <<'PY'
 import json
 import os
 import sys
 
-receipt = json.load(sys.stdin)
+with open(sys.argv[1], encoding="utf-8") as stream:
+    receipt = json.load(stream)
 if receipt.get("receipt_version") != "perseus-evidence-receipt/v1":
     raise SystemExit("unexpected receipt version")
 if receipt.get("external_ref") != os.environ["RECEIPT_REF"]:
@@ -361,7 +371,7 @@ for event in receipt.get("events", []):
     if any(forbidden in encoded for forbidden in ("prompt", "body", "credentials", "tool_arguments")):
         raise SystemExit("receipt contains a forbidden raw-material field")
 print(f"Ledger receipt: {len(receipt.get('events', []))} event(s), chain verified, raw-material check passed")
-'
+PY
 ```
 
 For a production or consequential action, the usage event can add the
