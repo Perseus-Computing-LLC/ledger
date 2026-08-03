@@ -22,6 +22,7 @@ from urllib.parse import urlparse, parse_qs
 from .. import __version__, bridge, config as cfgmod, db, pricing
 from ..billing import StripeClient, BillingError, handle_webhook_event
 from ..utils import strict_int
+from ..prebind import validate_prebind
 from . import api, views, auth as authmod
 
 # Paths reachable without a session when auth is enabled.
@@ -830,6 +831,12 @@ class Handler(BaseHTTPRequestHandler):
                           "resource_constraints_version", "resource_constraints_hash"):
                 if ev.get(field) is not None and not isinstance(ev[field], str):
                     return self._json(400, {"error": f"{field} must be a string"})
+            if ev.get("prebind") is not None:
+                if not isinstance(ev["prebind"], dict):
+                    return self._json(400, {"error": "prebind must be an object"})
+                valid, errors = validate_prebind(ev["prebind"])
+                if not valid:
+                    return self._json(400, {"error": "invalid prebind", "fields": errors})
 
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
@@ -893,6 +900,7 @@ class Handler(BaseHTTPRequestHandler):
                             action_receipt_hash=ev.get("action_receipt_hash"),
                             resource_constraints_version=ev.get("resource_constraints_version"),
                             resource_constraints_hash=ev.get("resource_constraints_hash"),
+                            prebind=ev.get("prebind"),
                             user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
