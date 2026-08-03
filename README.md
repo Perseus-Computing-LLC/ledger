@@ -91,6 +91,8 @@ This writes an immutable event into the local SQLite-backed hash chain. Existing
 Ledger integrity is not a marketing assertion. It is checked from the recorded chain and can be exposed through the existing admin verification endpoint in a controlled deployment.
 
 - [Ledger integrity](docs/ledger-integrity.md)
+- [Continuous attestation](docs/continuous-attestation.md) — admission vs. runtime evidence; attestation blocks; mechanical vs. reasoning provenance
+- [Evidence receipts](docs/evidence-receipts.md) — task-scoped, machine-readable views of hash-chained events
 - [API reference](docs/api.md)
 - [Schema](docs/schema.md)
 - [Reconciliation](docs/reconciliation.md) — optional provider-cost and Stripe settlement reconciliation
