@@ -25,6 +25,7 @@ from dataclasses import dataclass, asdict
 from typing import Optional
 
 from . import db, pricing
+from .prebind import validate_prebind
 
 DAY = 86400
 _SHA256_HEX = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -166,6 +167,7 @@ def record_usage(conn, org_id: str, provider: str,
                  block_over_limit: bool = False,
                  block_over_balance: bool = False,
                  chain_hmac_key: Optional[bytes] = None,
+                 prebind: Optional[dict] = None,
                  commit: bool = True) -> MeterResult:
     """Meter one LLM/agent call. Returns a :class:`MeterResult`.
 
@@ -206,6 +208,10 @@ def record_usage(conn, org_id: str, provider: str,
     follows the actual ``cost_usd``.
     """
     ts = ts if ts is not None else time.time()
+    if prebind is not None:
+        valid, errors = validate_prebind(prebind)
+        if not valid:
+            raise ValueError("invalid prebind: " + ", ".join(errors))
     evidence_hashes_json = _canonical_evidence_hashes(evidence_hashes)
     policy_version = _optional_text(policy_version, "policy_version")
     correction_ref = _optional_text(correction_ref, "correction_ref")
@@ -475,6 +481,8 @@ def record_usage(conn, org_id: str, provider: str,
         "action_receipt_hash": action_receipt_hash,
         "resource_constraints_version": resource_constraints_version,
         "resource_constraints_hash": resource_constraints_hash,
+        "prebind_json": json.dumps(prebind, sort_keys=True, separators=(",", ":")) if prebind else None,
+        "prebind_hash": prebind.get("prebind_hash") if prebind else None,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
@@ -483,8 +491,8 @@ def record_usage(conn, org_id: str, provider: str,
         "baseline_micros,optimal_micros,external_ref,user_id,evidence_hashes,policy_version,"
         "result_hash,human_review,correction_ref,agent_id,authority_manifest_ref,scope_anchor,"
         "action_intent_hash,action_status,approval_ref,context_render_schema,context_render_hash,"
-        "served_memory_provenance_hash,action_receipt_hash,resource_constraints_version,resource_constraints_hash,estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "served_memory_provenance_hash,action_receipt_hash,resource_constraints_version,resource_constraints_hash,prebind_json,prebind_hash,estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
@@ -494,6 +502,8 @@ def record_usage(conn, org_id: str, provider: str,
          action_intent_hash, action_status, approval_ref, context_render_schema,
          context_render_hash, served_memory_provenance_hash, action_receipt_hash,
          resource_constraints_version, resource_constraints_hash,
+         (json.dumps(prebind, sort_keys=True, separators=(",", ":")) if prebind else None),
+         (prebind.get("prebind_hash") if prebind else None),
          int(estimated), source, ts, prev_hash, row_hash),
     )
 

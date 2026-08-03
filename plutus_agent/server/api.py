@@ -6,6 +6,7 @@ import io
 import json
 
 from .. import db, metering, pricing, savings
+from ..prebind import validate_prebind
 
 
 def default_org_id(conn) -> str | None:
@@ -64,6 +65,23 @@ def events_json(conn, org_id: str, limit: int = 50, before=None) -> dict:
     return _page(metering.recent_events(conn, org_id, limit=limit, before=before), limit)
 
 
+def replay_receipt_prebind(conn, org_id: str, external_ref: str, **kwargs) -> dict:
+    """Re-evaluate a stored prebind without mutating the usage history."""
+    from ..prebind import replay_prebind
+
+    rows = db.events_by_ref(conn, org_id, external_ref)
+    if not rows:
+        raise ValueError("receipt not found")
+    payload = rows[0]["prebind_json"]
+    if payload is None:
+        raise ValueError("receipt has no prebind block")
+    prior = json.loads(payload)
+    valid, errors = validate_prebind(prior)
+    if not valid:
+        raise ValueError("stored prebind is invalid: " + ", ".join(errors))
+    return replay_prebind(prior, **kwargs)
+
+
 _EXPORT_COLUMNS = ["id", "ts", "provider", "model", "task_type", "workspace",
                    "input_tokens", "output_tokens", "cache_read_tokens",
                    "cache_write_tokens", "reasoning_tokens", "user_id",
@@ -119,6 +137,8 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                     "served_memory_provenance_hash": row["served_memory_provenance_hash"],
                     "action_receipt_hash": row["action_receipt_hash"],
                 },
+                "prebind": json.loads(row["prebind_json"])
+                if row["prebind_json"] is not None else None,
                 "action_authorization": {
                     "agent_id": row["agent_id"],
                     "authority_manifest_ref": row["authority_manifest_ref"],
