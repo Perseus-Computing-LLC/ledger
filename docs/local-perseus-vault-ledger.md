@@ -12,10 +12,13 @@ throwaway paths:
   lifecycle.
 
 The walkthrough uses no provider credentials, prompts, memory bodies, or
-network transport. It creates one encrypted Vault database and one local
-Ledger database under `$HOME/.perseus-ledger-local` by default. The smoke event
-uses zero tokens and zero cost and exists only to verify the receipt and
-integrity paths.
+external provider/runtime transport. Installation may use the network to clone
+the Ledger source, install packages, and fetch the Vault installer. The smoke
+checks use Vault MCP stdio plus loopback-only HTTP for the local Ledger service;
+they do not contact a remote provider. The walkthrough creates one encrypted
+Vault database and one local Ledger database under
+`$HOME/.perseus-ledger-local` by default. The smoke event uses zero tokens and
+zero cost and exists only to verify the receipt and integrity paths.
 
 For the governance mapping behind the hash-only fields, see
 [Memory governance and Ledger provenance](memory-governance-provenance.md).
