@@ -46,6 +46,10 @@ This is a product and architecture position, not a claim of handling CUI or sati
 
 Each product is useful on its own and integrates through documented, runtime-neutral contracts. Ledger does not require Perseus, Vault, or any specific agent runtime.
 
+For the governance bridge between durable memory decisions, recall posture, and
+hash-only Ledger evidence, see [Memory governance and Ledger provenance](docs/memory-governance-provenance.md).
+For a copy-pasteable local setup, see [Local Perseus + Vault + Ledger integration](docs/local-perseus-vault-ledger.md).
+
 ## Quick start: record a verifiable event
 
 ```bash
