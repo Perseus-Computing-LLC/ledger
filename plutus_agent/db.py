@@ -59,7 +59,7 @@ from typing import Optional
 #     authority-manifest reference, trusted scope anchor, action intent hash,
 #     lifecycle status, and approval references. Vault remains the enforcement
 #     authority; Ledger records only supplied, hash-covered evidence.
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -729,6 +729,22 @@ CREATE TABLE IF NOT EXISTS chain_checkpoints (
     UNIQUE(org_id, through_rowid)
 );
 CREATE INDEX IF NOT EXISTS ix_ckpt_org ON chain_checkpoints(org_id, through_rowid);
+
+-- Union reconciliation journal (ledger#207). Every divergence between the
+-- tracked ledger and the store records its resolution reason here — recovery
+-- of a published-but-store-lost record, preservation of a store-only record,
+-- a both-sides conflict resolved by fresh store state, or an operator-flagged
+-- deletion. Never a silent status rewrite: the journal row is written in the
+-- same transaction as the mutation it describes.
+CREATE TABLE IF NOT EXISTS reconciliation_events (
+    id        TEXT PRIMARY KEY,
+    event_id  TEXT NOT NULL,
+    side      TEXT NOT NULL,     -- tracked | store | both
+    action    TEXT NOT NULL,     -- recovered | kept | conflict | deleted | match
+    reason    TEXT NOT NULL,
+    ts        REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_recon_event ON reconciliation_events(event_id);
 """
 
 # Public prefix for ingest API keys. The secret is `plutus_sk_<random>`; only its
@@ -892,6 +908,11 @@ def _migrate_add_columns(conn) -> None:
         ("usage_events", "resource_constraints_hash", "TEXT"),
         ("usage_events", "prebind_json", "TEXT"),
         ("usage_events", "prebind_hash", "TEXT"),
+        # v17 union reconciliation (ledger#207): reason recorded on the record
+        # when a published-but-store-lost event is recovered. Excluded from the
+        # hash-chain canonical form (not in _CHAIN_FIELDS*), so existing rows
+        # and chains are byte-identical after the migration.
+        ("usage_events", "reconciliation_note", "TEXT NOT NULL DEFAULT ''"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
