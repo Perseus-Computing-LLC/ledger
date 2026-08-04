@@ -1,5 +1,13 @@
 # Ledger integrity — usage-event tamper-evidence (#108)
 
+> **Layer boundary:** this document covers the **dataplane** layer — storage
+> integrity over the append-only event store. Authority-layer attestation
+> (signed receipts binding actor, boundary, evidence, action, result) is a
+> separate, independently verifiable claim; see
+> [Two-layer integrity: dataplane storage root and authority-layer receipts](spec-two-layer-integrity.md)
+> for the split, and [Authorized Action Receipts](authorized-action-receipts.md)
+> for the authority-layer mechanism.
+
 Plutus stores usage in an integer-exact, independently re-queryable ledger
 (`SUM(usage_events.cost_micros)`). That makes the dollars *reproducible* — but,
 on its own, the table was append-only **by convention** only. Nothing stopped an
@@ -176,7 +184,7 @@ corruption and casual tampering, not a motivated operator with DB access.
 
 ## Guardrail
 
-**No public document may claim Plutus is "tamper-evident" until this ships _and_
+**No public document may claim Plutus is "tamper-evident" until this ships *and*
 an external cryptographic review covers it** (the SOW drafted for the Perseus
 Vault audit-chain review). Until then, savings statements carry the caveat the
 harness/one-pager already print: the ledger is *re-queryable* and now
