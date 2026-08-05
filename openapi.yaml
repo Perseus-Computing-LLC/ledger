@@ -348,7 +348,47 @@ components:
         result_hash: { type: string, nullable: true, pattern: '^[0-9a-fA-F]{64}$', description: "SHA-256 hash of the resulting artifact or conclusion." }
         human_review: { type: string, nullable: true, enum: [approved, rejected, corrected], description: "Human disposition for the autonomous action." }
         correction_ref: { type: string, nullable: true, description: "Opaque identifier of the human correction; required for a corrected disposition." }
+        agent_id: { type: string, nullable: true, description: "AAR actor identity. Required with the other action-provenance fields when any AAR field is supplied." }
+        authority_manifest_ref: { type: string, nullable: true, description: "Opaque authority-manifest reference from the enforcement plane." }
+        scope_anchor: { type: string, nullable: true, description: "Opaque trusted scope anchor bound to the action." }
+        action_intent_hash: { type: string, nullable: true, pattern: '^[0-9a-fA-F]{64}$', description: "SHA-256 digest of the action intent." }
+        action_status: { type: string, nullable: true, enum: [intent, approval_requested, approved, denied, expired, executed, failed, cancelled], description: "AAR lifecycle status supplied by the enforcement plane." }
+        approval_ref: { type: string, nullable: true, description: "Opaque approval reference; required for approved, denied, or expired action statuses." }
+        context_render_schema: { type: string, nullable: true, description: "Versioned schema identifier for the hash-only context-render binding." }
+        context_render_hash: { type: string, nullable: true, pattern: '^[0-9a-fA-F]{64}$', description: "SHA-256 digest of the rendered context; raw context is never stored." }
+        served_memory_provenance_hash: { type: string, nullable: true, pattern: '^[0-9a-fA-F]{64}$', description: "SHA-256 digest of the served-memory provenance projection." }
+        action_receipt_hash: { type: string, nullable: true, pattern: '^[0-9a-fA-F]{64}$', description: "SHA-256 digest binding an upstream action receipt." }
+        resource_constraints_version: { type: string, nullable: true, description: "Opaque version of the resource-constraints projection." }
+        resource_constraints_hash: { type: string, nullable: true, pattern: '^[0-9a-fA-F]{64}$', description: "SHA-256 digest of the resource-constraints projection; raw constraints are never stored." }
+        prebind:
+          $ref: '#/components/schemas/Prebind'
         source: { type: string, default: api }
+    Prebind:
+      type: object
+      additionalProperties: false
+      description: "Hash-bound, raw-payload-free pre-action assurance block."
+      required: [schema_version, attempted_action, actor_ref, authority_ref, trusted_scope, policy_version, evidence_hashes, selected_context_digest, resource_ref, boundary_outcome, non_effective_result, replay_id, stage_refs, prebind_hash]
+      properties:
+        schema_version: { type: string, const: perseus-ledger-prebind/v1 }
+        attempted_action: { type: string }
+        actor_ref: { type: string }
+        authority_ref: { type: string }
+        trusted_scope: { type: string }
+        policy_version: { type: string }
+        evidence_hashes:
+          type: array
+          minItems: 1
+          items: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        selected_context_digest: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        resource_ref: { type: string }
+        boundary_outcome: { type: string, enum: [allow, hold, deny, abstain, interrupt, recover] }
+        non_effective_result: { type: string, enum: [not_executed, held, denied, abstained, cancelled, failed] }
+        replay_id: { type: string }
+        approval_ref: { type: string, nullable: true }
+        stage_refs:
+          type: array
+          items: { type: string }
+        prebind_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
     EventResult:
       type: object
       properties:

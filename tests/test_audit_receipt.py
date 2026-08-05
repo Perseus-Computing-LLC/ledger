@@ -1,3 +1,5 @@
+import pytest
+
 from plutus_agent import db, metering
 from plutus_agent.server.api import audit_json
 import time
@@ -94,6 +96,18 @@ def test_action_provenance_requires_complete_authority_context(tmp_path):
     conn.close()
 
 
+def test_agent_only_action_provenance_is_rejected(tmp_path):
+    conn = db.connect(str(tmp_path / "agent-only-authority.db"))
+    db.init_schema(conn)
+    org_id = db.create_org(conn, "agent-only-authority", tier="free")["id"]
+    with pytest.raises(ValueError, match="required together"):
+        metering.record_usage(
+            conn, org_id, provider="openai", model="gpt-fixture",
+            cost_usd=0.1, agent_id="hermes-prod",
+        )
+    conn.close()
+
+
 def test_evidence_receipt_includes_hash_covered_decision_context(tmp_path):
     conn = db.connect(str(tmp_path / "decision-context.db"))
     db.init_schema(conn)
@@ -153,4 +167,57 @@ def test_context_render_binding_is_hash_covered_and_receipt_safe(tmp_path):
     assert "raw context" not in str(event)
     conn.execute("UPDATE usage_events SET context_render_hash='0' WHERE id=?", (event["event_id"],))
     assert db.verify_chain(conn, org_id)["ok"] is False
+    conn.close()
+
+
+def test_audit_exposes_partial_coverage_and_actual_hash_method(tmp_path):
+    conn = db.connect(str(tmp_path / "partial-audit.db"))
+    db.init_schema(conn)
+    org_id = db.create_org(conn, "partial-audit", tier="free")["id"]
+    metering.record_usage(
+        conn, org_id, provider="openai", model="gpt-fixture",
+        input_tokens=1, output_tokens=1, cost_usd=0.01,
+    )
+    legacy = conn.execute(
+        "SELECT id FROM usage_events WHERE org_id=? ORDER BY rowid LIMIT 1",
+        (org_id,),
+    ).fetchone()
+    conn.execute("UPDATE usage_events SET prev_hash=NULL, row_hash=NULL WHERE id=?",
+                 (legacy["id"],))
+    conn.commit()
+    metering.record_usage(
+        conn, org_id, provider="openai", model="gpt-fixture",
+        external_ref="partial-task", input_tokens=1, output_tokens=1,
+        cost_usd=0.01,
+    )
+
+    receipt = audit_json(conn, org_id, external_ref="partial-task")
+    verification = receipt["verification"]
+    assert verification["method"] == "sha256"
+    assert verification["hash_method"] == "sha256"
+    assert verification["pre_chain_events"] == 1
+    assert verification["unverifiable_events"] == 1
+    assert verification["coverage"]["status"] == "partial"
+
+    summary = audit_json(conn, org_id)
+    assert summary["verification"]["method"] == "sha256"
+    assert summary["verification"]["unverifiable_events"] == 1
+    conn.close()
+
+
+def test_audit_reports_hmac_sha256_method(tmp_path):
+    conn = db.connect(str(tmp_path / "hmac-audit.db"))
+    db.init_schema(conn)
+    org_id = db.create_org(conn, "hmac-audit", tier="free")["id"]
+    key = b"customer-held-secret"
+    metering.record_usage(
+        conn, org_id, provider="openai", model="gpt-fixture",
+        external_ref="hmac-task", input_tokens=1, output_tokens=1,
+        cost_usd=0.01, chain_hmac_key=key,
+    )
+
+    receipt = audit_json(conn, org_id, hmac_key=key, external_ref="hmac-task")
+    assert receipt["verification"]["method"] == "hmac-sha256"
+    assert receipt["verification"]["hash_method"] == "hmac-sha256"
+    assert audit_json(conn, org_id, hmac_key=key)["verification"]["method"] == "hmac-sha256"
     conn.close()

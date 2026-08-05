@@ -8,17 +8,27 @@ schema — the database half of the frozen contract whose API half is
 ## Schema version
 
 `plutus_agent.db.SCHEMA_VERSION` is an integer bumped on every schema change and
-stamped into the `meta` table key `schema_version` on `init_schema()`. **1.0
-ships at schema_version 5.** Read the stored value with `db.get_schema_version(conn)`.
+stamped into the `meta` table key `schema_version` on `init_schema()`. The
+runtime currently declares **`SCHEMA_VERSION=17`**. Read the stored value with
+`db.get_schema_version(conn)`; a fresh database is stamped with the runtime
+value after all additive migrations have run.
 
 | Version | Change |
 |---|---|
-| 4 | Money stored as integer micro-dollars (`*_micros`); the `allow_negative_balance` org column. |
+| 4 | Converts money to integer micro-dollars: `cost_micros`, `delta_micros`, `balance_after_micros`, and `monthly_budget_micros`; also adds `allow_negative_balance`. |
 | 5 | Adds the `ingest_idempotency` table (per-org `Idempotency-Key` store, #65). |
-| 6 | Adds `usage_events.prev_hash`/`row_hash` — the per-org tamper-evidence hash chain (#108). Nullable; rows written before the upgrade stay `NULL` ("pre-chain", unverifiable). See docs/ledger-integrity.md. |
-| 7 | Adds `usage_events.baseline_micros` (savings-share counterfactual) and the `savings_invoices` table (per-org/period savings-share billing, #7). Nullable; folded into the hash chain when present. |
-| 8 | Adds `usage_events.optimal_micros` — the efficiency-leakage counterfactual (cheapest policy-passing option; actual above it = missed savings / off-policy, #8). Nullable; hash-chained when present. |
-| 9 | Adds the `chain_checkpoints` table — externally-retained tamper-evidence checkpoints that make the hash chain independently verifiable (#120). Idempotent per `(org_id, through_rowid)`. See docs/ledger-integrity.md. |
+| 6 | Adds nullable `usage_events.prev_hash`/`row_hash` — the per-org tamper-evidence hash chain (#108). Rows written before the upgrade stay `NULL` ("pre-chain", unverifiable); they are never back-filled. See `docs/ledger-integrity.md`. |
+| 7 | Adds nullable `usage_events.baseline_micros` (savings-share counterfactual) and the `savings_invoices` table (per-org/period savings-share billing, #7). The baseline is hash-covered when present. |
+| 8 | Adds nullable `usage_events.optimal_micros` — the efficiency-leakage counterfactual (cheapest policy-passing option; actual above it = missed savings/off-policy, #8). It is hash-covered when present. |
+| 9 | Adds the `chain_checkpoints` table — externally-retained tamper-evidence checkpoints that make the hash chain independently verifiable (#120). Idempotent per `(org_id, through_rowid)`. See `docs/ledger-integrity.md`. |
+| 10 | Adds nullable `usage_events.external_ref` and `ix_usage_extref` for per-task/per-question attribution. |
+| 11 | Adds nullable `usage_events.cache_write_tokens` for provider cache-creation billing. |
+| 12 | Adds nullable `usage_events.user_id`, `users.active`, and `ix_usage_user` for team/seat attribution. |
+| 13 | Adds nullable `organizations.stripe_subscription_id` for subscription seat synchronization. |
+| 14 | Adds `api_keys.scope`, `api_keys.event_count`, `api_keys.rotation_of`, and the `ingest_health` table for scoped key rotation and source diagnostics (#150). |
+| 15 | Adds nullable hash-covered decision evidence: `evidence_hashes`, `policy_version`, `result_hash`, `human_review`, and `correction_ref`. |
+| 16 | Adds nullable hash-covered Authorized Action Receipt provenance: `agent_id`, `authority_manifest_ref`, `scope_anchor`, `action_intent_hash`, `action_status`, and `approval_ref`. |
+| 17 | Adds nullable hash-covered context/render/resource/prebind commitments: `context_render_schema`, `context_render_hash`, `served_memory_provenance_hash`, `action_receipt_hash`, `resource_constraints_version`, `resource_constraints_hash`, `prebind_json`, and `prebind_hash`; also adds `reconciliation_note` for union-recovered usage records. |
 
 ## The contract (within the 1.0 major line)
 

@@ -105,6 +105,20 @@ class Meter:
               baseline_model: Optional[str] = None,
               baseline_input_tokens: Optional[int] = None,
               baseline_output_tokens: Optional[int] = None,
+              external_ref: Optional[str] = None,
+              agent_id: Optional[str] = None,
+              authority_manifest_ref: Optional[str] = None,
+              scope_anchor: Optional[str] = None,
+              action_intent_hash: Optional[str] = None,
+              action_status: Optional[str] = None,
+              approval_ref: Optional[str] = None,
+              context_render_schema: Optional[str] = None,
+              context_render_hash: Optional[str] = None,
+              served_memory_provenance_hash: Optional[str] = None,
+              action_receipt_hash: Optional[str] = None,
+              resource_constraints_version: Optional[str] = None,
+              resource_constraints_hash: Optional[str] = None,
+              prebind: Optional[dict] = None,
               user_id: Optional[str] = None,
               source: str = "sdk"):
         """Meter one call. Returns a :class:`metering.MeterResult`.
@@ -154,6 +168,24 @@ class Meter:
                 event["baseline_input_tokens"] = int(baseline_input_tokens)
             if baseline_output_tokens is not None:
                 event["baseline_output_tokens"] = int(baseline_output_tokens)
+            optional_fields = {
+                "external_ref": external_ref,
+                "agent_id": agent_id,
+                "authority_manifest_ref": authority_manifest_ref,
+                "scope_anchor": scope_anchor,
+                "action_intent_hash": action_intent_hash,
+                "action_status": action_status,
+                "approval_ref": approval_ref,
+                "context_render_schema": context_render_schema,
+                "context_render_hash": context_render_hash,
+                "served_memory_provenance_hash": served_memory_provenance_hash,
+                "action_receipt_hash": action_receipt_hash,
+                "resource_constraints_version": resource_constraints_version,
+                "resource_constraints_hash": resource_constraints_hash,
+                "prebind": prebind,
+            }
+            event.update({key: value for key, value in optional_fields.items()
+                          if value is not None})
             if user_id is not None:
                 event["user_id"] = user_id
             return self._track_remote(event)
@@ -168,6 +200,20 @@ class Meter:
             baseline_cost_usd=baseline_cost_usd, baseline_model=baseline_model,
             baseline_input_tokens=baseline_input_tokens,
             baseline_output_tokens=baseline_output_tokens,
+            external_ref=external_ref,
+            agent_id=agent_id,
+            authority_manifest_ref=authority_manifest_ref,
+            scope_anchor=scope_anchor,
+            action_intent_hash=action_intent_hash,
+            action_status=action_status,
+            approval_ref=approval_ref,
+            context_render_schema=context_render_schema,
+            context_render_hash=context_render_hash,
+            served_memory_provenance_hash=served_memory_provenance_hash,
+            action_receipt_hash=action_receipt_hash,
+            resource_constraints_version=resource_constraints_version,
+            resource_constraints_hash=resource_constraints_hash,
+            prebind=prebind,
             user_id=user_id,
             source=source,
             pricing_overrides=self.cfg.get("pricing", {}).get("overrides"),

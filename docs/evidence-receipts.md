@@ -47,7 +47,16 @@ The endpoint uses the same organization authorization gate as `/api/audit`. The 
   "verification": {
     "chain_ok": true,
     "verified_events": 18,
-    "method": "per-organization SHA-256 hash chain"
+    "pre_chain_events": 0,
+    "unverifiable_events": 0,
+    "coverage": {
+      "total": 18,
+      "verified": 18,
+      "unverifiable": 0,
+      "status": "complete"
+    },
+    "method": "sha256",
+    "hash_method": "sha256"
   }
 }
 ```
@@ -75,6 +84,9 @@ These fields appear in `evidence` and `decision_context` on receipt events. They
 ## Interpretation and limits
 
 - `chain_ok` verifies the organization event chain, not only the selected receipt rows.
+- `pre_chain_events`/`unverifiable_events` report a leading legacy prefix that
+  predates hash chaining. Such a receipt can be chain-intact while its coverage
+  is `partial`; `method` identifies the actual SHA-256 or HMAC-SHA256 verifier.
 - A task receipt may contain a subset of an organization chain. Its first event can legitimately point to a predecessor outside the selected task.
 - `external_ref` is an opaque client-provided correlation identifier. A caller should use a stable artifact or task ID, never a secret.
 - A receipt is evidence of Ledger-recorded activity and allocation. It does not establish that every real-world action was reported to Ledger.

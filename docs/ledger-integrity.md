@@ -57,9 +57,12 @@ Also exposed as `GET /v1/admin/verify` (admin-token; returns HTTP 200 with
 `{"ok": false, ...}` on divergence so a monitor can alert on the body) and as a
 **Ledger integrity** tile on the dashboard.
 
-The report is per-org: `events`, `verified`, `pre_chain`, `status`
-(`ok`/`broken`/`empty`), and `first_divergence` (the event id, rowid, and a
-human-readable reason) when broken.
+The report is per-org: `events`, `verified`, `pre_chain`,
+`unverifiable_events`, `coverage`, `status` (`ok`/`broken`/`empty`), and
+`first_divergence` (the event id, rowid, and a human-readable reason) when
+broken. The machine-readable `method` is `sha256` by default or
+`hmac-sha256` when verification is performed with the customer-held key;
+`coverage.status` is `complete`, `partial`, or `broken`.
 
 ## Keyed MAC (two-party mode)
 
