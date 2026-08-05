@@ -121,7 +121,8 @@ def replay_prebind(prior: Mapping[str, Any], *, current_authority_ref: str | Non
         changed.append("policy_version")
     authority_ok = bool(state.get("authority_ok", not any(field in changed for field in ("authority_ref", "trusted_scope"))))
     evidence_current = bool(state.get("evidence_current", not bool(state.get("evidence_stale"))))
-    approved = bool(state.get("approval_granted", prior.get("approval_ref") is not None))
+    approval_required = prior.get("approval_ref") is not None
+    approved = bool(state.get("approval_granted", not approval_required))
     action_allowed = bool(state.get("action_allowed", authority_ok and evidence_current))
     admitted = authority_ok and evidence_current and approved and action_allowed
     if admitted:

@@ -12,7 +12,7 @@ def test_stored_prebind_replay_is_non_mutating(tmp_path):
     block = make_prebind(boundary_outcome="hold", non_effective_result="not_executed")
     metering.record_usage(
         conn, org_id, provider="openai", model="fixture", external_ref="replay-ref",
-        input_tokens=1, output_tokens=1, cost_usd=0.01, prebind=block,
+        input_tokens=0, output_tokens=0, cost_usd=0.0, prebind=block,
     )
     before = conn.execute("SELECT COUNT(*) AS n FROM usage_events").fetchone()["n"]
     replay = replay_receipt_prebind(

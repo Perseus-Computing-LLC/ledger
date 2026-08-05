@@ -33,6 +33,8 @@ def make_prebind(**overrides):
         replay_id="replay:deploy-42",
     )
     value.update(overrides)
+    # Overrides describe a new prebind, so keep its hash commitment coherent.
+    value["prebind_hash"] = prebind_digest(value)
     return value
 
 
@@ -90,6 +92,29 @@ def test_replay_is_pure_and_detects_scope_authority_and_evidence_changes():
     assert prior["boundary_outcome"] == "hold"
 
 
+def test_replay_admits_approval_free_allow_without_approval_state():
+    prior = make_prebind()
+    prior["boundary_outcome"] = "allow"
+    prior["prebind_hash"] = prebind_digest(prior)
+    comparison = replay_prebind(
+        prior,
+        current_state={"authority_ok": True, "evidence_current": True, "action_allowed": True},
+    )
+    assert comparison["admission"] == "admitted"
+    assert comparison["replayed_boundary_outcome"] == "allow"
+
+
+def test_replay_keeps_approval_required_prebind_blocked_without_grant():
+    prior = make_prebind(approval_ref="approval:deploy-42")
+    prior["prebind_hash"] = prebind_digest(prior)
+    comparison = replay_prebind(
+        prior,
+        current_state={"authority_ok": True, "evidence_current": True, "action_allowed": True},
+    )
+    assert comparison["admission"] == "not_admitted"
+    assert comparison["replayed_boundary_outcome"] == "deny"
+
+
 def test_replay_can_admit_corrected_held_attempt_without_mutating_history():
     prior = make_prebind(boundary_outcome="hold", non_effective_result="not_executed")
     comparison = replay_prebind(
@@ -115,7 +140,7 @@ def test_prebind_is_persisted_in_hash_chain_and_receipt(tmp_path):
     conn = db.connect(str(tmp_path / "prebind.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "prebind-integration", tier="free")["id"]
-    block = make_prebind(boundary_outcome="hold", non_effective_result="not_executed")
+    block = make_prebind(boundary_outcome="allow", non_effective_result="not_executed")
     result = metering.record_usage(
         conn, org_id, provider="openai", model="fixture", task_type="deploy",
         external_ref="deploy-prebind", input_tokens=1, output_tokens=1,
@@ -125,6 +150,61 @@ def test_prebind_is_persisted_in_hash_chain_and_receipt(tmp_path):
     receipt = audit_json(conn, org_id, external_ref="deploy-prebind")
     assert receipt["events"][0]["prebind"]["prebind_hash"] == block["prebind_hash"]
     assert db.verify_chain(conn, org_id)["ok"] is True
+    conn.close()
+
+
+def test_executed_terminal_status_cannot_follow_non_allow_prebind(tmp_path):
+    from plutus_agent import db, metering
+
+    conn = db.connect(str(tmp_path / "contradictory-execution.db"))
+    db.init_schema(conn)
+    org_id = db.create_org(conn, "contradictory-execution", tier="free")["id"]
+    block = make_prebind(boundary_outcome="hold", non_effective_result="not_executed")
+    with pytest.raises(ValueError, match="prebind"):
+        metering.record_usage(
+            conn, org_id, provider="openai", model="fixture",
+            input_tokens=1, output_tokens=1, cost_usd=0.01,
+            agent_id="hermes-prod", authority_manifest_ref="authority:manifest-3",
+            scope_anchor="github:Perseus-Computing-LLC/ledger",
+            action_intent_hash="a" * 64, action_status="executed",
+            prebind=block,
+        )
+    conn.close()
+
+
+def test_executed_terminal_status_cannot_follow_non_effective_prebind_result(tmp_path):
+    from plutus_agent import db, metering
+
+    conn = db.connect(str(tmp_path / "non-effective-execution.db"))
+    db.init_schema(conn)
+    org_id = db.create_org(conn, "non-effective-execution", tier="free")["id"]
+    block = make_prebind(boundary_outcome="allow", non_effective_result="not_executed")
+    block["non_effective_result"] = "denied"
+    block["prebind_hash"] = prebind_digest(block)
+    with pytest.raises(ValueError, match="prebind"):
+        metering.record_usage(
+            conn, org_id, provider="openai", model="fixture",
+            input_tokens=1, output_tokens=1, cost_usd=0.01,
+            agent_id="hermes-prod", authority_manifest_ref="authority:manifest-3",
+            scope_anchor="github:Perseus-Computing-LLC/ledger",
+            action_intent_hash="b" * 64, action_status="executed",
+            prebind=block,
+        )
+    conn.close()
+
+
+def test_non_effective_prebind_cannot_claim_resource_usage(tmp_path):
+    from plutus_agent import db, metering
+
+    conn = db.connect(str(tmp_path / "resource-contradiction.db"))
+    db.init_schema(conn)
+    org_id = db.create_org(conn, "resource-contradiction", tier="free")["id"]
+    with pytest.raises(ValueError, match="prebind"):
+        metering.record_usage(
+            conn, org_id, provider="openai", model="fixture",
+            input_tokens=1, output_tokens=0, cost_usd=0.01,
+            prebind=make_prebind(boundary_outcome="hold", non_effective_result="not_executed"),
+        )
     conn.close()
 
 

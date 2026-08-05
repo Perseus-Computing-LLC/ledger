@@ -170,7 +170,11 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
             "verification": {
                 "chain_ok": org_chain.get("status") == "ok",
                 "verified_events": org_chain.get("verified", 0),
-                "method": "per-organization SHA-256 hash chain",
+                "pre_chain_events": org_chain.get("pre_chain", 0),
+                "unverifiable_events": org_chain.get("unverifiable_events", 0),
+                "coverage": org_chain.get("coverage", {}),
+                "method": integrity.get("method", "sha256"),
+                "hash_method": integrity.get("hash_method", integrity.get("method", "sha256")),
             },
         }
 
@@ -195,7 +199,16 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
         "latest_checkpoint": dict(checkpoints[-1]) if checkpoints else None,
         "audit_access": pricing.tier(tier_key).audit_access,
         "verification": {
-            "method": "hash-chained usage ledger plus optional retained checkpoint",
+            "chain_ok": integrity.get("ok", False),
+            "method": integrity.get("method", "sha256"),
+            "hash_method": integrity.get("hash_method", integrity.get("method", "sha256")),
+            "verified_events": sum(o.get("verified", 0) for o in integrity.get("orgs", [])),
+            "pre_chain_events": sum(o.get("pre_chain", 0) for o in integrity.get("orgs", [])),
+            "unverifiable_events": sum(o.get("unverifiable_events", 0) for o in integrity.get("orgs", [])),
+            "coverage": (
+                integrity["orgs"][0].get("coverage", {})
+                if len(integrity.get("orgs", [])) == 1 else {}
+            ),
             "authoritative_billing_required": report.get("billing_provisional") is not False,
         },
     }

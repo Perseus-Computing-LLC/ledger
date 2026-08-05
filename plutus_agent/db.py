@@ -217,14 +217,19 @@ def verify_chain(conn, org_id: Optional[str] = None,
                  hmac_key: Optional[bytes] = None) -> dict:
     """Walk the usage_events hash chain and report the first divergence per org.
 
-    Returns ``{"ok": bool, "orgs": [ {org_id, events, verified, pre_chain,
-    status, first_divergence} ]}``. ``status`` is ``"ok"`` (chain intact),
-    ``"broken"`` (a divergence was found), or ``"empty"`` (no events). Rows with
-    a NULL ``row_hash`` predate the chain and are counted in ``pre_chain`` and
-    reported as unverifiable rather than treated as a failure — unless they
+    Returns ``{"ok": bool, "method": "sha256"|"hmac-sha256", "orgs": [...]}``.
+    Each org report includes ``events``, ``verified``, ``pre_chain``/
+    ``unverifiable_events``, a ``coverage`` object, ``status``, and
+    ``first_divergence``. ``status`` is ``"ok"`` (chain intact), ``"broken"``
+    (a divergence was found), or ``"empty"`` (no events). Coverage is
+    ``"complete"`` when every event is chained, ``"partial"`` when a leading
+    pre-chain prefix is unverifiable, and ``"broken"`` after a divergence. Rows
+    with a NULL ``row_hash`` predate the chain and are counted in ``pre_chain``
+    and reported as unverifiable rather than treated as a failure — unless they
     appear *after* a chained row, which is itself a divergence (a hash was
     stripped).
     """
+    method = "hmac-sha256" if hmac_key else "sha256"
     if org_id is not None:
         org_ids = [org_id]
     else:
@@ -291,12 +296,30 @@ def verify_chain(conn, org_id: Optional[str] = None,
             status = "empty"
         else:
             status = "ok"
+        coverage_status = (
+            "broken" if divergence is not None
+            else "partial" if pre_chain
+            else "empty" if events == 0
+            else "complete"
+        )
+        coverage = {
+            "total": events,
+            "verified": verified,
+            "unverifiable": pre_chain,
+            "status": coverage_status,
+        }
         orgs.append({
             "org_id": oid, "events": events, "verified": verified,
-            "pre_chain": pre_chain, "status": status,
+            "pre_chain": pre_chain,
+            "unverifiable": pre_chain,
+            "unverifiable_events": pre_chain,
+            "method": method,
+            "hash_method": method,
+            "coverage": coverage,
+            "status": status,
             "first_divergence": divergence,
         })
-    return {"ok": all_ok, "orgs": orgs}
+    return {"ok": all_ok, "method": method, "hash_method": method, "orgs": orgs}
 
 
 # ---- externally-retained checkpoints (#120) ---------------------------------

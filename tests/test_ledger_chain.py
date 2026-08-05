@@ -63,6 +63,42 @@ def test_verify_ok_on_clean_ledger(tmp_path):
     assert o["events"] == 4 and o["verified"] == 4 and o["pre_chain"] == 0
 
 
+def test_verify_reports_hash_method_and_partial_pre_chain_coverage(tmp_path):
+    conn, org = _org(tmp_path)
+    _meter(conn, org, n=1)
+    legacy = _events(conn, org)[0]
+    conn.execute("UPDATE usage_events SET prev_hash=NULL, row_hash=NULL WHERE id=?",
+                 (legacy["id"],))
+    conn.commit()
+    _meter(conn, org, n=1)
+
+    report = db.verify_chain(conn, org_id=org)
+    org_report = report["orgs"][0]
+
+    assert report["method"] == "sha256"
+    assert report["hash_method"] == "sha256"
+    assert org_report["method"] == "sha256"
+    assert org_report["pre_chain"] == 1
+    assert org_report["unverifiable_events"] == 1
+    assert org_report["coverage"] == {
+        "total": 2,
+        "verified": 1,
+        "unverifiable": 1,
+        "status": "partial",
+    }
+
+
+def test_verify_reports_hmac_sha256_method(tmp_path):
+    conn, org = _org(tmp_path)
+    key = b"customer-held-secret"
+    _meter(conn, org, n=1, chain_hmac_key=key)
+
+    report = db.verify_chain(conn, org_id=org, hmac_key=key)
+    assert report["method"] == "hmac-sha256"
+    assert report["hash_method"] == "hmac-sha256"
+    assert report["orgs"][0]["method"] == "hmac-sha256"
+
+
 def test_per_org_chains_are_independent(tmp_path):
     conn, org = _org(tmp_path)
     org2 = db.create_org(conn, "Beta", tier="pro")["id"]

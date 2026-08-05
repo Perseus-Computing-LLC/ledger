@@ -237,7 +237,7 @@ def record_usage(conn, org_id: str, provider: str,
         raise ValueError(
             "action_status must be one of " + ", ".join(sorted(_ACTION_STATUS_VALUES))
         )
-    if any((authority_manifest_ref, scope_anchor, action_intent_hash, action_status, approval_ref)):
+    if any((agent_id, authority_manifest_ref, scope_anchor, action_intent_hash, action_status, approval_ref)):
         if not agent_id:
             raise ValueError("agent_id is required when action provenance is supplied")
         if not authority_manifest_ref or not scope_anchor or not action_intent_hash or not action_status:
@@ -326,6 +326,21 @@ def record_usage(conn, org_id: str, provider: str,
             f"cost_usd must be non-negative, got {cost_usd}; credits/refunds "
             "must go through the adjust/grant/refund ledger path, not metering"
         )
+
+    if prebind is not None:
+        resource_used = (
+            any(int(value or 0) > 0 for value in (
+                input_tokens, output_tokens, cache_read_tokens,
+                reasoning_tokens, cache_write_tokens,
+            ))
+            or cost_usd > 0
+        )
+        execution_claimed = action_status == "executed" or resource_used
+        if execution_claimed and (
+            prebind["boundary_outcome"] != "allow"
+            or prebind["non_effective_result"] != "not_executed"
+        ):
+            raise ValueError("prebind result contradicts executed action or resource usage")
 
     # #7: savings-share counterfactual. A negative baseline is nonsensical and
     # could only inflate savings, so reject it rather than clamp silently. None
