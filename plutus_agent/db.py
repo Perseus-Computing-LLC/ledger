@@ -55,11 +55,13 @@ from typing import Optional
 # 15 = adds hash-covered decision-evidence fields to usage_events: canonical
 #     source hash list, policy version, result hash, and human review/correction
 #     linkage. All nullable and trailing so existing chain rows stay valid.
-# 16 = adds optional Authorized Action Receipt provenance: agent identity,
-#     authority-manifest reference, trusted scope anchor, action intent hash,
-#     lifecycle status, and approval references. Vault remains the enforcement
-#     authority; Ledger records only supplied, hash-covered evidence.
-SCHEMA_VERSION = 17
+# 17 = adds cross-product context-render evidence (context_render_schema/hash,
+#     served_memory_provenance_hash, action_receipt_hash, resource_constraints,
+#     prebind_json/hash).
+# 18 = adds stage-aware action receipts and evidence bindings (#219–#224):
+#     served_claim_json/hash (#221), evidence_status (#222),
+#     runtime_manifest_json/hash (#223), external_artifact_json/hash (#224).
+SCHEMA_VERSION = 18
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -153,6 +155,14 @@ _CHAIN_FIELDS_OPTIONAL = (
     "resource_constraints_hash",
     "prebind_json",
     "prebind_hash",
+    # v18: stage-aware action receipts and evidence bindings (#219–#224)
+    "served_claim_json",
+    "served_claim_hash",
+    "evidence_status",
+    "runtime_manifest_json",
+    "runtime_manifest_hash",
+    "external_artifact_json",
+    "external_artifact_hash",
 )
 
 
@@ -936,6 +946,16 @@ def _migrate_add_columns(conn) -> None:
         # hash-chain canonical form (not in _CHAIN_FIELDS*), so existing rows
         # and chains are byte-identical after the migration.
         ("usage_events", "reconciliation_note", "TEXT NOT NULL DEFAULT ''"),
+        # v18 stage-aware action receipts and evidence bindings (#219–#224).
+        # All nullable so existing rows and their pre-v18 chain canonical form
+        # are preserved; only supplied values extend the hash chain.
+        ("usage_events", "served_claim_json", "TEXT"),
+        ("usage_events", "served_claim_hash", "TEXT"),
+        ("usage_events", "evidence_status", "TEXT"),
+        ("usage_events", "runtime_manifest_json", "TEXT"),
+        ("usage_events", "runtime_manifest_hash", "TEXT"),
+        ("usage_events", "external_artifact_json", "TEXT"),
+        ("usage_events", "external_artifact_hash", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)

@@ -9,7 +9,7 @@ schema — the database half of the frozen contract whose API half is
 
 `plutus_agent.db.SCHEMA_VERSION` is an integer bumped on every schema change and
 stamped into the `meta` table key `schema_version` on `init_schema()`. The
-runtime currently declares **`SCHEMA_VERSION=17`**. Read the stored value with
+runtime currently declares **`SCHEMA_VERSION=18`**. Read the stored value with
 `db.get_schema_version(conn)`; a fresh database is stamped with the runtime
 value after all additive migrations have run.
 

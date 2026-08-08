@@ -139,6 +139,13 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                 },
                 "prebind": json.loads(row["prebind_json"])
                 if row["prebind_json"] is not None else None,
+                "served_claim": json.loads(row["served_claim_json"])
+                if row["served_claim_json"] is not None else None,
+                "evidence_status": row["evidence_status"],
+                "runtime_manifest": json.loads(row["runtime_manifest_json"])
+                if row["runtime_manifest_json"] is not None else None,
+                "external_artifact_binding": json.loads(row["external_artifact_json"])
+                if row["external_artifact_json"] is not None else None,
                 "action_authorization": {
                     "agent_id": row["agent_id"],
                     "authority_manifest_ref": row["authority_manifest_ref"],

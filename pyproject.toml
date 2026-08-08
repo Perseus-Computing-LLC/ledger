@@ -10,7 +10,7 @@ dynamic = ["version"]
 description = "Perseus Ledger: verifiable, hash-chained provenance for autonomous-system events and resource allocation."
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [{ name = "Thomas Connally", email = "tcconnally@gmail.com" }]
 maintainers = [{ name = "Perseus Computing LLC" }]
 keywords = [
@@ -49,7 +49,7 @@ fetchers = ["boto3>=1.28"]
 # behavioral verdicts with metering; the bridge itself is dependency-free.
 invarium = ["invarium>=0.3"]
 all = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "invarium>=0.3; python_version >= '3.10'"]
-dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "pytest>=7.0,<10", "invarium>=0.3"]
+dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "pytest>=7.0,<10", "invarium>=0.3; python_version >= '3.10'"]
 
 [project.urls]
 Homepage = "https://perseus.observer/ledger/"

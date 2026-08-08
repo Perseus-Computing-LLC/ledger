@@ -26,6 +26,11 @@ from typing import Optional
 
 from . import db, pricing
 from .prebind import validate_prebind
+from .receipts import (
+    build_served_claim, validate_served_claim,
+    validate_external_artifact_binding, validate_runtime_manifest,
+    EVIDENCE_STATUS_VALUES,
+)
 
 DAY = 86400
 _SHA256_HEX = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -168,6 +173,10 @@ def record_usage(conn, org_id: str, provider: str,
                  block_over_balance: bool = False,
                  chain_hmac_key: Optional[bytes] = None,
                  prebind: Optional[dict] = None,
+                 served_claim: Optional[dict] = None,
+                 evidence_status: Optional[str] = None,
+                 runtime_manifest: Optional[dict] = None,
+                 external_artifact: Optional[dict] = None,
                  commit: bool = True) -> MeterResult:
     """Meter one LLM/agent call. Returns a :class:`MeterResult`.
 
@@ -269,7 +278,45 @@ def record_usage(conn, org_id: str, provider: str,
         raise ValueError("resource_constraints_hash must be a 64-character SHA-256 hex digest")
     resource_constraints_hash = resource_constraints_hash.lower() if resource_constraints_hash else None
 
-    # Fix #80: never let a negative token count through — it would rewind the
+    # v18: stage-aware action receipts and evidence bindings (#219–#224)
+    served_claim_json: Optional[str] = None
+    served_claim_hash: Optional[str] = None
+    if served_claim is not None:
+        if not isinstance(served_claim, dict):
+            raise ValueError("served_claim must be a dict")
+        valid, errors = validate_served_claim(served_claim)
+        if not valid:
+            raise ValueError("invalid served_claim: " + ", ".join(errors))
+        served_claim_json = json.dumps(served_claim, sort_keys=True, separators=(",", ":"))
+        served_claim_hash = served_claim.get("claim_digest")
+
+    if evidence_status is not None:
+        if evidence_status not in EVIDENCE_STATUS_VALUES:
+            raise ValueError(f"evidence_status must be one of {sorted(EVIDENCE_STATUS_VALUES)}")
+
+    runtime_manifest_json: Optional[str] = None
+    runtime_manifest_hash: Optional[str] = None
+    if runtime_manifest is not None:
+        if not isinstance(runtime_manifest, dict):
+            raise ValueError("runtime_manifest must be a dict")
+        valid, errors = validate_runtime_manifest(runtime_manifest)
+        if not valid:
+            raise ValueError("invalid runtime_manifest: " + ", ".join(errors))
+        runtime_manifest_json = json.dumps(runtime_manifest, sort_keys=True, separators=(",", ":"))
+        runtime_manifest_hash = runtime_manifest.get("manifest_digest")
+
+    external_artifact_json: Optional[str] = None
+    external_artifact_hash: Optional[str] = None
+    if external_artifact is not None:
+        if not isinstance(external_artifact, dict):
+            raise ValueError("external_artifact must be a dict")
+        valid, errors = validate_external_artifact_binding(external_artifact)
+        if not valid:
+            raise ValueError("invalid external_artifact: " + ", ".join(errors))
+        external_artifact_json = json.dumps(external_artifact, sort_keys=True, separators=(",", ":"))
+        external_artifact_hash = external_artifact.get("binding_digest")
+
+    # Fix #80: never let a negative token count through...
     # month-to-date tracked total (bypassing the free-tier quota) and corrupt
     # every SUM(tokens) aggregate. Authoritative guard; the /v1/usage boundary
     # also rejects negatives with a 400 before reaching here.
@@ -498,6 +545,14 @@ def record_usage(conn, org_id: str, provider: str,
         "resource_constraints_hash": resource_constraints_hash,
         "prebind_json": json.dumps(prebind, sort_keys=True, separators=(",", ":")) if prebind else None,
         "prebind_hash": prebind.get("prebind_hash") if prebind else None,
+        # v18 fields (#219–#224)
+        "served_claim_json": served_claim_json,
+        "served_claim_hash": served_claim_hash,
+        "evidence_status": evidence_status,
+        "runtime_manifest_json": runtime_manifest_json,
+        "runtime_manifest_hash": runtime_manifest_hash,
+        "external_artifact_json": external_artifact_json,
+        "external_artifact_hash": external_artifact_hash,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
@@ -506,8 +561,10 @@ def record_usage(conn, org_id: str, provider: str,
         "baseline_micros,optimal_micros,external_ref,user_id,evidence_hashes,policy_version,"
         "result_hash,human_review,correction_ref,agent_id,authority_manifest_ref,scope_anchor,"
         "action_intent_hash,action_status,approval_ref,context_render_schema,context_render_hash,"
-        "served_memory_provenance_hash,action_receipt_hash,resource_constraints_version,resource_constraints_hash,prebind_json,prebind_hash,estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "served_memory_provenance_hash,action_receipt_hash,resource_constraints_version,resource_constraints_hash,prebind_json,prebind_hash,"
+        "served_claim_json,served_claim_hash,evidence_status,runtime_manifest_json,runtime_manifest_hash,external_artifact_json,external_artifact_hash,"
+        "estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
@@ -519,6 +576,9 @@ def record_usage(conn, org_id: str, provider: str,
          resource_constraints_version, resource_constraints_hash,
          (json.dumps(prebind, sort_keys=True, separators=(",", ":")) if prebind else None),
          (prebind.get("prebind_hash") if prebind else None),
+         served_claim_json, served_claim_hash, evidence_status,
+         runtime_manifest_json, runtime_manifest_hash,
+         external_artifact_json, external_artifact_hash,
          int(estimated), source, ts, prev_hash, row_hash),
     )
 

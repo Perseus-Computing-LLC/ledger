@@ -75,8 +75,8 @@ class TestSchemaVersion(unittest.TestCase):
         docs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs", "schema.md")
         with open(docs_path, encoding="utf-8") as handle:
             docs = handle.read()
-        self.assertEqual(db.SCHEMA_VERSION, 17)
-        self.assertIn("SCHEMA_VERSION=17", docs)
+        self.assertEqual(db.SCHEMA_VERSION, 18)
+        self.assertIn("SCHEMA_VERSION=18", docs)
 
         table_rows = {}
         for line in docs.splitlines():
