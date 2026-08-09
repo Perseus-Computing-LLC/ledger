@@ -1,6 +1,6 @@
 # Savings-share billing (#7)
 
-Plutus's differentiated revenue path: bill a share of the money Perseus actually
+Ledger's differentiated revenue path: bill a share of the money Perseus actually
 saved a customer, not a flat subscription. This document is the methodology (why
 the number is defensible), the design (how it plugs into the ledger), and the
 operator go-live checklist.
@@ -31,12 +31,12 @@ Three properties make it stick:
 
 2. **Recomputable + tamper-evident.** `baseline_micros` is folded into the
    `usage_events` SHA-256 hash chain (see [`ledger-integrity.md`](ledger-integrity.md)),
-   so altering a recorded baseline to inflate savings breaks `plutus verify`. It
+   so altering a recorded baseline to inflate savings breaks `ledger verify`. It
    is also a deterministic function of the chained token counts and the published
    price table, so the customer can independently reconstruct every dollar. The
    export includes a `baseline_usd` column for exactly this audit.
 
-3. **Coverage is disclosed.** `plutus savings` always reports how many events in
+3. **Coverage is disclosed.** `ledger savings` always reports how many events in
    the period carried a baseline (`2/3 (67% coverage)`). A period where only some
    traffic was instrumented is visible, never hidden — you bill on what you can
    prove, and the customer sees the denominator.
@@ -73,7 +73,7 @@ as `pending` without raising a sub-dollar Stripe invoice.
 The honest baseline comes from the component that already knows both the routed
 model and the counterfactual — the Hermes sync (`examples/hermes_sync.py`). It
 tags each session event with a **`baseline_model`** — the flagship the customer
-would have run without Perseus routing — and hosted Plutus prices the *same*
+would have run without Perseus routing — and hosted Ledger prices the *same*
 token counts at that model. The sync never sends a dollar figure, only the model
 name, so the amount is derived from the published price table and stays
 reconstructable.
@@ -81,11 +81,11 @@ reconstructable.
 Turn it on with one env var on the Hermes box:
 
 ```bash
-PLUTUS_BASELINE=flagship            # built-in provider→flagship map
+LEDGER_BASELINE=flagship            # built-in provider→flagship map
 # or pin one baseline for every provider:
-PLUTUS_BASELINE_MODEL=claude-opus-4-8
+LEDGER_BASELINE_MODEL=claude-opus-4-8
 # or per-provider:
-PLUTUS_BASELINE_MODELS='{"anthropic":"claude-opus-4-8","openai":"gpt-5"}'
+LEDGER_BASELINE_MODELS='{"anthropic":"claude-opus-4-8","openai":"gpt-5"}'
 ```
 
 Rules that keep it honest:
@@ -106,30 +106,30 @@ Server-side, `record_usage(baseline_model=…)` (and the `/v1/usage`
 
 ### Manual / other integrations
 
-`plutus meter --baseline <usd>` and the `/v1/usage` `baseline_cost_usd` field let
+`ledger meter --baseline <usd>` and the `/v1/usage` `baseline_cost_usd` field let
 any integration record an explicit baseline directly. When both a model and a
 cost are supplied, the explicit cost wins. **No baseline → no billable savings**
 (the safe default), so partial rollout under-bills rather than over-bills.
 
 ## Operator go-live checklist
 
-Steps only the account owner can do (Plutus can't hold your Stripe credentials):
+Steps only the account owner can do (Ledger can't hold your Stripe credentials):
 
-- [ ] `pip install "plutus-agent[stripe]"`
+- [ ] `pip install "ledger-agent[stripe]"`
 - [ ] Create or connect a **live** Stripe account; grab live keys.
 - [ ] `export STRIPE_SECRET_KEY=sk_live_… STRIPE_PUBLISHABLE_KEY=pk_live_…`
-- [ ] `plutus stripe-setup` once against the live key (creates the $20/mo price).
-- [ ] Deploy `plutus serve` behind HTTPS; register the production webhook at
+- [ ] `ledger stripe-setup` once against the live key (creates the $20/mo price).
+- [ ] Deploy `ledger serve` behind HTTPS; register the production webhook at
       `https://your-host/webhook/stripe`; set `STRIPE_WEBHOOK_SECRET`.
 - [ ] Set `billing.savings_share_pct` if not 0.10, and `auth.base_url` for the
       pricing/upgrade links.
-- [ ] Turn on baselines in the Hermes sync: set `PLUTUS_BASELINE=flagship` (or a
-      `PLUTUS_BASELINE_MODEL[S]` override) on the Hermes box, then
-      `hermes_sync.py --dry-run` and confirm events are tagged. `plutus savings`
+- [ ] Turn on baselines in the Hermes sync: set `LEDGER_BASELINE=flagship` (or a
+      `LEDGER_BASELINE_MODEL[S]` override) on the Hermes box, then
+      `hermes_sync.py --dry-run` and confirm events are tagged. `ledger savings`
       coverage should climb above 0% after the next sync.
-- [ ] Dry-run `plutus bill-savings --period <last-month>`, eyeball the figure and
+- [ ] Dry-run `ledger bill-savings --period <last-month>`, eyeball the figure and
       coverage, then re-run with `--apply`. Schedule it monthly (cron, after
-      month end) alongside `plutus close`.
+      month end) alongside `ledger close`.
 
 Everything up to the last two steps also works in Stripe **test mode**
 (`sk_test_…`) end-to-end, so you can rehearse the whole flow before going live.

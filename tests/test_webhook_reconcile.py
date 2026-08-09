@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from plutus_agent import db
-from plutus_agent import reconcile_webhooks as rw
+from ledger_agent import db
+from ledger_agent import reconcile_webhooks as rw
 
 
 def _mem():
@@ -36,7 +36,7 @@ class TestReconcile(unittest.TestCase):
 
     def _events(self):
         return [{"id": "evt_1", "type": "checkout.session.completed", "created": 100,
-                 "data": {"object": {"metadata": {"plutus_org_id": self.org_id,
+                 "data": {"object": {"metadata": {"ledger_org_id": self.org_id,
                                                   "kind": "credit"},
                                      "amount_total": 500, "mode": "payment",
                                      "payment_intent": "pi_fake_1"}}}]

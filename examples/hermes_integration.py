@@ -1,7 +1,7 @@
-"""Hermes Agent → Plutus.
+"""Hermes Agent → Ledger.
 
-The original ``plutus.py`` monitor reads Hermes' ``state.db`` after the fact.
-This shows the *push* path: meter each Hermes session into Plutus as it
+The original ``ledger.py`` monitor reads Hermes' ``state.db`` after the fact.
+This shows the *push* path: meter each Hermes session into Ledger as it
 completes, so spend shows up live on the dashboard and depletes prepaid credit.
 
 Drop this into a Hermes post-session hook, or batch-import an existing
@@ -9,9 +9,9 @@ Drop this into a Hermes post-session hook, or batch-import an existing
 """
 import os
 
-from plutus_agent import Meter
-from plutus_agent.hermes import read_spend_events
-from plutus_agent.integrations import track_hermes_session
+from ledger_agent import Meter
+from ledger_agent.hermes import read_spend_events
+from ledger_agent.integrations import track_hermes_session
 
 meter = Meter(org="Hermes", tier="pro")
 
@@ -21,14 +21,14 @@ def on_session_complete(session: dict):
     res = track_hermes_session(meter, session, workspace=session.get("workspace", "hermes"))
     if res.alerts:
         for a in res.alerts:
-            print(f"[plutus] ALERT {a['kind']}: {a['message']}")
+            print(f"[ledger] ALERT {a['kind']}: {a['message']}")
     return res
 
 
 def backfill_from_state_db(state_db: str):
-    """One-time import of historical Hermes sessions into Plutus.
+    """One-time import of historical Hermes sessions into Ledger.
 
-    Reads via :func:`plutus_agent.hermes.read_spend_events`, so mid-session
+    Reads via :func:`ledger_agent.hermes.read_spend_events`, so mid-session
     model switches are attributed to the provider that actually served each
     call (schema v17 ``session_model_usage``), with a graceful fallback to the
     aggregate ``sessions`` row for pre-v17 data. One meter event is recorded per
@@ -44,7 +44,7 @@ def backfill_from_state_db(state_db: str):
 
 if __name__ == "__main__":
     state_db = os.environ.get(
-        "PLUTUS_STATE_DB",
+        "LEDGER_STATE_DB",
         "/opt/data/webui/minions-hermes-config/state.db")
     if os.path.exists(state_db):
         backfill_from_state_db(state_db)

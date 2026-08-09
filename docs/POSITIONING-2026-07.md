@@ -38,7 +38,7 @@ SQLite state, one-import SDK, MIT-licensed.
 **We found a money-attribution bug at the source, fixed it upstream, and it made
 our own product more accurate.**
 
-Plutus reads Hermes Agent's `state.db` to know what each session spent. Hermes
+Ledger reads Hermes Agent's `state.db` to know what each session spent. Hermes
 recorded a session's tokens against the model that was active when the session
 *started* — so any mid-session model switch dumped the whole session's cost onto
 the wrong provider. That corrupts per-provider spend, the runway projections
@@ -47,7 +47,7 @@ it has infinite runway, so the router sends it *more* traffic).
 
 We authored the fix in **hermes-agent itself** (issue #51607, merged upstream): a
 `session_model_usage` table that attributes each API call to the model live at
-that call. Then we taught Plutus to consume it, allocating each session's
+that call. Then we taught Ledger to consume it, allocating each session's
 authoritative cost across the providers that actually served it — so totals never
 regress and the split is finally correct.
 
@@ -56,7 +56,7 @@ to be right about money. We chase wrong numbers to their source in someone else'
 codebase, fix them in the open, and hold ourselves to the same standard. That's
 the whole pitch for trusting a billing layer.
 
-Concrete before/after (real `plutus.py --json`, one session that switched
+Concrete before/after (real `ledger.py --json`, one session that switched
 Anthropic → OpenAI mid-flight, $1.00 actual cost):
 
 | provider | before | after |
@@ -74,7 +74,7 @@ belongs and the router stops over-routing to it.
 - Hardened self-serve surface (CSRF fail-closed, DB-backed signup cap, security
   headers, CSV-injection defense, fail-closed public bind) — see
   `docs/REVIEW-2026-07.md`.
-- Shipped: v1.0.1 on PyPI (`plutus-agent`) and GHCR; MIT.
+- Shipped: v1.0.1 on PyPI (`ledger-agent`) and GHCR; MIT.
 
 ## Who it's for
 
@@ -84,6 +84,6 @@ without wiring Stripe, a ledger, and quota enforcement themselves.
 
 ## What we don't claim
 
-Plutus is not a hosted SaaS, not an observability suite, and not a gateway that
+Ledger is not a hosted SaaS, not an observability suite, and not a gateway that
 proxies your calls. It meters what you report and bills against it. It complements
 LiteLLM/Langfuse/Helicone rather than replacing them.

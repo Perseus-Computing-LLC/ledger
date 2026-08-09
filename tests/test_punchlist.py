@@ -17,9 +17,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import cli, config as cfgmod, db, demo
-from plutus_agent.config import DEFAULT_CONFIG
-from plutus_agent.server import app, auth as authmod
+from ledger_agent import cli, config as cfgmod, db, demo
+from ledger_agent.config import DEFAULT_CONFIG
+from ledger_agent.server import app, auth as authmod
 
 
 # --------------------------------------------------------------------- #37.1 ---
@@ -30,14 +30,14 @@ class TestCliNameValidation(unittest.TestCase):
     def setUp(self):
         fd, self.dbpath = tempfile.mkstemp(suffix=".db")
         os.close(fd)
-        os.environ["PLUTUS_DB"] = self.dbpath
+        os.environ["LEDGER_DB"] = self.dbpath
         conn = db.connect(self.dbpath)
         db.init_schema(conn)
         self.org_id = db.create_org(conn, "Acme")["id"]
         conn.close()
 
     def tearDown(self):
-        os.environ.pop("PLUTUS_DB", None)
+        os.environ.pop("LEDGER_DB", None)
         for ext in ("", "-wal", "-shm"):
             try:
                 os.unlink(self.dbpath + ext)
@@ -132,7 +132,7 @@ class TestInstallHookBackup(unittest.TestCase):
             settings.write_bytes(original)
             args = types.SimpleNamespace(path=str(settings), print=False)
             cli.cmd_install_hook(args)
-            backup = settings.with_suffix(".json.plutus-bak")
+            backup = settings.with_suffix(".json.ledger-bak")
             self.assertTrue(backup.exists())
             self.assertEqual(backup.read_bytes(), original)
             # second run: file is now modified; the pristine backup must survive

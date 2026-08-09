@@ -15,9 +15,9 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import config as cfgmod, db, demo
-from plutus_agent.config import DEFAULT_CONFIG
-from plutus_agent.server import app, auth as authmod
+from ledger_agent import config as cfgmod, db, demo
+from ledger_agent.config import DEFAULT_CONFIG
+from ledger_agent.server import app, auth as authmod
 
 
 def _auth_cfg(**over):
@@ -270,7 +270,7 @@ class TestServerEnforcement(unittest.TestCase):
 
     def _req(self, path, cookie=None):
         url = f"http://127.0.0.1:{self.port}{path}"
-        headers = {"Cookie": f"plutus_session={cookie}"} if cookie else {}
+        headers = {"Cookie": f"ledger_session={cookie}"} if cookie else {}
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.status, r.read().decode()
@@ -389,7 +389,7 @@ class TestBearerAuditReceipt(unittest.TestCase):
         self.assertEqual(cm.exception.code, 403)
 
     def test_missing_or_invalid_bearer_is_401(self):
-        for key in (None, "plutus_sk_not_a_real_key"):
+        for key in (None, "ledger_sk_not_a_real_key"):
             with self.assertRaises(urllib.error.HTTPError) as cm:
                 self._req(f"/api/audit?org={self.org_id}", key=key)
             self.assertEqual(cm.exception.code, 401)
@@ -591,7 +591,7 @@ class TestCSRFEnforcement(unittest.TestCase):
         url = f"http://127.0.0.1:{self.port}{path}"
         headers = {}
         if cookie:
-            headers["Cookie"] = f"plutus_session={cookie}"
+            headers["Cookie"] = f"ledger_session={cookie}"
         if origin:
             headers["Origin"] = origin
         if bearer:

@@ -16,13 +16,13 @@ import time
 
 import pytest
 
-from plutus_agent.prebind import (
+from ledger_agent.prebind import (
     PREBIND_SCHEMA, PREBIND_V2_SCHEMA, STAGE_VALUES,
     build_prebind, build_prebind_v2,
     prebind_digest, replay_prebind, replay_prebind_v2,
     validate_prebind,
 )
-from plutus_agent.receipts import (
+from ledger_agent.receipts import (
     build_stage_trace, build_served_claim, validate_served_claim,
     evidence_decision, EVIDENCE_STATUS_VALUES, EVIDENCE_POLICY_VALUES,
     build_runtime_manifest, validate_runtime_manifest,
@@ -53,7 +53,7 @@ def make_prebind_v2(**overrides):
         attempted_action="action:deploy-42",
         actor_ref="agent:hermes-prod",
         authority_ref="authority:manifest-3",
-        trusted_scope="github:Perseus-Computing-LLC/plutus",
+        trusted_scope="github:Perseus-Computing-LLC/ledger",
         policy_version="policy/v3",
         evidence_hashes=[digest("source")],
         selected_context_digest=digest("context-selection"),
@@ -221,8 +221,8 @@ def test_served_claim_rejects_missing_source():
 
 
 def test_served_claim_is_persisted_in_receipt(tmp_path):
-    from plutus_agent import db, metering
-    from plutus_agent.server.api import audit_json
+    from ledger_agent import db, metering
+    from ledger_agent.server.api import audit_json
 
     conn = db.connect(str(tmp_path / "served-claim.db"))
     db.init_schema(conn)
@@ -244,7 +244,7 @@ def test_served_claim_is_persisted_in_receipt(tmp_path):
 
 
 def test_served_claim_rejects_invalid_dict(tmp_path):
-    from plutus_agent import db, metering
+    from ledger_agent import db, metering
     conn = db.connect(str(tmp_path / "bad-claim.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "bad-claim", tier="free")["id"]
@@ -295,8 +295,8 @@ def test_evidence_decision_rejects_invalid_policy():
 
 
 def test_evidence_status_is_persisted_in_receipt(tmp_path):
-    from plutus_agent import db, metering
-    from plutus_agent.server.api import audit_json
+    from ledger_agent import db, metering
+    from ledger_agent.server.api import audit_json
 
     conn = db.connect(str(tmp_path / "evidence-status.db"))
     db.init_schema(conn)
@@ -373,8 +373,8 @@ def test_runtime_manifest_distinguishes_execution_families():
 
 
 def test_runtime_manifest_is_persisted_in_receipt(tmp_path):
-    from plutus_agent import db, metering
-    from plutus_agent.server.api import audit_json
+    from ledger_agent import db, metering
+    from ledger_agent.server.api import audit_json
 
     conn = db.connect(str(tmp_path / "runtime-manifest.db"))
     db.init_schema(conn)
@@ -520,8 +520,8 @@ def test_external_artifact_allows_retry_after_failed():
 
 
 def test_external_artifact_is_persisted_in_receipt(tmp_path):
-    from plutus_agent import db, metering
-    from plutus_agent.server.api import audit_json
+    from ledger_agent import db, metering
+    from ledger_agent.server.api import audit_json
 
     conn = db.connect(str(tmp_path / "artifact.db"))
     db.init_schema(conn)
@@ -548,7 +548,7 @@ def test_external_artifact_is_persisted_in_receipt(tmp_path):
 
 def test_v18_fields_preserve_chain_integrity(tmp_path):
     """All new v18 fields are optional and chain-preserving."""
-    from plutus_agent import db, metering
+    from ledger_agent import db, metering
 
     conn = db.connect(str(tmp_path / "chain-v18.db"))
     db.init_schema(conn)
@@ -592,8 +592,8 @@ def test_v18_fields_preserve_chain_integrity(tmp_path):
 
 
 def test_v2_prebind_in_chain_preserves_integrity(tmp_path):
-    from plutus_agent import db, metering
-    from plutus_agent.server.api import audit_json
+    from ledger_agent import db, metering
+    from ledger_agent.server.api import audit_json
 
     conn = db.connect(str(tmp_path / "prebind-v2-chain.db"))
     db.init_schema(conn)
@@ -613,8 +613,8 @@ def test_v2_prebind_in_chain_preserves_integrity(tmp_path):
 
 
 def test_legacy_events_render_with_nulls_for_v18_fields(tmp_path):
-    from plutus_agent import db, metering
-    from plutus_agent.server.api import audit_json
+    from ledger_agent import db, metering
+    from ledger_agent.server.api import audit_json
 
     conn = db.connect(str(tmp_path / "legacy-v18.db"))
     db.init_schema(conn)

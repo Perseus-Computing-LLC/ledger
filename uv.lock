@@ -184,6 +184,59 @@ wheels = [
 ]
 
 [[package]]
+name = "ledger-agent"
+source = { editable = "." }
+dependencies = [
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "boto3" },
+    { name = "invarium" },
+    { name = "reportlab" },
+    { name = "stripe" },
+]
+dev = [
+    { name = "boto3" },
+    { name = "invarium" },
+    { name = "pytest" },
+    { name = "reportlab" },
+    { name = "stripe" },
+]
+fetchers = [
+    { name = "boto3" },
+]
+invarium = [
+    { name = "invarium" },
+]
+pdf = [
+    { name = "reportlab" },
+]
+stripe = [
+    { name = "stripe" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", marker = "extra == 'all'", specifier = ">=1.28" },
+    { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.28" },
+    { name = "boto3", marker = "extra == 'fetchers'", specifier = ">=1.28" },
+    { name = "invarium", marker = "python_full_version >= '3.10' and extra == 'all'", specifier = ">=0.3" },
+    { name = "invarium", marker = "python_full_version >= '3.10' and extra == 'dev'", specifier = ">=0.3" },
+    { name = "invarium", marker = "extra == 'invarium'", specifier = ">=0.3" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0,<10" },
+    { name = "pyyaml", specifier = ">=5.4,<7" },
+    { name = "reportlab", marker = "extra == 'all'", specifier = ">=4.0,<5" },
+    { name = "reportlab", marker = "extra == 'dev'", specifier = ">=4.0,<5" },
+    { name = "reportlab", marker = "extra == 'pdf'", specifier = ">=4.0,<5" },
+    { name = "stripe", marker = "extra == 'all'", specifier = ">=7.0,<14" },
+    { name = "stripe", marker = "extra == 'dev'", specifier = ">=7.0,<14" },
+    { name = "stripe", marker = "extra == 'stripe'", specifier = ">=7.0,<14" },
+]
+provides-extras = ["stripe", "pdf", "fetchers", "invarium", "all", "dev"]
+
+[[package]]
 name = "packaging"
 version = "26.3"
 source = { registry = "https://pypi.org/simple" }
@@ -294,59 +347,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
 ]
-
-[[package]]
-name = "plutus-agent"
-source = { editable = "." }
-dependencies = [
-    { name = "pyyaml" },
-]
-
-[package.optional-dependencies]
-all = [
-    { name = "boto3" },
-    { name = "invarium" },
-    { name = "reportlab" },
-    { name = "stripe" },
-]
-dev = [
-    { name = "boto3" },
-    { name = "invarium" },
-    { name = "pytest" },
-    { name = "reportlab" },
-    { name = "stripe" },
-]
-fetchers = [
-    { name = "boto3" },
-]
-invarium = [
-    { name = "invarium" },
-]
-pdf = [
-    { name = "reportlab" },
-]
-stripe = [
-    { name = "stripe" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "boto3", marker = "extra == 'all'", specifier = ">=1.28" },
-    { name = "boto3", marker = "extra == 'dev'", specifier = ">=1.28" },
-    { name = "boto3", marker = "extra == 'fetchers'", specifier = ">=1.28" },
-    { name = "invarium", marker = "python_full_version >= '3.10' and extra == 'all'", specifier = ">=0.3" },
-    { name = "invarium", marker = "python_full_version >= '3.10' and extra == 'dev'", specifier = ">=0.3" },
-    { name = "invarium", marker = "extra == 'invarium'", specifier = ">=0.3" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0,<10" },
-    { name = "pyyaml", specifier = ">=5.4,<7" },
-    { name = "reportlab", marker = "extra == 'all'", specifier = ">=4.0,<5" },
-    { name = "reportlab", marker = "extra == 'dev'", specifier = ">=4.0,<5" },
-    { name = "reportlab", marker = "extra == 'pdf'", specifier = ">=4.0,<5" },
-    { name = "stripe", marker = "extra == 'all'", specifier = ">=7.0,<14" },
-    { name = "stripe", marker = "extra == 'dev'", specifier = ">=7.0,<14" },
-    { name = "stripe", marker = "extra == 'stripe'", specifier = ">=7.0,<14" },
-]
-provides-extras = ["stripe", "pdf", "fetchers", "invarium", "all", "dev"]
 
 [[package]]
 name = "pygments"

@@ -3,12 +3,12 @@ import importlib.util
 import json
 from types import SimpleNamespace
 
-from plutus_agent import db, metering, pricing
-from plutus_agent.integrations.adapters import track_anthropic
+from ledger_agent import db, metering, pricing
+from ledger_agent.integrations.adapters import track_anthropic
 
 
 def _org(tmp_path):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org = db.create_org(conn, "Cache Test", tier="pro")["id"]
     return conn, org
@@ -53,8 +53,8 @@ def test_anthropic_adapter_passes_cache_creation_tokens(tmp_path):
 
 
 def test_claude_code_hook_keeps_cache_creation_separate():
-    path = "integrations/claude-code-plugin/scripts/plutus-meter.py"
-    spec = importlib.util.spec_from_file_location("plutus_cc_hook", path)
+    path = "integrations/claude-code-plugin/scripts/ledger-meter.py"
+    spec = importlib.util.spec_from_file_location("ledger_cc_hook", path)
     hook = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(hook)
     lines = [json.dumps({"type": "assistant", "message": {

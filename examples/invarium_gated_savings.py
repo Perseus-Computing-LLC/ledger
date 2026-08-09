@@ -1,4 +1,4 @@
-"""Accuracy-gated savings: Invarium verdict → Plutus meter.
+"""Accuracy-gated savings: Invarium verdict → Ledger meter.
 
 Run:  python examples/invarium_gated_savings.py
 
@@ -11,7 +11,7 @@ The story in one screen:
 * Naively metering both would book savings on B too — paying out a share on a
   wrong-but-cheap answer. That is exactly the failure mode that erodes the
   "fewer dollars *at higher accuracy*" claim.
-* Invarium judges behavior; Plutus books savings only for the verified task. B's
+* Invarium judges behavior; Ledger books savings only for the verified task. B's
   baseline is withheld, so B contributes $0 to billable savings.
 
 Everything is deterministic (in-memory SQLite, no LLM, no network).
@@ -20,8 +20,8 @@ from __future__ import annotations
 
 from invarium import AgentResult, ToolCall, expect
 
-from plutus_agent import db, savings
-from plutus_agent.integrations.invarium import meter_agent_result
+from ledger_agent import db, savings
+from ledger_agent.integrations.invarium import meter_agent_result
 
 
 # --- proposed Invarium primitive (design doc shape C) -------------------------

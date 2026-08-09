@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from plutus_agent import db, metering
-from plutus_agent.server.api import replay_receipt_prebind
+from ledger_agent import db, metering
+from ledger_agent.server.api import replay_receipt_prebind
 from test_prebind_receipt import make_prebind
 
 

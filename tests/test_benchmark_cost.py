@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from plutus_agent.benchmark_cost import (
+from ledger_agent.benchmark_cost import (
     AGENTIC,
     RESOLVE_BEFORE_CONTEXT,
     ApproachRun,
@@ -18,7 +18,7 @@ from plutus_agent.benchmark_cost import (
     to_csv,
     write_exhibit,
 )
-from plutus_agent.pricing import PRICE_TABLE_AS_OF
+from ledger_agent.pricing import PRICE_TABLE_AS_OF
 
 
 def _scenario():

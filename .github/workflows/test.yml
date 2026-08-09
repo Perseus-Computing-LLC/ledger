@@ -22,30 +22,30 @@ jobs:
 
       - name: Lint — py_compile
         run: |
-          python3 -m py_compile plutus.py
-          python3 -m py_compile plutus_route.py
+          python3 -m py_compile ledger.py
+          python3 -m py_compile ledger_route.py
 
       - name: Smoke test — version flag
         run: |
-          python3 plutus.py --version | grep 'plutus v'
-          python3 plutus_route.py --version | grep 'plutus v'
+          python3 ledger.py --version | grep 'ledger v'
+          python3 ledger_route.py --version | grep 'ledger v'
 
       - name: Smoke test — help output
         run: |
-          python3 plutus.py --help > /dev/null
-          python3 plutus_route.py --help > /dev/null
+          python3 ledger.py --help > /dev/null
+          python3 ledger_route.py --help > /dev/null
 
       - name: Price table freshness guard
         run: PYTHONPATH=. python3 tools/check_price_freshness.py
 
       - name: Smoke test — json mode
-        run: python3 plutus.py --json 2>/dev/null || echo "(state.db unavailable — expected in CI)"
+        run: python3 ledger.py --json 2>/dev/null || echo "(state.db unavailable — expected in CI)"
 
       - name: Run tests
-        run: python3 -m pytest test_plutus.py -v
+        run: python3 -m pytest test_ledger.py -v
 
   engine:
-    name: engine (plutus_agent) — ${{ matrix.os }} py${{ matrix.python-version }}
+    name: engine (ledger_agent) — ${{ matrix.os }} py${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -70,17 +70,17 @@ jobs:
         run: pip install ".[all]" pytest
 
       - name: Lint — compileall
-        run: python -m compileall -q plutus_agent
+        run: python -m compileall -q ledger_agent
 
       - name: CLI smoke
         shell: bash  # Git Bash on Windows — the pipes/grep/line-continuations need it
         run: |
-          plutus version | grep 'plutus v'
-          plutus pricing | grep -i 'Pro'
-          plutus init --org "CI Co" --tier pro --workspace ci --budget 10
-          plutus meter --provider anthropic --model claude-opus-4-8 \
+          ledger version | grep 'ledger v'
+          ledger pricing | grep -i 'Pro'
+          ledger init --org "CI Co" --tier pro --workspace ci --budget 10
+          ledger meter --provider anthropic --model claude-opus-4-8 \
             --task code_review --workspace ci --input 1000 --output 500
-          plutus status
+          ledger status
 
       - name: Run engine + server tests
         run: python -m pytest tests/ -v

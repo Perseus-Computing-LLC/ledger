@@ -1,5 +1,5 @@
 """Savings-share bridge wiring (#7): the Hermes sync tags events with a baseline
-model so hosted Plutus can price the counterfactual and record the saving.
+model so hosted Ledger can price the counterfactual and record the saving.
 
 Covers examples/hermes_sync.py — the env-driven baseline resolver, the
 "only when routing happened" rule, and that collect_sessions attaches
@@ -24,24 +24,24 @@ class TestResolveBaselineModels(unittest.TestCase):
         self.assertEqual(hs.resolve_baseline_models({}), {})
 
     def test_flagship_map(self):
-        m = hs.resolve_baseline_models({"PLUTUS_BASELINE": "flagship"})
+        m = hs.resolve_baseline_models({"LEDGER_BASELINE": "flagship"})
         self.assertEqual(m["anthropic"], "claude-opus-4-8")
         self.assertEqual(m["openai"], "gpt-5")
 
     def test_single_global_model(self):
-        m = hs.resolve_baseline_models({"PLUTUS_BASELINE_MODEL": "gpt-5"})
+        m = hs.resolve_baseline_models({"LEDGER_BASELINE_MODEL": "gpt-5"})
         self.assertEqual(m, {"*": "gpt-5"})
 
     def test_explicit_json_wins(self):
         m = hs.resolve_baseline_models({
-            "PLUTUS_BASELINE": "flagship",  # ignored when JSON is present
-            "PLUTUS_BASELINE_MODELS": '{"openai": "gpt-5"}',
+            "LEDGER_BASELINE": "flagship",  # ignored when JSON is present
+            "LEDGER_BASELINE_MODELS": '{"openai": "gpt-5"}',
         })
         self.assertEqual(m, {"openai": "gpt-5"})
 
     def test_bad_json_exits(self):
         with self.assertRaises(SystemExit):
-            hs.resolve_baseline_models({"PLUTUS_BASELINE_MODELS": "not json"})
+            hs.resolve_baseline_models({"LEDGER_BASELINE_MODELS": "not json"})
 
 
 class TestBaselineFor(unittest.TestCase):

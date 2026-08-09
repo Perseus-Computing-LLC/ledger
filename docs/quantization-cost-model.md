@@ -4,9 +4,9 @@ Serving a model at lower numeric precision — fp8, NVFP4, int8, int4, 1-bit —
 lowers the per-token *inference* cost. As 4-bit serving becomes the default on
 Blackwell/Rubin-class hardware, a cost model that can't see precision will
 misprice a growing share of real spend. This is issue
-[#128](https://github.com/Perseus-Computing-LLC/plutus/issues/128).
+[#128](https://github.com/Perseus-Computing-LLC/ledger/issues/128).
 
-Plutus models precision as a **multiplier** on the resolved per-token cost for
+Ledger models precision as a **multiplier** on the resolved per-token cost for
 router/estimator decisions:
 
 ```
@@ -24,7 +24,7 @@ supports it.
 Every recognized tier ships at a multiplier of **1.0 — no assumed savings**, and
 any *unrecognized* precision string also resolves to 1.0. Quoting a quantization
 tier on an uncalibrated deployment therefore changes nothing. This is deliberate:
-Plutus's job is to *prove* savings, so it must never manufacture a discount from a
+Ledger's job is to *prove* savings, so it must never manufacture a discount from a
 label. An uncalibrated install can under-report a real saving, but it can never
 over-report one.
 
@@ -45,7 +45,7 @@ ratios (INT8 is already the Vault's shipped default embedding path).
 | 1bit  | 0.05      | **Assumed**, based on 32× memory reduction; Vault#630 measures quality, not serving cost |
 | fp16  | 1.20      | perseus-vault#630 row 2: equivalent quality to INT8 (0.989 cosine), larger model (86MB vs 23MB) |
 | fp8   | 1.00      | Uncalibrated |
-| nvfp4 | 0.49      | Plutus#131: measured B200 throughput ratio (FP8/NVFP4) |
+| nvfp4 | 0.49      | Ledger#131: measured B200 throughput ratio (FP8/NVFP4) |
 | int4  | 1.00      | Uncalibrated |
 
 **1-bit benchmark details (2026-07-15):** 24-memory paraphrase-heavy recall
@@ -79,7 +79,7 @@ to reflect the larger model footprint.
 Drop measured ratios into config without a code change:
 
 ```yaml
-# ~/.plutus/config.yaml
+# ~/.ledger/config.yaml
 pricing:
   quantization:
     nvfp4: 0.55   # measured: NVFP4 serving costs ~55% of the fp16/fp8 baseline
@@ -91,7 +91,7 @@ Any tier you don't list stays at 1.0.
 ## API
 
 ```python
-from plutus_agent import pricing
+from ledger_agent import pricing
 
 # Resolve a multiplier (honoring a measured-override map).
 mult, known = pricing.resolve_precision_multiplier("nvfp4", {"nvfp4": 0.55})
@@ -110,7 +110,7 @@ router/estimator multipliers. These values do not alter ledger debits.
 
 ## Quantization-aware routing
 
-`plutus_route.py` includes a `quantization-aware` policy (#128 step 3) that
+`ledger_route.py` includes a `quantization-aware` policy (#128 step 3) that
 applies precision multipliers to model costs and re-ranks providers by effective
 cost (`base_cost × multiplier`). A configurable quality floor
 (`quality_min_retention`, default 0.90) filters out quantization tiers whose
@@ -118,13 +118,13 @@ measured quality retention falls below the threshold.
 
 ```bash
 # Route with quantization-aware cost optimization
-python plutus_route.py --policy quantization-aware --dry-run
+python ledger_route.py --policy quantization-aware --dry-run
 
 # Stack with other policies:
-python plutus_route.py --policy "quantization-aware,cost-prefer-cheapest" --dry-run
+python ledger_route.py --policy "quantization-aware,cost-prefer-cheapest" --dry-run
 ```
 
-Configuration in `plutus.budgets.json`:
+Configuration in `ledger.budgets.json`:
 
 ```json
 {
@@ -139,5 +139,5 @@ Per-model quantization availability is in `MODEL_QUANTIZATION_TIERS` (currently
 fp16/fp8 for all models). As providers deploy NVFP4 on Blackwell/Rubin hardware,
 add tiers to this table and populate the corresponding precision multipliers.
 
-All policy decisions are logged to `plutus.routing.jsonl` with the effective
+All policy decisions are logged to `ledger.routing.jsonl` with the effective
 cost computation visible in the policy notes.

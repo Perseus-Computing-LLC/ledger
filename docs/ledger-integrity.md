@@ -8,7 +8,7 @@
 > for the split, and [Authorized Action Receipts](authorized-action-receipts.md)
 > for the authority-layer mechanism.
 
-Plutus stores usage in an integer-exact, independently re-queryable ledger
+Ledger stores usage in an integer-exact, independently re-queryable ledger
 (`SUM(usage_events.cost_micros)`). That makes the dollars *reproducible* — but,
 on its own, the table was append-only **by convention** only. Nothing stopped an
 operator with database access from rewriting a debit, deleting an event, or
@@ -48,9 +48,9 @@ Any edit, delete, reorder, or insert changes a `row_hash` or orphans a
 ## Verifying
 
 ```bash
-plutus verify                # all orgs; exit 0 = intact, exit 2 = tampered
-plutus verify --org <id>     # a single org
-plutus verify --json         # machine-readable report
+ledger verify                # all orgs; exit 0 = intact, exit 2 = tampered
+ledger verify --org <id>     # a single org
+ledger verify --json         # machine-readable report
 ```
 
 Also exposed as `GET /v1/admin/verify` (admin-token; returns HTTP 200 with
@@ -75,13 +75,13 @@ passes again.
 To close that, set a secret the operator does **not** control alone:
 
 ```bash
-export PLUTUS_CHAIN_HMAC_KEY='<secret held by the customer>'
+export LEDGER_CHAIN_HMAC_KEY='<secret held by the customer>'
 # or: ledger.hmac_key in config.yaml
 ```
 
 With a key set, `row_hash` is HMAC-SHA256. Only a holder of the key can produce
 a chain that verifies, so an operator without it cannot re-chain a rewritten
-history. `plutus verify --hmac-key <secret>` accepts the key explicitly (e.g.
+history. `ledger verify --hmac-key <secret>` accepts the key explicitly (e.g.
 for a customer-side audit). This is the property behind any "auditable by both
 parties" statement.
 
@@ -90,7 +90,7 @@ parties" statement.
 The keyed MAC closes re-chaining *only* when the operator does not hold the key.
 In the common single-party, self-hosted deployment the operator holds it, so an
 operator with database access can still edit a row and recompute the whole chain
-from genesis — `plutus verify` reports **intact**. The internal chain is
+from genesis — `ledger verify` reports **intact**. The internal chain is
 tamper-evident only relative to a *trusted head*, and nothing pins the head.
 
 A checkpoint pins one. It escrows a head the chain provably reached:
@@ -110,15 +110,15 @@ The point is *where the anchor lives*: the customer retains it **out of band**
 where the operator cannot rewrite it. Verification then requires the live DB to
 *reproduce* that exact `head_hash` and covered `event_count` at `through_rowid`.
 An operator who rewrote earlier history cannot reproduce a head the customer
-already holds, so the recompute that fools `plutus verify` is caught.
+already holds, so the recompute that fools `ledger verify` is caught.
 
 ```bash
-plutus checkpoint                      # record an anchor per org; prints JSON to retain
-plutus checkpoint --org <id> --json    # a single org, machine-readable
+ledger checkpoint                      # record an anchor per org; prints JSON to retain
+ledger checkpoint --org <id> --json    # a single org, machine-readable
 
-plutus verify-checkpoints --file anchor.json   # replay a retained anchor; exit 2 on divergence
-plutus verify-checkpoints --file -             # read anchors from stdin
-plutus verify-checkpoints                      # fall back to DB-stored anchors (weaker; see below)
+ledger verify-checkpoints --file anchor.json   # replay a retained anchor; exit 2 on divergence
+ledger verify-checkpoints --file -             # read anchors from stdin
+ledger verify-checkpoints                      # fall back to DB-stored anchors (weaker; see below)
 ```
 
 `verify-checkpoints` reports a per-anchor `status`: `ok`, `head_mismatch`
@@ -138,7 +138,7 @@ rows too. The strong guarantee requires a `--file` copy held out of band.
 A checkpoint that is never taken protects nothing, and one that only lives in
 the operator's database protects little. #121 makes both failure modes hard:
 
-**Auto-capture on period close.** Every *applied* `plutus close` records a
+**Auto-capture on period close.** Every *applied* `ledger close` records a
 fresh anchor for the org (`--no-checkpoint` opts out), so a routine monthly
 cron leaves each billing period pinned without operator action. The anchor is
 included in the close's JSON output and printed for retention.
@@ -146,8 +146,8 @@ included in the close's JSON output and printed for retention.
 **API + dashboard.**
 
 ```bash
-curl -H "Authorization: Bearer plutus_sk_…" -X POST https://…/v1/checkpoints  # record now
-curl -H "Authorization: Bearer plutus_sk_…"        https://…/v1/checkpoints   # list/download
+curl -H "Authorization: Bearer ledger_sk_…" -X POST https://…/v1/checkpoints  # record now
+curl -H "Authorization: Bearer ledger_sk_…"        https://…/v1/checkpoints   # list/download
 ```
 
 The customer calls `GET /v1/checkpoints` with **their own key** and stores the
@@ -156,8 +156,8 @@ itself, is what creates independence. The dashboard shows the latest anchor
 (date, rowid, event count, signed/unsigned) next to the ledger-integrity tile,
 with a download link.
 
-**Out-of-band delivery: emailed receipts.** `plutus checkpoint --deliver` and
-`plutus close --apply --deliver` email each new anchor via the `alerts` SMTP
+**Out-of-band delivery: emailed receipts.** `ledger checkpoint --deliver` and
+`ledger close --apply --deliver` email each new anchor via the `alerts` SMTP
 config; the JSON line in the message body *is* the retained anchor, and the
 recipient's mailbox is the independent store. Offline-safe: unconfigured SMTP
 degrades to a dry run that says exactly what's missing.
@@ -187,7 +187,7 @@ corruption and casual tampering, not a motivated operator with DB access.
 
 ## Guardrail
 
-**No public document may claim Plutus is "tamper-evident" until this ships *and*
+**No public document may claim Ledger is "tamper-evident" until this ships *and*
 an external cryptographic review covers it** (the SOW drafted for the Perseus
 Vault audit-chain review). Until then, savings statements carry the caveat the
 harness/one-pager already print: the ledger is *re-queryable* and now

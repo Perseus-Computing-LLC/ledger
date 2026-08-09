@@ -5,13 +5,13 @@ optional settlement adapter for test-mode payments and prepaid-credit workflows.
 It is not required for event recording, chain verification, evidence receipts,
 or local operation.
 
-The stable package, CLI, config path, and lookup keys below retain `plutus*`
+The stable package, CLI, config path, and lookup keys below retain `ledger*`
 names as compatibility contracts during the product transition.
 
 ## 0. Prerequisites
 ```bash
-pip install "plutus-agent[stripe]"
-plutus init --org "Your Co" --tier pro
+pip install "ledger-agent[stripe]"
+ledger init --org "Your Co" --tier pro
 ```
 Grab your **test-mode** keys from the Stripe dashboard (Developers → API keys).
 Always start in test mode (`sk_test_…`).
@@ -22,25 +22,25 @@ export STRIPE_SECRET_KEY=sk_test_xxx
 export STRIPE_PUBLISHABLE_KEY=pk_test_xxx
 export STRIPE_WEBHOOK_SECRET=whsec_xxx        # from step 3
 ```
-Or put them in `~/.plutus/config.yaml` under `billing:` (env wins).
+Or put them in `~/.ledger/config.yaml` under `billing:` (env wins).
 
 ## 2. Create the Pro plan
 ```bash
-plutus stripe-setup
+ledger stripe-setup
 ```
 This creates the configured recurring product and price (idempotent via the
-legacy-compatible `plutus_pro_monthly` lookup key) and writes the price ID into
+legacy-compatible `ledger_pro_monthly` lookup key) and writes the price ID into
 your config. Credit top-ups are priced dynamically per checkout, so nothing else
 to create.
 
 ## 3. Run the server + forward webhooks
 ```bash
-plutus serve            # dashboard at http://localhost:8420
+ledger serve            # dashboard at http://localhost:8420
 # in another terminal (Stripe CLI):
 stripe listen --forward-to localhost:8420/webhook/stripe
 ```
 `stripe listen` prints a `whsec_…` — that's your `STRIPE_WEBHOOK_SECRET` for
-step 1. Restart `plutus serve` after setting it.
+step 1. Restart `ledger serve` after setting it.
 
 ## 4. Take a payment
 On the dashboard's **Billing** panel: enter an amount → **Top up →** → pay with
@@ -57,7 +57,7 @@ button manages the subscription.
 ## 5. Go live
 Swap `sk_test_…`/`pk_test_…`/`whsec_…` for live keys, register a production
 webhook endpoint in the Stripe dashboard pointing at
-`https://your-host/webhook/stripe`, and re-run `plutus stripe-setup` once
+`https://your-host/webhook/stripe`, and re-run `ledger stripe-setup` once
 against the live key to create the live price.
 
 ## How it's safe
@@ -81,7 +81,7 @@ at the customer's designated baseline model). Pass it at meter time:
 
 ```bash
 # actual cost $1.00; would have been $4.00 without Perseus routing → $3.00 saved
-plutus meter --provider anthropic --model claude-haiku-4-5 \
+ledger meter --provider anthropic --model claude-haiku-4-5 \
     --cost 1.00 --baseline 4.00
 ```
 
@@ -98,7 +98,7 @@ is as tamper-evident as the actual cost, and it's exported alongside cost
 
 **See what's owed (read-only):**
 ```bash
-plutus savings --period 2026-07
+ledger savings --period 2026-07
 #   verified savings   : $3.5000
 #   share rate         : 18.0%
 #   ── billable share  : $0.6300
@@ -106,7 +106,7 @@ plutus savings --period 2026-07
 
 **Raise the invoice** (dry-run without `--apply`):
 ```bash
-plutus bill-savings --period 2026-07 --apply
+ledger bill-savings --period 2026-07 --apply
 ```
 With `--apply` and a live Stripe key this creates a Stripe invoice for the share
 and records it in `savings_invoices` (idempotent per org+period — a re-run is a

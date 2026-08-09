@@ -1,6 +1,6 @@
 import datetime as dt
 
-from plutus_agent.savings import operational_window
+from ledger_agent.savings import operational_window
 
 
 def test_operational_windows_are_utc_and_bounded():

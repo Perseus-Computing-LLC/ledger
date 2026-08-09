@@ -7,8 +7,8 @@ import urllib.request
 
 import yaml
 
-from plutus_agent import Meter, db
-from plutus_agent.prebind import build_prebind
+from ledger_agent import Meter, db
+from ledger_agent.prebind import build_prebind
 
 
 AAR_FIELDS = {
@@ -153,7 +153,7 @@ def test_meter_track_remote_serializes_all_cross_product_fields(monkeypatch):
         return Response()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    meter = Meter(remote="https://ledger.example.test", api_key="plutus_sk_test")
+    meter = Meter(remote="https://ledger.example.test", api_key="ledger_sk_test")
     fields = _all_fields()
     result = meter.track(
         provider="openai",

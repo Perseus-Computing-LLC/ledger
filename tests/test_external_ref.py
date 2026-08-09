@@ -10,11 +10,11 @@ import datetime as dt
 
 import pytest
 
-from plutus_agent import db, metering
+from ledger_agent import db, metering
 
 
 def _org(tmp_path, tier="pro"):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "Acme", tier=tier, owner_email="a@b.co")["id"]
     return conn, org_id
@@ -132,7 +132,7 @@ def test_tampering_with_external_ref_breaks_the_chain(tmp_path):
 def test_bridge_passes_task_id_as_external_ref(tmp_path):
     pytest.importorskip("invarium")
     from invarium import AgentResult, ToolCall
-    from plutus_agent.integrations.invarium import meter_agent_result
+    from ledger_agent.integrations.invarium import meter_agent_result
 
     conn, org = _org(tmp_path)
     result = AgentResult(

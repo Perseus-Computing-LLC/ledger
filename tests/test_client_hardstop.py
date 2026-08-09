@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 
-from plutus_agent import Meter
+from ledger_agent import Meter
 
 
 class TestEmbeddedHardStop(unittest.TestCase):

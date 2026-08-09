@@ -1,17 +1,17 @@
 """Cost reconciliation: true-up estimated cost to a provider's real billing.
 
-Covers plutus_agent.reconcile - the delta math, idempotency, restatement,
+Covers ledger_agent.reconcile - the delta math, idempotency, restatement,
 the never-assume-zero safety rule, dry-run vs apply, and the input loaders.
 """
 import json
 
 import pytest
 
-from plutus_agent import db, metering, reconcile
+from ledger_agent import db, metering, reconcile
 
 
 def _org(tmp_path, credit=100.0):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "Acme", tier="pro")["id"]
     if credit:

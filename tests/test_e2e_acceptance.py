@@ -1,4 +1,4 @@
-"""Deterministic Hermes -> Perseus -> Plutus fixture acceptance harness.
+"""Deterministic Hermes -> Perseus -> Ledger fixture acceptance harness.
 
 This test intentionally stays provider-free. It exercises the production ledger
 and report code with a fixture representing the normalized Hermes response plus
@@ -8,7 +8,7 @@ the Perseus counterfactual baseline.
 import json
 import time
 
-from plutus_agent import db, metering, savings
+from ledger_agent import db, metering, savings
 
 
 def test_provider_usage_baseline_idempotency_and_report(tmp_path):

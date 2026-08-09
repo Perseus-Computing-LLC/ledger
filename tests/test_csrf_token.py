@@ -15,9 +15,9 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import db, demo
-from plutus_agent.config import DEFAULT_CONFIG
-from plutus_agent.server import app, auth
+from ledger_agent import db, demo
+from ledger_agent.config import DEFAULT_CONFIG
+from ledger_agent.server import app, auth
 
 
 def _auth_cfg():
@@ -68,7 +68,7 @@ class TestCsrfEnforcement(unittest.TestCase):
                 pass
 
     def _post(self, path, data=b"", origin=None):
-        headers = {"Cookie": f"plutus_session={self.token}",
+        headers = {"Cookie": f"ledger_session={self.token}",
                    "Content-Type": "application/x-www-form-urlencoded"}
         if origin:
             headers["Origin"] = origin

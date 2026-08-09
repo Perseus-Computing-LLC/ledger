@@ -1,6 +1,6 @@
 """Ledger tamper-evidence: the usage_events hash chain (#108).
 
-Covers plutus_agent.db.compute_row_hash / chain_head / verify_chain and the
+Covers ledger_agent.db.compute_row_hash / chain_head / verify_chain and the
 record_usage wiring — the chain is built at ingest, an intact chain verifies,
 and every tampering shape (modify, delete, reorder, insert, hash-strip) is
 detected. Also: the pre-chain (pre-upgrade) prefix, the additive migration, and
@@ -8,11 +8,11 @@ the optional keyed-MAC two-party mode.
 """
 import pytest
 
-from plutus_agent import config, db, metering
+from ledger_agent import config, db, metering
 
 
 def _org(tmp_path, credit=1000.0):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "Acme", tier="pro")["id"]
     if credit:
@@ -253,8 +253,8 @@ def test_compute_row_hash_is_deterministic_and_prev_sensitive():
 
 
 def test_config_resolves_hmac_key(monkeypatch, tmp_path):
-    monkeypatch.delenv("PLUTUS_CHAIN_HMAC_KEY", raising=False)
+    monkeypatch.delenv("LEDGER_CHAIN_HMAC_KEY", raising=False)
     assert config.chain_hmac_key({"ledger": {"hmac_key": ""}}) is None
     assert config.chain_hmac_key({"ledger": {"hmac_key": "abc"}}) == b"abc"
-    monkeypatch.setenv("PLUTUS_CHAIN_HMAC_KEY", "envkey")
+    monkeypatch.setenv("LEDGER_CHAIN_HMAC_KEY", "envkey")
     assert config.chain_hmac_key({"ledger": {"hmac_key": "abc"}}) == b"envkey"

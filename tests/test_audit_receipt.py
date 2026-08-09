@@ -1,7 +1,7 @@
 import pytest
 
-from plutus_agent import db, metering
-from plutus_agent.server.api import audit_json
+from ledger_agent import db, metering
+from ledger_agent.server.api import audit_json
 import time
 
 
@@ -61,7 +61,7 @@ def test_authorized_action_provenance_is_hash_covered_and_rendered(tmp_path):
         task_type="deploy", external_ref="deploy-42",
         input_tokens=10, output_tokens=5, cost_usd=0.1,
         agent_id="hermes-prod", authority_manifest_ref="auth-42@3",
-        scope_anchor="github:Perseus-Computing-LLC/plutus",
+        scope_anchor="github:Perseus-Computing-LLC/ledger",
         action_intent_hash=intent_hash, action_status="executed",
     )
 
@@ -70,7 +70,7 @@ def test_authorized_action_provenance_is_hash_covered_and_rendered(tmp_path):
     assert event["action_authorization"] == {
         "agent_id": "hermes-prod",
         "authority_manifest_ref": "auth-42@3",
-        "scope_anchor": "github:Perseus-Computing-LLC/plutus",
+        "scope_anchor": "github:Perseus-Computing-LLC/ledger",
         "action_intent_hash": intent_hash,
         "status": "executed",
         "approval_ref": None,

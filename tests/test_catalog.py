@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from plutus_agent.catalog import catalog_is_fresh, import_catalog
+from ledger_agent.catalog import catalog_is_fresh, import_catalog
 
 
 _NOW = datetime(2026, 7, 17, tzinfo=timezone.utc).timestamp()

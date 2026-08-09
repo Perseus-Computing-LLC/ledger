@@ -15,12 +15,12 @@ import hashlib
 
 import pytest
 
-from plutus_agent import db, metering, savings
-from plutus_agent.pricing import PRICE_TABLE_AS_OF, tier, savings_mode
+from ledger_agent import db, metering, savings
+from ledger_agent.pricing import PRICE_TABLE_AS_OF, tier, savings_mode
 
 
 def _org(tmp_path, tier="pro"):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "Acme", tier=tier, owner_email="a@b.co")["id"]
     return conn, org_id
@@ -345,7 +345,7 @@ def test_correction_hash_is_not_builtin_hash():
     """Verify that the correction hash is NOT Python's salted built-in hash(),
     which changes between interpreter restarts. The stripe_ref should use
     hashlib.sha256 instead."""
-    from plutus_agent.savings import CORRECTION_KEY_PREFIX
+    from ledger_agent.savings import CORRECTION_KEY_PREFIX
     org_id = "o1"
     period = "2026-07"
     reason = "test reason"

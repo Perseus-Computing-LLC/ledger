@@ -1,12 +1,12 @@
-# Plutus artifacts — environment-specific, never commit
-plutus.budgets.json
-plutus.snapshots.jsonl
-plutus.routing.jsonl
-plutus.routing.log
-plutus.html
-plutus.err
-*.plutus-bak-*
-config.yaml.plutus-bak-*
+# Ledger artifacts — environment-specific, never commit
+ledger.budgets.json
+ledger.snapshots.jsonl
+ledger.routing.jsonl
+ledger.routing.log
+ledger.html
+ledger.err
+*.ledger-bak-*
+config.yaml.ledger-bak-*
 # Config and its timestamped backups (config.yaml.bak-<ts>) can hold file-sourced
 # secrets — never commit them (the old patterns above missed the .bak- form).
 config.yaml
@@ -19,7 +19,7 @@ __pycache__/
 .venv/
 venv/
 
-# plutus_agent (monetization engine) artifacts
+# ledger_agent (monetization engine) artifacts
 build/
 dist/
 *.egg-info/
@@ -28,5 +28,5 @@ dist/
 *.db-shm
 quickstart.db
 .playwright-mcp/
-plutus-*.pdf
-plutus-*.html
+ledger-*.pdf
+ledger-*.html

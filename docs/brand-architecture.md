@@ -39,11 +39,11 @@ Ledger's core is an append-only, hash-chained evidence record. Resource
 allocation, usage metering, billing, provider reconciliation, and Stripe are
 optional adapters—not the product boundary and not the primary story.
 
-## Plutus transition
+## Ledger transition
 
-`Plutus` is a legacy compatibility identity during migration. Keep existing
-contracts stable, including `plutus-agent`, `plutus_agent`, the `plutus` CLI,
-`PLUTUS_*` configuration, deployed endpoints, and `/v1` routes, until a
+`Ledger` is a legacy compatibility identity during migration. Keep existing
+contracts stable, including `ledger-agent`, `ledger_agent`, the `ledger` CLI,
+`LEDGER_*` configuration, deployed endpoints, and `/v1` routes, until a
 separately announced migration supplies tested Ledger aliases and a deprecation
 window.
 

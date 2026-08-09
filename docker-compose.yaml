@@ -12,18 +12,18 @@ services:
     ports:
       - "8420:8420"
     volumes:
-      - plutus-data:/data
+      - ledger-data:/data
     environment:
-      PLUTUS_HOME: /data
+      LEDGER_HOME: /data
       # --- Auth (REQUIRED for a real deploy: the server refuses to bind 0.0.0.0
       #     with auth disabled). Uncomment + fill these, drop --allow-insecure
       #     from the command below, and ideally sit behind a TLS proxy.
       #     See docs/deploy-hardening.md. ---
-      # PLUTUS_AUTH_ENABLED: "1"
-      # PLUTUS_GOOGLE_CLIENT_ID: ${PLUTUS_GOOGLE_CLIENT_ID:-}
-      # PLUTUS_GOOGLE_CLIENT_SECRET: ${PLUTUS_GOOGLE_CLIENT_SECRET:-}
-      # PLUTUS_BASE_URL: ${PLUTUS_BASE_URL:-}   # https://... enables the Secure cookie
-      # PLUTUS_ALLOWED_DOMAIN: ${PLUTUS_ALLOWED_DOMAIN:-}
+      # LEDGER_AUTH_ENABLED: "1"
+      # LEDGER_GOOGLE_CLIENT_ID: ${LEDGER_GOOGLE_CLIENT_ID:-}
+      # LEDGER_GOOGLE_CLIENT_SECRET: ${LEDGER_GOOGLE_CLIENT_SECRET:-}
+      # LEDGER_BASE_URL: ${LEDGER_BASE_URL:-}   # https://... enables the Secure cookie
+      # LEDGER_ALLOWED_DOMAIN: ${LEDGER_ALLOWED_DOMAIN:-}
       # --- Stripe (optional; leave blank to run fully offline) ---
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
@@ -37,4 +37,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  plutus-data:
+  ledger-data:

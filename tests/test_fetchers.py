@@ -6,7 +6,7 @@ with an injected opener (no network), the never-assume-zero orchestration, and
 """
 import pytest
 
-from plutus_agent import db, fetchers, metering, reconcile
+from ledger_agent import db, fetchers, metering, reconcile
 
 
 # --------------------------------------------------------------- parsers ------
@@ -125,7 +125,7 @@ def test_fetch_authoritative_mix_success_and_error():
 
 # ------------------------------------------------------------ close_period -----
 def _org(tmp_path, credit=1000.0):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "Acme", tier="pro")["id"]
     if credit:

@@ -25,9 +25,9 @@ implemented by the per-org event hash chain and out-of-band checkpoints
 - every `usage_events` row carries `prev_hash`/`row_hash` over canonical,
   column-tagged immutable fields; SHA-256 by default, HMAC-SHA256 when a key
   is set;
-- verification (`plutus verify`) replays the chain from genesis and fails at
+- verification (`ledger verify`) replays the chain from genesis and fails at
   the first divergence — exit 0 = intact, exit 2 = tampered;
-- retained checkpoints (`plutus checkpoint` / `verify-checkpoints`) pin a
+- retained checkpoints (`ledger checkpoint` / `verify-checkpoints`) pin a
   chain head out of band so a rewritten history cannot be re-chained into
   agreement with a head someone else already holds.
 
@@ -56,7 +56,7 @@ Each layer has its own verifier, and neither verifier replays the other:
 
 | Claim to check | Verifier | Does not require |
 |---|---|---|
-| Storage did not change | `plutus verify` / `verify-checkpoints` (chain + retained heads) | Replaying receipt signatures; any receipt at all |
+| Storage did not change | `ledger verify` / `verify-checkpoints` (chain + retained heads) | Replaying receipt signatures; any receipt at all |
 | Receipt is genuine and authorized | AAR authority checks (manifest state, approval state, opaque reference validity) | Replaying the storage chain; the chain root |
 
 The two verifiers may run in any order, on different machines, at different
@@ -68,7 +68,7 @@ present.
 
 | Case | Dataplane verdict | Authority verdict | Distinguishable outcome |
 |---|---|---|---|
-| Tampered store, valid receipts | **broken** — chain/checkpoint divergence (`plutus verify` exit 2) | **intact** — receipts still verify against manifests | Storage compromised; authority trail intact. Do not conflate "receipts check out" with "store intact". |
+| Tampered store, valid receipts | **broken** — chain/checkpoint divergence (`ledger verify` exit 2) | **intact** — receipts still verify against manifests | Storage compromised; authority trail intact. Do not conflate "receipts check out" with "store intact". |
 | Valid store, revoked/absent signature | **intact** — chain verifies | **failed** — signature missing or manifest revoked | Store intact; authority compromised/expired. Do not conflate "chain verifies" with "action was authorized". |
 | Both intact | intact | intact | The only case where "what happened" and "it was authorized" both hold. |
 | Both failed | broken | failed | Either layer independently broken; both must be remediated. |

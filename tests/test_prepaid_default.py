@@ -14,9 +14,9 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import cli, db, metering
-from plutus_agent.config import DEFAULT_CONFIG
-from plutus_agent.server import app
+from ledger_agent import cli, db, metering
+from ledger_agent.config import DEFAULT_CONFIG
+from ledger_agent.server import app
 
 
 class TestDefaultOn(unittest.TestCase):
@@ -94,14 +94,14 @@ class TestCliToggle(unittest.TestCase):
     def setUp(self):
         fd, self.dbpath = tempfile.mkstemp(suffix=".db")
         os.close(fd)
-        os.environ["PLUTUS_DB"] = self.dbpath
+        os.environ["LEDGER_DB"] = self.dbpath
         conn = db.connect(self.dbpath)
         db.init_schema(conn)
         self.org = db.create_org(conn, "Acme")["id"]
         conn.close()
 
     def tearDown(self):
-        os.environ.pop("PLUTUS_DB", None)
+        os.environ.pop("LEDGER_DB", None)
         for ext in ("", "-wal", "-shm"):
             try:
                 os.unlink(self.dbpath + ext)

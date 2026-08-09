@@ -1,13 +1,13 @@
 # Database schema & forward-compatibility policy
 
-Plutus stores all state in a single SQLite file (`~/.plutus/plutus.db` by
+Ledger stores all state in a single SQLite file (`~/.ledger/ledger.db` by
 default). This document is the **1.0 forward-compatibility contract** for that
 schema — the database half of the frozen contract whose API half is
 [`openapi.yaml`](../openapi.yaml).
 
 ## Schema version
 
-`plutus_agent.db.SCHEMA_VERSION` is an integer bumped on every schema change and
+`ledger_agent.db.SCHEMA_VERSION` is an integer bumped on every schema change and
 stamped into the `meta` table key `schema_version` on `init_schema()`. The
 runtime currently declares **`SCHEMA_VERSION=18`**. Read the stored value with
 `db.get_schema_version(conn)`; a fresh database is stamped with the runtime
@@ -49,7 +49,7 @@ value after all additive migrations have run.
    rather than risk corrupting money data with old code. Upgrade the package.
 5. **Breaking changes require a new major.** Anything that violates (1)–(2) — a
    dropped/renamed column, a money-representation change, a semantic change to an
-   existing column — ships only in a Plutus 2.0 with an explicit, documented
+   existing column — ships only in a Ledger 2.0 with an explicit, documented
    migration, and bumps `SCHEMA_VERSION` across the corresponding range.
 
 ## Concurrency note

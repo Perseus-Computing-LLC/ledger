@@ -3,14 +3,14 @@
 This plugin is an optional self-hosted Perseus Ledger integration. It is
 **separate from Anthropic** and is not endorsed, reviewed, or operated by
 Anthropic. Your Ledger instance is your responsibility; Anthropic does not host,
-monitor, or have access to it. Legacy `plutus*` identifiers remain in the
+monitor, or have access to it. Legacy `ledger*` identifiers remain in the
 integration configuration during the transition.
 
 ## What is sent, and where
 
 At the end of each Claude Code turn, the plugin sends **token usage metadata** to
-the Plutus instance **you configure** (`remote` in `~/.claude/plutus_cc_config.json`
-or `PLUTUS_REMOTE_URL`):
+the Ledger instance **you configure** (`remote` in `~/.claude/ledger_cc_config.json`
+or `LEDGER_REMOTE_URL`):
 
 - the model name (e.g. `claude-opus-4-8`)
 - token counts: input, output, cache-read
@@ -29,7 +29,7 @@ endpoint, authenticated with your ingest API key.
 
 ## Retention and use
 
-Retention and access are governed entirely by **your** Plutus deployment and
+Retention and access are governed entirely by **your** Ledger deployment and
 your own privacy policy — not by this plugin and not by Anthropic. The plugin
 does not send data anywhere except the instance you point it at. It does not
 train on, resell, or share your data.
@@ -38,4 +38,4 @@ train on, resell, or share your data.
 
 Installing this plugin and configuring an instance URL constitutes your consent
 to send the above metadata to that instance at session end. Remove the plugin
-(`/plugin uninstall plutus-metering`) and delete the config file to stop.
+(`/plugin uninstall ledger-metering`) and delete the config file to stop.

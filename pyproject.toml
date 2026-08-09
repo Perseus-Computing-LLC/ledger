@@ -3,9 +3,9 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "plutus-agent"
-# Single-sourced from plutus_agent.__version__ (#57) so the wheel metadata and
-# `plutus version` can never drift apart.
+name = "ledger-agent"
+# Single-sourced from ledger_agent.__version__ (#57) so the wheel metadata and
+# `ledger version` can never drift apart.
 dynamic = ["version"]
 description = "Perseus Ledger: verifiable, hash-chained provenance for autonomous-system events and resource allocation."
 readme = "README.md"
@@ -41,10 +41,10 @@ dependencies = [
 # docs/deploy-hardening.md).
 stripe = ["stripe>=7.0,<14"]
 pdf = ["reportlab>=4.0,<5"]
-# #109: provider cost fetchers for `plutus close`. Only AWS Bedrock (Cost
+# #109: provider cost fetchers for `ledger close`. Only AWS Bedrock (Cost
 # Explorer) needs an SDK; OpenAI/Anthropic use stdlib urllib, no dependency.
 fetchers = ["boto3>=1.28"]
-# Optional: the Invarium bridge (plutus_agent.integrations.invarium) for
+# Optional: the Invarium bridge (ledger_agent.integrations.invarium) for
 # accuracy-gated savings metering. Only needed to run tests/examples that pair
 # behavioral verdicts with metering; the bridge itself is dependency-free.
 invarium = ["invarium>=0.3"]
@@ -57,24 +57,24 @@ Repository = "https://github.com/Perseus-Computing-LLC/ledger"
 Issues = "https://github.com/Perseus-Computing-LLC/ledger/issues"
 
 [project.scripts]
-plutus = "plutus_agent.cli:main"
+ledger = "ledger_agent.cli:main"
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "test_plutus.py"]
+testpaths = ["tests", "test_ledger.py"]
 addopts = "--strict-markers"
 markers = [
   "integration: tests that exercise optional external integrations",
 ]
 
 [tool.setuptools.dynamic]
-version = { attr = "plutus_agent.__version__" }
+version = { attr = "ledger_agent.__version__" }
 
 [tool.setuptools]
-# The repo also contains the production monitor (plutus.py / plutus_route.py) at
+# The repo also contains the production monitor (ledger.py / ledger_route.py) at
 # the root; those ship and run independently and are NOT part of this package.
 packages = [
-    "plutus_agent",
-    "plutus_agent.billing",
-    "plutus_agent.server",
-    "plutus_agent.integrations",
+    "ledger_agent",
+    "ledger_agent.billing",
+    "ledger_agent.server",
+    "ledger_agent.integrations",
 ]

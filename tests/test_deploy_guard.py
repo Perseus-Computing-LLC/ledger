@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent.server import app
+from ledger_agent.server import app
 
 
 class TestInsecureBindGuard(unittest.TestCase):
@@ -26,11 +26,11 @@ class TestInsecureBindGuard(unittest.TestCase):
         app._guard_insecure_bind("0.0.0.0", False, {"server": {"allow_insecure": True}})
 
     def test_allows_public_bind_with_env_optin(self):
-        os.environ["PLUTUS_ALLOW_INSECURE"] = "1"
+        os.environ["LEDGER_ALLOW_INSECURE"] = "1"
         try:
             app._guard_insecure_bind("0.0.0.0", False, {})
         finally:
-            del os.environ["PLUTUS_ALLOW_INSECURE"]
+            del os.environ["LEDGER_ALLOW_INSECURE"]
 
 
 if __name__ == "__main__":

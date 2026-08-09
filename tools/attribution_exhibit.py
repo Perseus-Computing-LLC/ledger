@@ -8,7 +8,7 @@ tool turns that claim into a picture, computed from a REAL Hermes ``state.db``:
 
   BEFORE  = the old aggregate: every session's cost on its initial provider
             (``sessions`` row, grouped by ``billing_provider``).
-  AFTER   = #97's per-model attribution (``plutus_agent.hermes.read_spend_events``:
+  AFTER   = #97's per-model attribution (``ledger_agent.hermes.read_spend_events``:
             cost allocated across the providers that actually served each call).
 
 Emits a Markdown table + a self-contained SVG bar chart to ``docs/exhibits/``.
@@ -33,7 +33,7 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent.hermes import read_spend_events  # noqa: E402
+from ledger_agent.hermes import read_spend_events  # noqa: E402
 
 _EXHIBITS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "docs", "exhibits")

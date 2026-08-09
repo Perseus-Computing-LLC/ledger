@@ -1,11 +1,11 @@
 # Changelog
 
-All notable changes to Plutus are documented here.
+All notable changes to Ledger are documented here.
 
 ## [Unreleased]
 
 ### Added
-- **`plutus reconcile-webhooks`** (#177). Diffs the Stripe event log (source
+- **`ledger reconcile-webhooks`** (#177). Diffs the Stripe event log (source
   of truth) against the local `stripe_events` table to surface webhook
   events dropped by deploy windows or restarts. Dry-run by default;
   `--apply` replays gaps oldest-first through the idempotent app handler.
@@ -13,7 +13,7 @@ All notable changes to Plutus are documented here.
 
 ### Added
 - **Recurring-billing gate** (#175). New `billing.subscriptions_enabled`
-  config key + `PLUTUS_SUBSCRIPTIONS_ENABLED` env override (default OFF).
+  config key + `LEDGER_SUBSCRIPTIONS_ENABLED` env override (default OFF).
   While gated, `POST /billing/checkout/pro` and `/billing/checkout/team`
   return 403 with a "Subscriptions open at launch" page; credit top-ups and
   donations are unaffected. Flip on once the launch-readiness checks
@@ -64,7 +64,7 @@ All notable changes to Plutus are documented here.
   savings)** for every tier and for any unrecognized input — so an uncalibrated
   deployment can never over-report savings. Real multipliers are supplied from
   *measured* artifacts (perseus-vault#630) via `pricing.quantization` in
-  `~/.plutus/config.yaml`, never from vendor-published claims. See
+  `~/.ledger/config.yaml`, never from vendor-published claims. See
   [docs/quantization-cost-model.md](docs/quantization-cost-model.md).
 
 ### Changed
@@ -72,11 +72,11 @@ All notable changes to Plutus are documented here.
   defaults to `0.10` and `savings.DEFAULT_RATE_BPS` to `1000`; per-run `--rate`
   and the config key still override. This is the published rate for the
   value-based path; the underlying share math is unchanged.
-- **Attribution: Plutus measures, it doesn't save.** Corrected the dashboard
+- **Attribution: Ledger measures, it doesn't save.** Corrected the dashboard
   billboard and all copy to reflect that **Perseus** (routing) + **Vault** (memory)
-  are what reduce spend; Plutus meters it and *proves* the savings. The billboard
+  are what reduce spend; Ledger meters it and *proves* the savings. The billboard
   now branches on whether a Perseus baseline is present: with one it reads
-  *"Perseus saved you $X — verified by Plutus"*; standalone it reads *"Your AI
+  *"Perseus saved you $X — verified by Ledger"*; standalone it reads *"Your AI
   spend … flagship-equivalent … N× efficient"* (a tracking/verification stat, no
   "saved" claim), plus a "reconcile against your provider console" nudge. The Free
   tip jar only appears when there are provable ecosystem savings to share. Tier
@@ -100,24 +100,24 @@ All notable changes to Plutus are documented here.
   Changed above) shown on every tier, with a Free-tier **tip jar**
   (`POST /billing/checkout/donate` → one-time Stripe Checkout, recorded as a
   distinct hash-chained `donation` ledger entry). Deep reporting (per-task,
-  leakage, export) is gated behind Pro. `plutus bill-savings --apply` now refuses
+  leakage, export) is gated behind Pro. `ledger bill-savings --apply` now refuses
   to invoice a waived (Pro) or suggested (Free) org without `--force`. `/pricing`
-  and the `plutus pricing` CLI show the four-tier ladder. See
+  and the `ledger pricing` CLI show the four-tier ladder. See
   [docs/three-tier-model.md](docs/three-tier-model.md).
 - **Efficiency leakage & policy adherence (#8).** The negative half of the
   efficiency story: turns that ran ABOVE the cheapest policy-passing option.
   Meter an event with `optimal_model` / `optimal_cost_usd` (the model the routing
-  policy *would* have chosen); the server prices it like the baseline. `plutus
+  policy *would* have chosen); the server prices it like the baseline. `ledger
   efficiency` now reports **leaked $** (`Σ max(0, cost − optimal)`) and an
   **adherence rate** (share of policy-covered turns that ran on-policy) alongside
   achieved efficiency — so "you saved $X" is paired with "and left $Y on the
   table on these off-policy turns." Schema v8 (additive: nullable
   `usage_events.optimal_micros`, hash-chained as another optional trailing field
   so pre-v8 chains verify unchanged); `optimal_micros` exported as `optimal_usd`
-  for audit; `/v1/usage` and `plutus meter --optimal` accept it. Only events that
+  for audit; `/v1/usage` and `ledger meter --optimal` accept it. Only events that
   carry an optimal count toward leakage/adherence — the negative signal is never
   fabricated. Roadmap for tiers 2–3 in docs/roadmap-efficiency-leakage.md.
-- **Savings-share billing (`plutus savings` / `plutus bill-savings`).** The
+- **Savings-share billing (`ledger savings` / `ledger bill-savings`).** The
   value-based revenue path: bill a share (default 18%, `billing.savings_share_pct`)
   of the money Perseus provably saved a customer, not just the flat subscription.
   Every metered event can carry a `baseline_cost_usd` counterfactual (what the
@@ -125,56 +125,56 @@ All notable changes to Plutus are documented here.
   `max(0, baseline − cost)` and a period's billable share is the summed savings ×
   the rate. Three properties keep the number defensible: only events with a
   baseline count (never a blanket percentage), the baseline is folded into the
-  usage hash chain (so an inflated saving breaks `plutus verify`) and exported as
+  usage hash chain (so an inflated saving breaks `ledger verify`) and exported as
   `baseline_usd` for independent reconstruction, and coverage is always disclosed.
-  `plutus savings` reports the figure read-only; `plutus bill-savings --apply`
+  `ledger savings` reports the figure read-only; `ledger bill-savings --apply`
   raises a Stripe invoice and records an idempotent `savings_invoices` row (a
   re-run for the same org+period is a no-op). `baseline_cost_usd` is accepted at
-  `plutus meter --baseline` and the `/v1/usage` boundary. Free tier now covers up
+  `ledger meter --baseline` and the `/v1/usage` boundary. Free tier now covers up
   to 5 team members (the hybrid model: free to 5, then the $20/mo floor, then
   opt-in savings-share). Schema v7 (additive: nullable `usage_events.baseline_micros`
   chained as an optional trailing field so pre-v7 chains verify unchanged, plus
   the `savings_invoices` table). See BILLING.md §6 and docs/savings-share.md. (#7)
 - **Automatic baselines from the Hermes bridge.** `examples/hermes_sync.py` now
   tags each synced session with a `baseline_model` — the flagship the customer
-  would have run without Perseus routing — so hosted Plutus prices the
+  would have run without Perseus routing — so hosted Ledger prices the
   counterfactual from its published table and records the saving with no manual
-  step. Opt in with `PLUTUS_BASELINE=flagship` (or `PLUTUS_BASELINE_MODEL[S]`); a
+  step. Opt in with `LEDGER_BASELINE=flagship` (or `LEDGER_BASELINE_MODEL[S]`); a
   baseline is attached only when the actual model differs from the flagship (so
   un-routed traffic records nothing), and only the model name is sent — never a
   dollar amount — keeping the figure reconstructable. `record_usage` and
   `/v1/usage` accept `baseline_model` and price it via `pricing.resolve_price`;
   `config.savings.baseline_models` is the operator-owned flagship map. (#7)
-- **Ledger tamper-evidence (`plutus verify`).** The usage ledger was
+- **Ledger tamper-evidence (`ledger verify`).** The usage ledger was
   integer-exact and re-queryable but append-only *by convention* only — an
   operator with database access could rewrite a debit undetectably, which the
   verified-savings work (perseus#749) made load-bearing. Every `usage_events`
   row now carries a per-org SHA-256 hash chain (`prev_hash`/`row_hash`) computed
   inside `record_usage`'s transaction, so any modification, deletion, reorder,
-  or insertion breaks the chain from that point. `plutus verify` walks the chain
+  or insertion breaks the chain from that point. `ledger verify` walks the chain
   and reports the first divergence (exit 2 on tampering); `GET /v1/admin/verify`
   and a dashboard "Ledger integrity" tile surface the same. An optional keyed
-  HMAC (`ledger.hmac_key` / `PLUTUS_CHAIN_HMAC_KEY`), with the key held by the
+  HMAC (`ledger.hmac_key` / `LEDGER_CHAIN_HMAC_KEY`), with the key held by the
   customer, gives the two-party property — the operator alone cannot re-chain a
   rewritten history. Schema v6 (additive: nullable columns; rows written before
   the upgrade are reported as an unverifiable "pre-chain" prefix, not
   back-filled). Reuses the Perseus Vault audit-chain design (#460/#463). No
   "tamper-evident" claim ships in public docs until an external crypto review
   covers this. See docs/ledger-integrity.md. (#108)
-- **Provider cost fetchers + scheduled close (`plutus close`).** Follow-up to
+- **Provider cost fetchers + scheduled close (`ledger close`).** Follow-up to
   the reconciler (#107): the operator no longer supplies the authoritative
-  per-provider total by hand. New `plutus_agent.fetchers` pulls a period's real
+  per-provider total by hand. New `ledger_agent.fetchers` pulls a period's real
   spend from each provider's own cost API — OpenAI organization Costs
   (`OPENAI_ADMIN_KEY`), Anthropic cost report (`ANTHROPIC_ADMIN_KEY`), and AWS
-  Bedrock via Cost Explorer (`pip install 'plutus-agent[fetchers]'`) — and
-  normalizes to the reconciler's `{provider: usd}` shape. `plutus close` runs
+  Bedrock via Cost Explorer (`pip install 'ledger-agent[fetchers]'`) — and
+  normalizes to the reconciler's `{provider: usd}` shape. `ledger close` runs
   fetch → reconcile in one step (period defaults to the previous month;
   providers default to those with recorded usage), dry-run by default, apply with
   `--apply`. Carries #107's guardrails: a provider whose fetch fails is left
   unreconciled and **never zeroed**, and `close` exits non-zero so a cron job
   surfaces the gap. OpenAI/Anthropic use stdlib urllib (no new hard dependency);
   the offline story is untouched. See docs/reconciliation.md. (#109)
-- **Cost reconciliation (`plutus reconcile`).** The wired providers return
+- **Cost reconciliation (`ledger reconcile`).** The wired providers return
   tokens, not dollars, so metered cost is priced from the static table in
   `pricing.py` and flagged `estimated`. The new reconciler trues that up to a
   provider's authoritative billing: give it the provider's own per-provider
@@ -183,17 +183,17 @@ All notable changes to Plutus are documented here.
   real invoice. Idempotent and restatement-safe (each provider+period keyed by
   `reconcile:<period>:<provider>`, written net of prior adjusts), dry-run by
   default, and it never assumes a provider with no supplied total should be
-  zeroed. New `plutus_agent.reconcile` module + `plutus reconcile` CLI. See
+  zeroed. New `ledger_agent.reconcile` module + `ledger reconcile` CLI. See
   docs/reconciliation.md.
 
 ### Fixed
-- **Per-model spend attribution for mid-session model switches.** Plutus reads
+- **Per-model spend attribution for mid-session model switches.** Ledger reads
   Hermes' `state.db` for spend. The `sessions` row attributes every token to the
   `(model, billing_provider)` active when the session *started*, so a mid-session
   `/model` switch dumped the whole session's cost onto the initial provider —
   corrupting per-provider spend, and with it the runway projections and the
   runway router's decisions (a provider with hidden burn looks like it has
-  infinite runway and gets *more* traffic). Plutus now reads the schema-v17
+  infinite runway and gets *more* traffic). Ledger now reads the schema-v17
   `session_model_usage` table (authored + fixed upstream in hermes-agent, issue
   #51607) so spend lands on the provider that actually served each call. Tokens
   come straight from the per-model rows; the session's authoritative
@@ -201,9 +201,9 @@ All notable changes to Plutus are documented here.
   estimated cost (falling back to token weight), so the per-session total is
   preserved exactly and never regresses. Pre-v17 / un-backfilled databases fall
   back to the aggregate `sessions` row. Applied across all three readers — the
-  standalone monitor (`plutus.py`), the hosted sync (`examples/hermes_sync.py`),
+  standalone monitor (`ledger.py`), the hosted sync (`examples/hermes_sync.py`),
   and the backfill (`examples/hermes_integration.py`) — with a new canonical,
-  unit-tested implementation in `plutus_agent/hermes.py`.
+  unit-tested implementation in `ledger_agent/hermes.py`.
 
 ## [1.0.1] — 2026-07-05
 
@@ -222,10 +222,10 @@ than expose an unauthenticated dashboard on a public interface.
   is disabled — previously the shipped Docker/compose default (`serve --demo
   --host 0.0.0.0`) and the off-by-default / fail-off-on-misconfig auth could
   publish an open billing console on the network. Override for a trusted network
-  with `--allow-insecure` / `PLUTUS_ALLOW_INSECURE=1`; the disposable demo image
+  with `--allow-insecure` / `LEDGER_ALLOW_INSECURE=1`; the disposable demo image
   sets it explicitly. New `docs/deploy-hardening.md` documents the safe config.
 - **Config backups no longer escape the ignore rules.** `.gitignore`/`.dockerignore`
-  matched only `*.plutus-bak-*` but the real backup name is `config.yaml.bak-<ts>`,
+  matched only `*.ledger-bak-*` but the real backup name is `config.yaml.bak-<ts>`,
   which could carry file-sourced secrets into a commit or image; now `config.yaml*`
   and `*.bak-*` are ignored.
 - **SMTP `alerts.require_tls` (opt-in)** refuses to send alerts over an
@@ -262,7 +262,7 @@ than expose an unauthenticated dashboard on a public interface.
   a victim's browser a `/auth/callback?code=…&state=…` link — planting an
   attacker-owned session in the victim's browser (the victim would then operate
   inside, and leak API keys to, the attacker's tenant). `/auth/login` now sets a
-  short-lived `HttpOnly; SameSite=Lax` `plutus_oauth_state` cookie and
+  short-lived `HttpOnly; SameSite=Lax` `ledger_oauth_state` cookie and
   `handle_callback` requires the callback `state` to match it (constant-time),
   in addition to the existing `_pending` nonce check. (2026-07-05 security review)
 - **Security headers on every response.** `_send` now emits `X-Frame-Options: DENY`
@@ -287,7 +287,7 @@ than expose an unauthenticated dashboard on a public interface.
 
 ## [1.0.0] — 2026-06-27
 
-**Plutus 1.0 — the billing loop is closed and the contract is frozen.** The
+**Ledger 1.0 — the billing loop is closed and the contract is frozen.** The
 ledger is now an auditable mirror of Stripe (refunds, disputes, and failed
 payments reverse it idempotently); every money- and quota-bearing input is
 guarded; ingest and auth are hardened; self-serve export and a token-scoped admin
@@ -314,7 +314,7 @@ launch.
   ADR keeping the single-file SQLite backend for 1.0 while documenting the
   Postgres migration shape. `db.SCHEMA_VERSION` bumped to 5 (the
   `ingest_idempotency` table); `init_schema` now refuses to open a database
-  written by a newer Plutus, and `db.get_schema_version()` reads the stamped
+  written by a newer Ledger, and `db.get_schema_version()` reads the stamped
   version.
 
 ### Security
@@ -330,7 +330,7 @@ launch.
   carries a valid token. This lets through legitimate requests whose
   Origin/Referer a privacy proxy stripped (which the origin check rejects), while
   a forgery — which can't know the token — is still blocked. The token is
-  `HMAC-SHA256(session_token, "plutus-csrf-v1")`, derivable only by the cookie
+  `HMAC-SHA256(session_token, "ledger-csrf-v1")`, derivable only by the cookie
   holder and never leaking the cookie; it's embedded as a hidden `_csrf` field in
   every dashboard/pricing form. The origin check remains the first gate.
 - **Per-IP self-serve signup throttle (#59).** The existing global hourly limiter
@@ -349,8 +349,8 @@ launch.
 
 ### Changed
 - **Package version is single-sourced (#57).** `pyproject.toml` now declares
-  `dynamic = ["version"]` reading from `plutus_agent.__version__`, so the wheel
-  metadata and `plutus version` can no longer drift apart.
+  `dynamic = ["version"]` reading from `ledger_agent.__version__`, so the wheel
+  metadata and `ledger version` can no longer drift apart.
 
 ### Tests
 - **High-risk auth/tenant coverage (#66, part 3 — closes #66).** Added tests for
@@ -368,7 +368,7 @@ launch.
   `GET/POST /v1/admin/orgs` (list / create), `POST /v1/admin/credits`
   (`grant`/`adjust` ledger entries), and `GET/POST /v1/admin/keys` (list /
   mint — the secret is returned once). Gated by a single `admin.token`
-  (env `PLUTUS_ADMIN_TOKEN`, masked from saved config, constant-time compared);
+  (env `LEDGER_ADMIN_TOKEN`, masked from saved config, constant-time compared);
   with no token configured the API is disabled and returns `404`.
 - **Self-serve spend export + cursor pagination (#66, part 1).** New
   `GET /v1/usage/export.csv` and `export.json` (Bearer-authenticated, org-scoped,
@@ -436,7 +436,7 @@ launch.
 ### Added
 - **Stripe refunds, disputes, and failed payments now reverse the ledger
   (#60).** The webhook handler previously ignored every reversal event, so a
-  refunded or charged-back prepaid top-up left the credit on Plutus's
+  refunded or charged-back prepaid top-up left the credit on Ledger's
   append-only ledger forever. New handlers: `charge.refunded` posts a negative
   `refund` entry (converging to the charge's cumulative `amount_refunded`, so
   partial/repeat refunds reverse exactly once); `charge.dispute.created` /
@@ -464,8 +464,8 @@ launch.
   `over_balance` once a charge would go negative. It only affects orgs that have
   actually held credit; pure free-tier tracking is never blocked. Trusted /
   internal orgs can opt into track-only mode with a new per-org
-  `allow_negative_balance` flag, toggled via `plutus org allow-negative <org>` /
-  `plutus org enforce-balance <org>` (idempotent column migration on existing
+  `allow_negative_balance` flag, toggled via `ledger org allow-negative <org>` /
+  `ledger org enforce-balance <org>` (idempotent column migration on existing
   databases).
 
 ### Fixed — 1.0 punch-list (#37)
@@ -555,7 +555,7 @@ threaded, connection-per-request server.
   sync bridge sent the default `Python-urllib/x.y` User-Agent, which Cloudflare
   (and similar WAFs) hard-block with **error 1010** — so `POST /v1/usage`
   through the public origin failed for any urllib client. Both now send a real
-  `User-Agent` (`plutus-agent/<version>`). Caught while dogfooding Hermes.
+  `User-Agent` (`ledger-agent/<version>`). Caught while dogfooding Hermes.
 
 ## [0.5.0] — 2026-06-23
 
@@ -567,14 +567,14 @@ feed usage into a hosted instance over HTTP, with no SDK or local DB.
   array (≤1000) via an API key, returns the metered result(s) + month-to-date
   quota. Past the free cap with `pricing.block_over_free_limit` on, it returns
   **402** with an `upgrade_url`.
-- **API keys** — per-org `plutus_sk_…` secrets (only a SHA-256 hash is stored;
+- **API keys** — per-org `ledger_sk_…` secrets (only a SHA-256 hash is stored;
   the secret is shown once). New `api_keys` table, `db.create_api_key` /
   `api_key_org` / `list_api_keys` / `revoke_api_key`.
 - **Dashboard key management** — an API-keys panel (list, create, revoke) with a
   ready-to-paste `curl` snippet; a one-time "key created" page.
-- **`plutus keys create|list|revoke`** CLI for self-hosted/local key management.
-- **SDK remote mode** — `Meter(remote="https://…", api_key="plutus_sk_…")` (or env
-  `PLUTUS_REMOTE_URL` + `PLUTUS_API_KEY`) sends each `track()` to `/v1/usage`
+- **`ledger keys create|list|revoke`** CLI for self-hosted/local key management.
+- **SDK remote mode** — `Meter(remote="https://…", api_key="ledger_sk_…")` (or env
+  `LEDGER_REMOTE_URL` + `LEDGER_API_KEY`) sends each `track()` to `/v1/usage`
   instead of a local DB. Auto-detected from env, so the bundled adapters and the
   Claude Code hook report to a hosted instance with no code change. A 402 over
   quota returns a non-recorded result rather than raising (won't break an agent);
@@ -586,11 +586,11 @@ feed usage into a hosted instance over HTTP, with no SDK or local DB.
 
 ## [0.4.0] — 2026-06-23
 
-The **self-serve signup funnel** — Plutus turns into a SaaS strangers can buy
+The **self-serve signup funnel** — Ledger turns into a SaaS strangers can buy
 without an operator in the loop.
 
 ### Added
-- **Open signup** (`auth.allow_signup` / `PLUTUS_ALLOW_SIGNUP`). When on, any
+- **Open signup** (`auth.allow_signup` / `LEDGER_ALLOW_SIGNUP`). When on, any
   verified Google account that isn't already known gets its *own* new Free-tier
   org as owner. Off by default; the allow-list still takes precedence so
   inviting a teammate and onboarding a stranger stay distinct. See `docs/auth.md`.
@@ -627,36 +627,36 @@ without an operator in the loop.
 
 ## [0.2.0] — 2026-06-21
 
-The **monetization engine** — Plutus becomes the billing layer for AI agents.
+The **monetization engine** — Ledger becomes the billing layer for AI agents.
 
 ### Added
-- **`plutus_agent` package** (PyPI `plutus-agent`, console command `plutus`).
+- **`ledger_agent` package** (PyPI `ledger-agent`, console command `ledger`).
 - **Multi-tenant model** — organizations → workspaces → users, in SQLite.
 - **Usage metering** per provider / model / task-type, with token→cost
   estimation and exact-cost passthrough.
 - **Prepaid credit** — append-only ledger that depletes as calls route through;
   balance is the sum of deltas (robust to out-of-order / back-filled inserts).
-- **Dark dashboard** at `:8420` (`plutus serve`) — brand `#0c0814`, real-time
+- **Dark dashboard** at `:8420` (`ledger serve`) — brand `#0c0814`, real-time
   cards, per-workspace budget bars, provider health, cost-per-task, live feed.
   Framework-free (stdlib `http.server`).
-- **`plutus serve --demo` / `plutus demo`** — realistic month of sample data.
+- **`ledger serve --demo` / `ledger demo`** — realistic month of sample data.
 - **Stripe billing** — Checkout for prepaid credits + the $20/mo Pro plan,
   Customer Portal, and an idempotent webhook handler. Optional + offline-safe.
-- **`plutus stripe-setup`** — creates the Pro price in your Stripe account.
-- **`plutus install-claude-hook`** — wires Plutus into Claude Code / Codex as a
+- **`ledger stripe-setup`** — creates the Pro price in your Stripe account.
+- **`ledger install-claude-hook`** — wires Ledger into Claude Code / Codex as a
   Stop hook so every turn meters automatically.
 - **Monthly reports** — PDF (reportlab) or print-ready HTML.
 - **Alerts** — SMTP low-balance and budget-cap email, de-duped, offline-safe.
 - **Pricing tiers** — Free / Pro / Enterprise.
-- **Embeddable client** — `from plutus_agent import Meter`.
+- **Embeddable client** — `from ledger_agent import Meter`.
 - **Integrations** — Anthropic / OpenAI / Hermes adapters; runnable examples.
 - **Packaging** — `pyproject.toml`, Dockerfile, docker-compose, GHCR + PyPI
   release workflow, expanded CI.
 
 ### Unchanged
-- The live credit monitor (`plutus.py`) and runway router (`plutus_route.py`)
+- The live credit monitor (`ledger.py`) and runway router (`ledger_route.py`)
   are left byte-for-byte intact. The engine bridges to them via subprocess.
 
 ## [0.1.0]
-- Provider credit & spend monitor (`plutus.py`) and runway-based model router
-  (`plutus_route.py`) for Hermes Agent.
+- Provider credit & spend monitor (`ledger.py`) and runway-based model router
+  (`ledger_route.py`) for Hermes Agent.

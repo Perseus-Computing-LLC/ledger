@@ -2,7 +2,7 @@
 """Fail CI when an imported price catalog is older than the allowed vintage."""
 import argparse
 
-from plutus_agent.catalog import DEFAULT_MAX_AGE_DAYS, catalog_is_fresh, load_catalog
+from ledger_agent.catalog import DEFAULT_MAX_AGE_DAYS, catalog_is_fresh, load_catalog
 
 p = argparse.ArgumentParser()
 p.add_argument("catalog")

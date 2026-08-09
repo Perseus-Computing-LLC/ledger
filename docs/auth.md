@@ -1,7 +1,7 @@
 # Authentication — Google sign-in
 
-By default the Plutus dashboard is **open** — fine for `localhost` or when it
-sits behind a trusted proxy. To require login, Plutus ships **Google OIDC**
+By default the Ledger dashboard is **open** — fine for `localhost` or when it
+sits behind a trusted proxy. To require login, Ledger ships **Google OIDC**
 sign-in built on the standard library (no auth framework, no extra dependency).
 
 When enabled:
@@ -23,24 +23,24 @@ OAuth client ID**:
 
 - Application type: **Web application**
 - **Authorized redirect URI:** `https://YOUR-HOST/auth/callback`
-  (e.g. `https://plutus.perseus.observer/auth/callback`)
+  (e.g. `https://ledger.perseus.observer/auth/callback`)
 
 Copy the **Client ID** and **Client secret**.
 
-## 2. Configure Plutus
+## 2. Configure Ledger
 
 Prefer environment variables (the client secret is never written to
 `config.yaml` — it's stripped on save, like the Stripe key):
 
 | Env var | Meaning |
 |---|---|
-| `PLUTUS_AUTH_ENABLED` | `1`/`true` to turn sign-in on |
-| `PLUTUS_GOOGLE_CLIENT_ID` | OAuth client ID |
-| `PLUTUS_GOOGLE_CLIENT_SECRET` | OAuth client secret |
-| `PLUTUS_BASE_URL` | Public origin, e.g. `https://plutus.perseus.observer` (used to build the redirect URI) |
-| `PLUTUS_ALLOWED_EMAILS` | Comma-separated extra emails allowed to sign in |
-| `PLUTUS_ALLOWED_DOMAIN` | Any address at this domain may sign in, e.g. `perseus.observer` |
-| `PLUTUS_ALLOW_SIGNUP` | `1`/`true` for **open signup** — any verified Google account gets its own new Free-tier org |
+| `LEDGER_AUTH_ENABLED` | `1`/`true` to turn sign-in on |
+| `LEDGER_GOOGLE_CLIENT_ID` | OAuth client ID |
+| `LEDGER_GOOGLE_CLIENT_SECRET` | OAuth client secret |
+| `LEDGER_BASE_URL` | Public origin, e.g. `https://ledger.perseus.observer` (used to build the redirect URI) |
+| `LEDGER_ALLOWED_EMAILS` | Comma-separated extra emails allowed to sign in |
+| `LEDGER_ALLOWED_DOMAIN` | Any address at this domain may sign in, e.g. `perseus.observer` |
+| `LEDGER_ALLOW_SIGNUP` | `1`/`true` for **open signup** — any verified Google account gets its own new Free-tier org |
 
 Equivalent `config.yaml`:
 
@@ -49,7 +49,7 @@ auth:
   enabled: true
   google_client_id: "…apps.googleusercontent.com"
   google_client_secret: ""        # leave empty here; supply via env
-  base_url: "https://plutus.perseus.observer"
+  base_url: "https://ledger.perseus.observer"
   allowed_emails: []
   allowed_domain: ""
   provision_org_id: ""            # newly-allowed emails join this org (or the sole org)
@@ -58,7 +58,7 @@ auth:
 ```
 
 > **Safety valve:** if `auth.enabled` is `true` but the client ID/secret are
-> missing, Plutus treats auth as **off** rather than locking everyone out of a
+> missing, Ledger treats auth as **off** rather than locking everyone out of a
 > misconfigured server. The startup banner shows the effective auth mode.
 
 ## 3. Members & provisioning
@@ -66,7 +66,7 @@ auth:
 Sign-in resolves an email in this order:
 
 1. **Existing member** → signs in as themselves (the org owner created by
-   `plutus init` already counts).
+   `ledger init` already counts).
 2. **Allow-listed** (via `allowed_emails`/`allowed_domain`) → provisioned as a
    `member` of `provision_org_id`, or of the only org if there is exactly one.
    This is how you invite teammates into an existing org.
@@ -98,9 +98,9 @@ quota, an **Upgrade to Pro** nudge that links to `/pricing` and Stripe Checkout.
 
 ## 4. Self-hosting note
 
-Cloudflare Access (or any external SSO proxy) can gate Plutus too, but it
+Cloudflare Access (or any external SSO proxy) can gate Ledger too, but it
 doesn't scale to *your* end users — they'd each need access to your Zero Trust
-org. App-native OIDC is what lets customers run Plutus and sign in with their
+org. App-native OIDC is what lets customers run Ledger and sign in with their
 own Google accounts. Use a proxy as an interim guard; rely on this for the real
 thing.
 

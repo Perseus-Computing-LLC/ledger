@@ -42,8 +42,8 @@ if [ ! -f "$LEDGER_SOURCE/pyproject.toml" ]; then
   git clone --depth 1 https://github.com/Perseus-Computing-LLC/ledger.git "$LEDGER_SOURCE"
 fi
 
-# Keep Perseus and plutus-agent in the same environment: Perseus's optional
-# local metering imports plutus_agent lazily from this interpreter.
+# Keep Perseus and ledger-agent in the same environment: Perseus's optional
+# local metering imports ledger_agent lazily from this interpreter.
 if [ ! -x "$ROOT/.venv/bin/python" ]; then
   uv venv "$ROOT/.venv"
 fi
@@ -59,7 +59,7 @@ fi
 
 command -v perseus
 command -v perseus-vault
-command -v plutus
+command -v ledger
 ```
 
 If the binary is built from source instead, `cargo install --git
@@ -79,7 +79,7 @@ VAULT_DIR="$ROOT/vault"
 VAULT_DB="$VAULT_DIR/perseus-vault.db"
 VAULT_KEY="$VAULT_DIR/secret.key"
 LEDGER_ROOT="$ROOT/ledger-state"
-LEDGER_DB="$LEDGER_ROOT/plutus.db"
+LEDGER_DB="$LEDGER_ROOT/ledger.db"
 PERSEUS_HOME="$ROOT/perseus-home"
 
 # Opaque smoke-test references. They are identifiers, not memory content.
@@ -94,9 +94,9 @@ mkdir -p "$WORKSPACE/.perseus" "$VAULT_DIR" "$LEDGER_ROOT" "$PERSEUS_HOME"
 
 # Current config path/environment contracts.
 export PERSEUS_HOME
-export PLUTUS_HOME="$LEDGER_ROOT"
-export PLUTUS_CONFIG="$LEDGER_ROOT/config.yaml"
-export PLUTUS_DB="$LEDGER_DB"
+export LEDGER_HOME="$LEDGER_ROOT"
+export LEDGER_CONFIG="$LEDGER_ROOT/config.yaml"
+export LEDGER_DB="$LEDGER_DB"
 ```
 
 The resulting layout is:
@@ -109,7 +109,7 @@ The resulting layout is:
 | Perseus global home | `$PERSEUS_HOME` |
 | Vault database | `$VAULT_DB` |
 | Vault AES-256-GCM key file | `$VAULT_KEY` |
-| Ledger config | `$PLUTUS_CONFIG` |
+| Ledger config | `$LEDGER_CONFIG` |
 | Ledger SQLite database | `$LEDGER_DB` |
 | Perseus metering health | `$ROOT/metering-status.json` |
 
@@ -158,22 +158,22 @@ Treat these states differently:
 
 ## 4. Initialize Ledger and write the Perseus config
 
-Ledger's current local configuration contracts are `PLUTUS_HOME`,
-`PLUTUS_CONFIG`, and `PLUTUS_DB`. `plutus init` creates the config/database;
+Ledger's current local configuration contracts are `LEDGER_HOME`,
+`LEDGER_CONFIG`, and `LEDGER_DB`. `ledger init` creates the config/database;
 the optional hash-chain HMAC is `ledger.hmac_key` or the
-`PLUTUS_CHAIN_HMAC_KEY` environment variable. This local smoke test leaves the
+`LEDGER_CHAIN_HMAC_KEY` environment variable. This local smoke test leaves the
 optional HMAC secret unset and uses the default SHA-256 chain.
 
 ```bash
 if [ ! -f "$LEDGER_DB" ]; then
-  plutus init --org "$ORG_REF"
+  ledger init --org "$ORG_REF"
 else
-  plutus init
+  ledger init
 fi
 ```
 
 Write the workspace-local Perseus config. Every key below is from the current
-`perseus_vault` connector and `plutus` metering contracts; the Vault command
+`perseus_vault` connector and `ledger` metering contracts; the Vault command
 contains both the database path and the key path so the MCP child cannot select
 an unintended store.
 
@@ -201,7 +201,7 @@ perseus_vault:
     max_attempts: 3
     backoff_base: 1.5
 
-plutus:
+ledger:
   enabled: true
   db_path: "$LEDGER_DB"
   org: "$ORG_REF"
@@ -220,7 +220,7 @@ renders a retrieval pointer rather than a pre-materialized memory dump. Use
 unconditional `always` posture is an explicit compatibility choice, not the
 recommended default for a consequential action.
 
-The `plutus` block enables only provider-usage metering. It does not infer Vault
+The `ledger` block enables only provider-usage metering. It does not infer Vault
 lifecycle decisions or context provenance. The host that performs a
 consequential action must explicitly send the hash-only context bindings
 shown in [Memory governance and Ledger provenance](memory-governance-provenance.md).
@@ -307,7 +307,7 @@ Create one synthetic, zero-cost event in the scratch Ledger. `--ref` becomes
 embedding a prompt or memory body.
 
 ```bash
-plutus meter \
+ledger meter \
   --org "$ORG_REF" \
   --provider "$PROVIDER_REF" \
   --model "$MODEL_REF" \
@@ -317,10 +317,10 @@ plutus meter \
   --ref "$RECEIPT_REF" --json
 
 # Read-only chain verification. Exit 0 is required.
-plutus verify --org "$ORG_REF" --json
+ledger verify --org "$ORG_REF" --json
 
 # Reconciliation is dry-run unless --apply is supplied. This writes nothing.
-plutus reconcile --org "$ORG_REF" \
+ledger reconcile --org "$ORG_REF" \
   --provider "$PROVIDER_REF" --amount 0 --json
 ```
 
@@ -332,7 +332,7 @@ putting it in a workspace file.
 ```bash
 set -euo pipefail
 LEDGER_PORT="${LEDGER_PORT:-18420}"
-plutus serve --host 127.0.0.1 --port "$LEDGER_PORT" \
+ledger serve --host 127.0.0.1 --port "$LEDGER_PORT" \
   >"$LEDGER_ROOT/server.log" 2>&1 &
 LEDGER_PID=$!
 cleanup_ledger() {
@@ -415,8 +415,8 @@ artifact itself; the caller must recompute that digest in the owning system.
 | Vault binary missing or MCP health fails | `perseus doctor --workspace "$WORKSPACE" --json`; inspect `vault_connectivity` | `fallback_to_local: true` may keep a render alive, but local fallback is not proof of durable Vault recall. Hold/abstain when the action requires Vault. |
 | Vault health is successful but recall is empty | `perseus_vault_health` plus the render result | This can be a healthy no-match. Do not call it an outage or invent evidence. |
 | Encrypted DB with a missing/wrong key | `perseus-vault doctor --db "$VAULT_DB"`; explicit `--encryption-key` on serve/maintenance | Stop. Do not generate a replacement key or allow plaintext writes beside ciphertext. |
-| Ledger metering is disabled or degraded | `perseus doctor --workspace "$WORKSPACE" --json`; inspect `plutus_metering`; inspect `$ROOT/metering-status.json` when present | `fail_open` behavior keeps the caller running but dropped events make evidence incomplete. Reconcile before claiming coverage. |
-| Receipt has `chain_ok: false` | `plutus verify --json` and the receipt's `verification` object | Stop evidence claims and investigate the first divergence. A later receipt cannot repair a broken chain. |
+| Ledger metering is disabled or degraded | `perseus doctor --workspace "$WORKSPACE" --json`; inspect `ledger_metering`; inspect `$ROOT/metering-status.json` when present | `fail_open` behavior keeps the caller running but dropped events make evidence incomplete. Reconcile before claiming coverage. |
+| Receipt has `chain_ok: false` | `ledger verify --json` and the receipt's `verification` object | Stop evidence claims and investigate the first divergence. A later receipt cannot repair a broken chain. |
 | Ledger endpoint unavailable | local process health and the metering status file | Do not silently label an action evidenced. Retry or record an explicit held/degraded outcome in the owning control plane. |
 
 Ledger's `verify` command and a receipt's `chain_ok` are necessary checks, not a

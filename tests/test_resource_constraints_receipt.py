@@ -1,7 +1,7 @@
 import hashlib
 import sqlite3
 
-from plutus_agent import db, metering
+from ledger_agent import db, metering
 
 
 def test_resource_constraint_hash_is_persisted_and_projected(tmp_path):

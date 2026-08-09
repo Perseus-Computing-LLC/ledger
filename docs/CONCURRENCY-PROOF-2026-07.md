@@ -1,4 +1,4 @@
-# Plutus money-path concurrency proof — 2026-07
+# Ledger money-path concurrency proof — 2026-07
 
 Closes review finding **P2** and the roadmap exit criteria for #28/#30 ("a
 concurrency/load test on the ingest + webhook paths proves no double-count, no

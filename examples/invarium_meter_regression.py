@@ -1,12 +1,12 @@
-"""Meter-accuracy regression suite: Invarium testing *Plutus*, not an agent.
+"""Meter-accuracy regression suite: Invarium testing *Ledger*, not an agent.
 
 Run:  python examples/invarium_meter_regression.py
 
-Shape C of the Invarium arc (docs/invarium-integration.md). The idea: Plutus's
+Shape C of the Invarium arc (docs/invarium-integration.md). The idea: Ledger's
 cost attribution is deterministic given fixed token counts and a pinned price
 table, so it can be regression-tested exactly like an agent. We `bless` a golden
 catalog of workloads (each with a frozen expected cost), and on every change we
-re-meter and `compare`. A drift in Plutus's pricing table or baseline-derivation
+re-meter and `compare`. A drift in Ledger's pricing table or baseline-derivation
 math shows up as a **cost regression** in the Invarium report.
 
 The mechanism (worth understanding): Invarium's `compare_reports` only flags a
@@ -17,7 +17,7 @@ must equal its golden value. A pricing change trips that pin → success 100%→
 is exactly why shape C pairs the cost assertion with the suite: the assertion is
 what makes an attribution drift visible to `bless`/`compare`.
 
-Deterministic: in-memory SQLite, fixed token counts, Plutus's pinned price table.
+Deterministic: in-memory SQLite, fixed token counts, Ledger's pinned price table.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from invarium.assertions import AssertionRecord
 from invarium.compare import compare_reports
 from invarium.report import TestReport, TestRun, build_test_report, new_run_id
 
-from plutus_agent import db, metering
+from ledger_agent import db, metering
 
 
 class Workload(NamedTuple):
@@ -37,14 +37,14 @@ class Workload(NamedTuple):
     input_tokens: int
     output_tokens: int
     baseline_model: Optional[str]
-    # Golden values, frozen from Plutus's price table (PRICE_TABLE_AS_OF). A
+    # Golden values, frozen from Ledger's price table (PRICE_TABLE_AS_OF). A
     # legitimate price-table change is expected to fail this suite until re-blessed.
     expected_cost_usd: float
     expected_savings_usd: float
 
 
 # The golden catalog: routed model + baseline, one per provider, plus a no-baseline
-# cost-only pin. Costs were captured from Plutus and frozen (see the module test).
+# cost-only pin. Costs were captured from Ledger and frozen (see the module test).
 CATALOG = [
     Workload("anthropic", "claude-haiku-4-5", 1_000_000, 500_000, "claude-opus-4-8", 3.50, 49.00),
     Workload("openai", "gpt-5-mini", 1_000_000, 1_000_000, "gpt-5", 2.25, 9.00),
@@ -54,9 +54,9 @@ CATALOG = [
 
 
 def meter_workload(w: Workload, pricing_overrides: Optional[dict] = None) -> AgentResult:
-    """Meter one workload through a fresh in-memory Plutus and return an AgentResult.
+    """Meter one workload through a fresh in-memory Ledger and return an AgentResult.
 
-    ``cost_usd=None`` forces Plutus to *price from its table* — that pricing logic
+    ``cost_usd=None`` forces Ledger to *price from its table* — that pricing logic
     is precisely what this suite regression-tests. The metered cost/baseline/savings
     ride along in metadata so the report and any downstream assertion can see them.
     """
@@ -141,7 +141,7 @@ def main() -> None:
 
     print(
         "\nA one-line price-table edit surfaces as a cost regression on exactly the\n"
-        "affected model - Invarium guarding Plutus's attribution, not just agents."
+        "affected model - Invarium guarding Ledger's attribution, not just agents."
     )
 
 

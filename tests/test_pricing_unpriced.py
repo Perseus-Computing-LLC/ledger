@@ -11,7 +11,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import db, metering, pricing
+from ledger_agent import db, metering, pricing
 
 
 class TestResolvePrice(unittest.TestCase):

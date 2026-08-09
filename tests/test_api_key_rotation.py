@@ -15,18 +15,18 @@ import time
 
 import pytest
 
-from plutus_agent import db
+from ledger_agent import db
 
 
 def _org(tmp_path, name="Acme", tier="pro"):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, name, tier=tier, owner_email="a@b.co")["id"]
     return conn, org_id
 
 
 def _two_orgs(tmp_path):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_a = db.create_org(conn, "OrgA", tier="pro", owner_email="a@x.co")["id"]
     org_b = db.create_org(conn, "OrgB", tier="pro", owner_email="b@x.co")["id"]

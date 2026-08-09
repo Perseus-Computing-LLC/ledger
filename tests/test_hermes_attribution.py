@@ -1,6 +1,6 @@
 """Per-model spend attribution from a Hermes ``state.db`` (issue #51607).
 
-Covers ``plutus_agent.hermes`` — the canonical reader that prefers the v17
+Covers ``ledger_agent.hermes`` — the canonical reader that prefers the v17
 ``session_model_usage`` table (so a mid-session model switch splits across the
 providers that actually served each call) and falls back to the aggregate
 ``sessions`` row for pre-v17 / un-backfilled data so totals never regress.
@@ -9,7 +9,7 @@ import sqlite3
 
 import pytest
 
-from plutus_agent.hermes import allocate_cost, read_spend_events
+from ledger_agent.hermes import allocate_cost, read_spend_events
 
 
 # --------------------------------------------------------------- allocate ---
