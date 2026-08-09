@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""Incrementally meter Hermes ``state.db`` sessions into a Plutus instance.
+"""Incrementally meter Hermes ``state.db`` sessions into a Ledger instance.
 
 This is the cron-safe, hosted-instance counterpart to ``hermes_integration.py``
 (which is a local-Meter demo). It reads *new* rows from the Hermes ``sessions``
-table — the same table the credit monitor ``plutus.py`` reads — and POSTs them
+table — the same table the credit monitor ``ledger.py`` reads — and POSTs them
 to ``POST /v1/usage`` with an API key, so Hermes spend shows up live on a hosted
-Plutus dashboard.
+Ledger dashboard.
 
-Stdlib only (sqlite3 + urllib) — no ``plutus_agent`` install needed on the
+Stdlib only (sqlite3 + urllib) — no ``ledger_agent`` install needed on the
 Hermes box, just python3. Progress is tracked by a ``sessions.rowid`` watermark
 in a small JSON state file and advanced per successful batch, so re-runs never
 double-count and a mid-run failure resumes cleanly.
 
-    export PLUTUS_REMOTE_URL=https://plutus.perseus.observer
-    export PLUTUS_API_KEY=plutus_sk_…
+    export LEDGER_REMOTE_URL=https://ledger.perseus.observer
+    export LEDGER_API_KEY=ledger_sk_…
     python3 hermes_sync.py --dry-run     # show what would be sent
     python3 hermes_sync.py               # sync new sessions (cron this)
     python3 hermes_sync.py --reset       # forget the watermark, re-sync all
 
-Env: PLUTUS_REMOTE_URL, PLUTUS_API_KEY (required); PLUTUS_STATE_DB (default:
+Env: LEDGER_REMOTE_URL, LEDGER_API_KEY (required); LEDGER_STATE_DB (default:
 ``$HERMES_HOME/state.db`` when that exists, else the legacy path below);
-PLUTUS_SYNC_STATE (watermark file); PLUTUS_WORKSPACE (default "hermes").
+LEDGER_SYNC_STATE (watermark file); LEDGER_WORKSPACE (default "hermes").
 
 Attribution (#170): the server records each event's ``provider`` verbatim —
 per-model rows from ``session_model_usage`` carry their own billing_provider,
@@ -39,12 +39,12 @@ model event from a session shares its session ID as ``external_ref`` so the
 Ledger receipt reconstructs the full task trail.
 
 Savings-share (#7): tag each event with the baseline model — the flagship the
-customer would have run WITHOUT Perseus routing — so hosted Plutus prices the
+customer would have run WITHOUT Perseus routing — so hosted Ledger prices the
 same tokens at that model and records the saving. Off unless you opt in:
 
-    PLUTUS_BASELINE=flagship          # use the built-in provider→flagship map
-    PLUTUS_BASELINE_MODEL=claude-opus-4-8            # one baseline for all providers
-    PLUTUS_BASELINE_MODELS='{"anthropic":"claude-opus-4-8","openai":"gpt-5"}'
+    LEDGER_BASELINE=flagship          # use the built-in provider→flagship map
+    LEDGER_BASELINE_MODEL=claude-opus-4-8            # one baseline for all providers
+    LEDGER_BASELINE_MODELS='{"anthropic":"claude-opus-4-8","openai":"gpt-5"}'
 
 A baseline is attached only when the session's actual model differs from the
 baseline (i.e. routing actually happened), so un-routed traffic records no
@@ -69,14 +69,14 @@ BATCH = 500
 def default_state_db(env) -> str:
     """Resolve the Hermes state.db path (#171).
 
-    Precedence: ``PLUTUS_STATE_DB`` (explicit, highest) > ``$HERMES_HOME/
+    Precedence: ``LEDGER_STATE_DB`` (explicit, highest) > ``$HERMES_HOME/
     state.db`` when ``HERMES_HOME`` is set and the file exists > the legacy
     hardcoded path above. A stock Hermes install keeps its sessions DB at
     ``$HERMES_HOME/state.db``, so zero-config works there without exporting
-    ``PLUTUS_STATE_DB``.
+    ``LEDGER_STATE_DB``.
     """
-    if env.get("PLUTUS_STATE_DB"):
-        return env["PLUTUS_STATE_DB"]
+    if env.get("LEDGER_STATE_DB"):
+        return env["LEDGER_STATE_DB"]
     home = env.get("HERMES_HOME")
     if home:
         cand = os.path.join(home, "state.db")
@@ -85,7 +85,7 @@ def default_state_db(env) -> str:
     return DEFAULT_STATE_DB
 
 # Provider -> the flagship a customer would run WITHOUT Perseus routing. Mirrors
-# config.py `savings.baseline_models`; used only when PLUTUS_BASELINE=flagship.
+# config.py `savings.baseline_models`; used only when LEDGER_BASELINE=flagship.
 # Kept inline so this script stays install-free on the Hermes box.
 FLAGSHIP_BASELINE = {
     "anthropic": "claude-opus-4-8",
@@ -102,23 +102,23 @@ FLAGSHIP_BASELINE = {
 def resolve_baseline_models(env) -> dict:
     """Resolve the provider->baseline-model map from env (savings off => {}).
 
-    Precedence: explicit per-provider JSON (PLUTUS_BASELINE_MODELS) > a single
-    global model for every provider (PLUTUS_BASELINE_MODEL, stored under "*") >
-    the built-in flagship map when PLUTUS_BASELINE is truthy > {} (off).
+    Precedence: explicit per-provider JSON (LEDGER_BASELINE_MODELS) > a single
+    global model for every provider (LEDGER_BASELINE_MODEL, stored under "*") >
+    the built-in flagship map when LEDGER_BASELINE is truthy > {} (off).
     """
-    raw = env.get("PLUTUS_BASELINE_MODELS")
+    raw = env.get("LEDGER_BASELINE_MODELS")
     if raw:
         try:
             m = json.loads(raw)
             if not isinstance(m, dict):
                 raise ValueError
         except Exception:
-            sys.exit("plutus: PLUTUS_BASELINE_MODELS must be JSON {provider: model}")
+            sys.exit("ledger: LEDGER_BASELINE_MODELS must be JSON {provider: model}")
         return {str(k).lower(): str(v) for k, v in m.items()}
-    one = env.get("PLUTUS_BASELINE_MODEL")
+    one = env.get("LEDGER_BASELINE_MODEL")
     if one:
         return {"*": one}
-    if (env.get("PLUTUS_BASELINE") or "").strip().lower() in ("flagship", "1", "true", "on", "yes"):
+    if (env.get("LEDGER_BASELINE") or "").strip().lower() in ("flagship", "1", "true", "on", "yes"):
         return dict(FLAGSHIP_BASELINE)
     return {}
 
@@ -176,7 +176,7 @@ def _has_table(conn, name: str) -> bool:
 def _allocate_cost(total: float, weights: list) -> list:
     """Split ``total`` across buckets proportional to ``weights`` (>=0), summing
     back to ``total``; even split when all weights are zero. Mirrors
-    ``plutus_agent.hermes.allocate_cost`` (inline so this stays install-free)."""
+    ``ledger_agent.hermes.allocate_cost`` (inline so this stays install-free)."""
     n = len(weights)
     if n == 0:
         return []
@@ -273,7 +273,7 @@ def collect_sessions(state_db: str, last_rowid: int = 0,
     All events for a session share the session's ``rowid`` — the watermark
     advances per session, not per model. Falls back to the aggregate
     ``sessions`` row on older databases so nothing is lost. Mirrors
-    ``plutus_agent.hermes.read_spend_events`` (kept inline; no install needed).
+    ``ledger_agent.hermes.read_spend_events`` (kept inline; no install needed).
     """
     conn = sqlite3.connect(f"file:{state_db}?mode=ro", uri=True)
     try:
@@ -348,7 +348,7 @@ def post_events(remote: str, api_key: str, events: list[dict], timeout: float = 
                  "Authorization": f"Bearer {api_key}",
                  # Real UA — Cloudflare (error 1010) blocks the default
                  # "Python-urllib" signature when posting through the public URL.
-                 "User-Agent": "plutus-agent-hermes-sync"},
+                 "User-Agent": "ledger-agent-hermes-sync"},
         method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode())
@@ -401,32 +401,32 @@ def main(argv=None) -> int:
     dry = "--dry-run" in argv
     reset = "--reset" in argv
 
-    remote = (os.environ.get("PLUTUS_REMOTE_URL") or "").rstrip("/")
-    api_key = os.environ.get("PLUTUS_API_KEY")
+    remote = (os.environ.get("LEDGER_REMOTE_URL") or "").rstrip("/")
+    api_key = os.environ.get("LEDGER_API_KEY")
     state_db = default_state_db(os.environ)
-    wm_path = os.environ.get("PLUTUS_SYNC_STATE",
-                             os.path.expanduser("~/.plutus/hermes_sync.json"))
-    workspace = os.environ.get("PLUTUS_WORKSPACE", "hermes")
+    wm_path = os.environ.get("LEDGER_SYNC_STATE",
+                             os.path.expanduser("~/.ledger/hermes_sync.json"))
+    workspace = os.environ.get("LEDGER_WORKSPACE", "hermes")
 
     if not remote or not api_key:
-        sys.exit("plutus: set PLUTUS_REMOTE_URL and PLUTUS_API_KEY")
+        sys.exit("ledger: set LEDGER_REMOTE_URL and LEDGER_API_KEY")
     if not os.path.exists(state_db):
-        sys.exit(f"plutus: state.db not found: {state_db}")
+        sys.exit(f"ledger: state.db not found: {state_db}")
 
     baseline_models = resolve_baseline_models(os.environ)
 
     last = 0 if reset else _load_watermark(wm_path)
     pairs = collect_sessions(state_db, last, workspace, baseline_models)
     if not pairs:
-        print(f"plutus: nothing new (watermark rowid={last})")
+        print(f"ledger: nothing new (watermark rowid={last})")
         return 0
-    print(f"plutus: {len(pairs)} new session(s), rowid {pairs[0][0]}..{pairs[-1][0]}")
+    print(f"ledger: {len(pairs)} new session(s), rowid {pairs[0][0]}..{pairs[-1][0]}")
     if baseline_models:
         n_base = sum(1 for _, e in pairs if e.get("baseline_model"))
-        print(f"plutus: savings-share ON — {n_base}/{len(pairs)} event(s) tagged "
+        print(f"ledger: savings-share ON — {n_base}/{len(pairs)} event(s) tagged "
               f"with a baseline model")
     else:
-        print("plutus: savings-share OFF (set PLUTUS_BASELINE=flagship to enable)")
+        print("ledger: savings-share OFF (set LEDGER_BASELINE=flagship to enable)")
 
     if dry:
         print(json.dumps([e for _, e in pairs[:3]], indent=2))
@@ -439,21 +439,21 @@ def main(argv=None) -> int:
         try:
             resp = post_events(remote, api_key, [e for _, e in chunk])
         except urllib.error.HTTPError as e:
-            sys.exit(f"plutus: ingest failed HTTP {e.code}: "
+            sys.exit(f"ledger: ingest failed HTTP {e.code}: "
                      f"{e.read().decode()[:200]} (watermark at {last}, not advanced)")
         except urllib.error.URLError as e:
-            sys.exit(f"plutus: could not reach {remote}: {e.reason} "
+            sys.exit(f"ledger: could not reach {remote}: {e.reason} "
                      f"(watermark at {last}, not advanced)")
         if not fold_warned:
             warn = folded_warning(resp)
             if warn:
-                print(f"plutus: WARNING: {warn}", file=sys.stderr)
+                print(f"ledger: WARNING: {warn}", file=sys.stderr)
                 fold_warned = True
         sent += len(chunk)
         last = chunk[-1][0]
         _save_watermark(wm_path, last, sent)   # advance per batch → resumable
 
-    print(f"plutus: metered {sent} session(s) → {remote} (watermark rowid={last})")
+    print(f"ledger: metered {sent} session(s) → {remote} (watermark rowid={last})")
     return 0
 
 

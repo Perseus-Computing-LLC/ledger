@@ -10,9 +10,9 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import db
-from plutus_agent.config import DEFAULT_CONFIG
-from plutus_agent.server import api, app
+from ledger_agent import db
+from ledger_agent.config import DEFAULT_CONFIG
+from ledger_agent.server import api, app
 
 
 class TestCsvSafe(unittest.TestCase):

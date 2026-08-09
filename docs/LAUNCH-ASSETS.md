@@ -2,7 +2,7 @@
 
 > **Status:** draft copy only. These assets must be fact-checked against the
 > release and reviewed before any outward post. The stable package, CLI, and API
-> retain their legacy `plutus*` names during the transition.
+> retain their legacy `ledger*` names during the transition.
 
 ## Show HN post
 
@@ -28,12 +28,12 @@ What it does today:
 - Optional Stripe settlement adapters; Stripe is not required or the product boundary
 - Self-hosted dashboard and API at `:8420`
 
-The installed compatibility package remains `plutus-agent` and the CLI remains
-`plutus` during transition; the product is Perseus Ledger.
+The installed compatibility package remains `ledger-agent` and the CLI remains
+`ledger` during transition; the product is Perseus Ledger.
 
-Open source (MIT): https://github.com/Perseus-Computing-LLC/plutus
+Open source (MIT): https://github.com/Perseus-Computing-LLC/ledger
 Docs: https://perseus.observer/ledger/
-PyPI compatibility package: `pip install plutus-agent`
+PyPI compatibility package: `pip install ledger-agent`
 
 ---
 
@@ -58,9 +58,9 @@ evidence and authority, and can the record be verified later?
 - Optional metering, reconciliation, and Stripe settlement adapters
 - Dashboard at `localhost:8420`
 
-Install remains `pip install plutus-agent` during the compatibility transition.
+Install remains `pip install ledger-agent` during the compatibility transition.
 
-Repo: https://github.com/Perseus-Computing-LLC/plutus
+Repo: https://github.com/Perseus-Computing-LLC/ledger
 
 ---
 
@@ -78,9 +78,9 @@ Repo: https://github.com/Perseus-Computing-LLC/plutus
 
 5/ Metering, reconciliation, prepaid credit, and Stripe remain optional adapters—not the product boundary.
 
-6/ Existing users keep the stable compatibility package and CLI: `pip install plutus-agent`; `plutus` remains supported during transition.
+6/ Existing users keep the stable compatibility package and CLI: `pip install ledger-agent`; `ledger` remains supported during transition.
 
-7/ https://github.com/Perseus-Computing-LLC/plutus
+7/ https://github.com/Perseus-Computing-LLC/ledger
    https://perseus.observer/ledger/
 
 **LinkedIn post:**
@@ -93,19 +93,19 @@ what happened and independently verify the resulting history.
 It is runtime-neutral, works offline with SQLite, and exposes HTTP and Python
 interfaces. Metering, reconciliation, and settlement remain optional adapters.
 
-The current compatibility install remains `pip install plutus-agent` while the
+The current compatibility install remains `pip install ledger-agent` while the
 product transition is completed.
 
-GitHub: https://github.com/Perseus-Computing-LLC/plutus
+GitHub: https://github.com/Perseus-Computing-LLC/ledger
 
 ---
 
 ## Landing page checklist
 
-- [ ] perseus.observer/plutus deployed (see plutus/index.html)
+- [ ] perseus.observer/ledger deployed (see ledger/index.html)
 - [ ] Pricing page shows all five tiers with feature comparison
-- [ ] Code snippet: `pip install plutus-agent && plutus init && plutus serve`
-- [ ] "View on GitHub" button links to Perseus-Computing-LLC/plutus
+- [ ] Code snippet: `pip install ledger-agent && ledger init && ledger serve`
+- [ ] "View on GitHub" button links to Perseus-Computing-LLC/ledger
 - [ ] Savings calculator embeds the frontier chart (once benchmark data exists)
 - [ ] Footer links to main perseus.observer, GitHub, docs
 

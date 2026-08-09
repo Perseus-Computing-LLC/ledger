@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the Plutus monetization engine (plutus_agent)."""
+"""Tests for the Ledger monetization engine (ledger_agent)."""
 import dataclasses
 import os
 import sys
@@ -9,10 +9,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import db, metering, pricing, demo, reports, config as cfgmod
-from plutus_agent.billing import handle_webhook_event
-from plutus_agent.utils import strict_int
-from plutus_agent.server import auth as authmod
+from ledger_agent import db, metering, pricing, demo, reports, config as cfgmod
+from ledger_agent.billing import handle_webhook_event
+from ledger_agent.utils import strict_int
+from ledger_agent.server import auth as authmod
 
 
 _PATHS = {}  # id(conn) -> file path, since sqlite3.Connection forbids attrs
@@ -254,7 +254,7 @@ class TestApiKeys(unittest.TestCase):
 
     def test_create_returns_secret_once_and_resolves(self):
         row, secret = db.create_api_key(self.conn, self.org, name="prod")
-        self.assertTrue(secret.startswith("plutus_sk_"))
+        self.assertTrue(secret.startswith("ledger_sk_"))
         self.assertEqual(db.api_key_org(self.conn, secret), self.org)
         # only a hash is stored — the raw secret is nowhere in the row
         self.assertNotIn(secret, dict(row).values())
@@ -262,7 +262,7 @@ class TestApiKeys(unittest.TestCase):
 
     def test_bad_or_unknown_key_denied(self):
         self.assertIsNone(db.api_key_org(self.conn, "nope"))
-        self.assertIsNone(db.api_key_org(self.conn, "plutus_sk_doesnotexist"))
+        self.assertIsNone(db.api_key_org(self.conn, "ledger_sk_doesnotexist"))
         self.assertIsNone(db.api_key_org(self.conn, ""))
 
     def test_revoke_blocks_key(self):
@@ -313,7 +313,7 @@ class TestBillingWebhook(unittest.TestCase):
             "id": "evt_1", "type": "checkout.session.completed",
             "data": {"object": {"id": "cs_1", "mode": "payment",
                                  "customer": "cus_123", "amount_total": 5000,
-                                 "metadata": {"plutus_org_id": self.org,
+                                 "metadata": {"ledger_org_id": self.org,
                                               "kind": "credit", "amount_usd": "50.00"}}},
         }
         res = handle_webhook_event(self.conn, event)
@@ -328,7 +328,7 @@ class TestBillingWebhook(unittest.TestCase):
             "data": {"object": {"id": "cs_d", "mode": "payment",
                                  "customer": "cus_123", "amount_total": 700,
                                  "payment_intent": "pi_d",
-                                 "metadata": {"plutus_org_id": self.org,
+                                 "metadata": {"ledger_org_id": self.org,
                                               "kind": "donation", "amount_usd": "7.00"}}},
         }
         res = handle_webhook_event(self.conn, event)
@@ -416,7 +416,7 @@ class TestReports(unittest.TestCase):
             self.assertIn("total", rep)
             html = reports.render_html(rep)
             self.assertIn("<!doctype html>", html)
-            self.assertIn("Plutus", html)
+            self.assertIn("Ledger", html)
         finally:
             drop_conn(conn)
 
@@ -427,14 +427,14 @@ class TestConfigSecretHandling(unittest.TestCase):
     def setUp(self):
         import tempfile
         self.home = tempfile.mkdtemp()
-        os.environ["PLUTUS_HOME"] = self.home
+        os.environ["LEDGER_HOME"] = self.home
 
     def tearDown(self):
-        os.environ.pop("PLUTUS_HOME", None)
+        os.environ.pop("LEDGER_HOME", None)
         os.environ.pop("STRIPE_SECRET_KEY", None)
 
     def test_save_strips_env_secret(self):
-        from plutus_agent import config as cfgmod
+        from ledger_agent import config as cfgmod
         os.environ["STRIPE_SECRET_KEY"] = "sk_live_should_not_persist"
         cfg = cfgmod.load()  # env-merged — contains the key in memory
         self.assertEqual(cfg["billing"]["stripe_secret_key"], "sk_live_should_not_persist")
@@ -446,13 +446,13 @@ class TestConfigSecretHandling(unittest.TestCase):
         self.assertEqual(on_disk["billing"]["stripe_price_pro"], "price_123")
 
     def test_load_base_has_no_env(self):
-        from plutus_agent import config as cfgmod
+        from ledger_agent import config as cfgmod
         os.environ["STRIPE_SECRET_KEY"] = "«redacted:sk_live_…»"
         self.assertEqual(cfgmod.load_base()["billing"]["stripe_secret_key"], "")
         self.assertEqual(cfgmod.load()["billing"]["stripe_secret_key"], "«redacted:sk_live_…»")
 
     def test_load_does_not_mutate_defaults_or_later_base_reads(self):
-        from plutus_agent import config as cfgmod
+        from ledger_agent import config as cfgmod
         os.environ["STRIPE_SECRET_KEY"] = "«redacted:sk_live_…»"
         runtime = cfgmod.load()
         self.assertEqual(runtime["billing"]["stripe_secret_key"], "«redacted:sk_live_…»")
@@ -462,7 +462,7 @@ class TestConfigSecretHandling(unittest.TestCase):
 
 class TestClaudeHook(unittest.TestCase):
     def test_merge_is_idempotent(self):
-        from plutus_agent import cli
+        from ledger_agent import cli
         cmd = cli._hook_command()
         settings = {}
         settings, changed = cli._merge_stop_hook(settings, cmd)
@@ -473,7 +473,7 @@ class TestClaudeHook(unittest.TestCase):
         self.assertEqual(len(settings["hooks"]["Stop"]), 1)
 
     def test_merge_preserves_existing_hooks(self):
-        from plutus_agent import cli
+        from ledger_agent import cli
         settings = {"hooks": {"Stop": [{"hooks": [
             {"type": "command", "command": "echo existing"}]}]},
             "model": "claude-opus-4-8"}
@@ -484,10 +484,10 @@ class TestClaudeHook(unittest.TestCase):
 
     def test_hook_meters_payload(self):
         import os
-        from plutus_agent.integrations import claude_code_hook
+        from ledger_agent.integrations import claude_code_hook
         d = os.path.join(tempfile.mkdtemp(), "hook.db")
-        os.environ["PLUTUS_DB"] = d
-        os.environ["PLUTUS_ORG"] = "HookTest"
+        os.environ["LEDGER_DB"] = d
+        os.environ["LEDGER_ORG"] = "HookTest"
         try:
             res = claude_code_hook.meter_payload({
                 "usage": {"input_tokens": 1000, "output_tokens": 500,
@@ -496,8 +496,8 @@ class TestClaudeHook(unittest.TestCase):
             self.assertGreater(res.cost_usd, 0)
             self.assertEqual(res.task_type, "coding")
         finally:
-            os.environ.pop("PLUTUS_DB", None)
-            os.environ.pop("PLUTUS_ORG", None)
+            os.environ.pop("LEDGER_DB", None)
+            os.environ.pop("LEDGER_ORG", None)
 
 
 # ---- Security hardening test (issue #35) ---------------------------------------
@@ -506,7 +506,7 @@ class TestSMTPTLSSecurity(unittest.TestCase):
     
     def test_no_login_without_tls(self):
         """SMTP should not login with credentials when TLS is unavailable."""
-        from plutus_agent import alerts
+        from ledger_agent import alerts
         import unittest.mock as mock
         
         conn = fresh_conn()
@@ -522,7 +522,7 @@ class TestSMTPTLSSecurity(unittest.TestCase):
             conn.commit()
             
             # Mock SMTP to simulate a server without STARTTLS support
-            with mock.patch("plutus_agent.alerts.smtplib.SMTP") as mock_smtp:
+            with mock.patch("ledger_agent.alerts.smtplib.SMTP") as mock_smtp:
                 mock_server = mock.MagicMock()
                 mock_server.esmtp_features = {}  # No STARTTLS
                 mock_smtp.return_value.__enter__.return_value = mock_server
@@ -552,22 +552,22 @@ class TestSMTPTLSSecurity(unittest.TestCase):
 
 
 class TestCliDbFlag(unittest.TestCase):
-    """Fix #47: `plutus --db <path>` must not crash (cli.py used os without
+    """Fix #47: `ledger --db <path>` must not crash (cli.py used os without
     importing it, so any invocation with --db raised NameError)."""
 
     def test_db_flag_sets_env_and_runs(self):
-        from plutus_agent import cli
+        from ledger_agent import cli
         d = os.path.join(tempfile.mkdtemp(), "cli.db")
-        prev = os.environ.pop("PLUTUS_DB", None)
+        prev = os.environ.pop("LEDGER_DB", None)
         try:
             rc = cli.main(["--db", d, "version"])  # would NameError before the fix
             self.assertEqual(rc, 0)
-            self.assertEqual(os.environ["PLUTUS_DB"], d)
+            self.assertEqual(os.environ["LEDGER_DB"], d)
         finally:
             if prev is not None:
-                os.environ["PLUTUS_DB"] = prev
+                os.environ["LEDGER_DB"] = prev
             else:
-                os.environ.pop("PLUTUS_DB", None)
+                os.environ.pop("LEDGER_DB", None)
 class TestConcurrencyHardStop(unittest.TestCase):
     """Fix #28/#30: under db.immediate() the prepaid hard-stop and balance_after
     are race-safe. Ten threads race to debit $1 against a $5 balance; exactly
@@ -633,8 +633,8 @@ class TestThreeTierModel(unittest.TestCase):
         self.assertIsNone(t.seats)  # unlimited
 
     def _render(self, conn, org):
-        from plutus_agent import efficiency as effm, savings as savm
-        from plutus_agent.server import views
+        from ledger_agent import efficiency as effm, savings as savm
+        from ledger_agent.server import views
         s = metering.org_summary(conn, org)
         s["efficiency"] = effm.org_efficiency(conn, org, period_label=None).as_dict()
         s["savings_share"] = savm.savings_share_report(
@@ -659,14 +659,14 @@ class TestThreeTierModel(unittest.TestCase):
                     baseline_model="claude-opus-4-8")
                 html = self._render(conn, org)
                 self.assertIn("Perseus saved you", html)              # attributed
-                self.assertIn("verified by Plutus", html)
+                self.assertIn("verified by Ledger", html)
                 self.assertEqual("Savings and audit stay available on Free" in html, not unlocked)
                 self.assertEqual("Chip in" in html, tier_key == "free")  # tip jar
         finally:
             drop_conn(conn)
 
     def test_standalone_billboard_makes_no_savings_claim(self):
-        # No Perseus baseline -> Plutus measures only. Never claim "saved you";
+        # No Perseus baseline -> Ledger measures only. Never claim "saved you";
         # show spend + a flagship-equivalent efficiency stat + a verify nudge.
         conn = fresh_conn()
         try:

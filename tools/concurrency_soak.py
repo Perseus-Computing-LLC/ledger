@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Concurrency / load proof for the Plutus money path (review P2, roadmap #28/#30).
+"""Concurrency / load proof for the Ledger money path (review P2, roadmap #28/#30).
 
 Money correctness rests on SQLite ``BEGIN IMMEDIATE`` serialization, and the
 server is threaded (connection-per-request) — but every atomicity test was
@@ -21,7 +21,7 @@ Same driver runs bounded in CI (`tests/test_concurrency.py`) and heavy as a soak
 (`python tools/concurrency_soak.py --threads 128 --requests 40 --with-reversals`).
 Exits non-zero on any invariant violation, so it is a real assertion at any scale.
 
-Stdlib only + plutus_agent. No fabricated numbers: everything printed is measured.
+Stdlib only + ledger_agent. No fabricated numbers: everything printed is measured.
 """
 from __future__ import annotations
 
@@ -39,10 +39,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import db  # noqa: E402
-from plutus_agent.billing import handle_webhook_event  # noqa: E402
-from plutus_agent.config import DEFAULT_CONFIG  # noqa: E402
-from plutus_agent.server import app  # noqa: E402
+from ledger_agent import db  # noqa: E402
+from ledger_agent.billing import handle_webhook_event  # noqa: E402
+from ledger_agent.config import DEFAULT_CONFIG  # noqa: E402
+from ledger_agent.server import app  # noqa: E402
 
 MICROS = 1_000_000
 
@@ -174,7 +174,7 @@ def _webhook_topup(dbpath, org_id, pi, usd):
     return _webhook(dbpath, {
         "id": f"evt_top_{pi}", "type": "checkout.session.completed",
         "data": {"object": {
-            "metadata": {"plutus_org_id": org_id, "kind": "credit"},
+            "metadata": {"ledger_org_id": org_id, "kind": "credit"},
             "amount_total": int(round(usd * 100)), "payment_intent": pi}}})
 
 
@@ -373,7 +373,7 @@ def run_idempotency_race(threads: int, cost: float = 0.25) -> dict:
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Plutus money-path concurrency soak")
+    ap = argparse.ArgumentParser(description="Ledger money-path concurrency soak")
     ap.add_argument("--threads", type=int, default=64)
     ap.add_argument("--requests", type=int, default=16, help="requests per thread")
     ap.add_argument("--cost", type=float, default=0.01)

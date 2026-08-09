@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Plutus Benchmark Runner — one command to generate the cost-to-quality frontier.
+Ledger Benchmark Runner — one command to generate the cost-to-quality frontier.
 
 Runs a seeded evaluation across four systems (full-context with prompt caching,
 sliding-window, vanilla RAG, Perseus+Vault) on LongMemEval and produces the
-frontier chart consumable by plutus.report() and the savings calculator.
+frontier chart consumable by ledger.report() and the savings calculator.
 
 Single paid seed (~$35 total) validates the entire savings-share thesis.
 
@@ -13,7 +13,7 @@ Usage:
 
 Requires:
     - LongMemEval harness installed (pip install longmemeval)
-    - plutus_harness.py (drop-in recorder + metered client)
+    - ledger_harness.py (drop-in recorder + metered client)
     - OpenAI/Anthropic API keys for the benchmark models
     - Perseus+Vault running locally for the Perseus+Vault system
 
@@ -34,7 +34,7 @@ from typing import Optional
 
 # Published API prices (USD per 1M tokens) — input, output, cache_read
 # These are the prices used to compute cost-per-system.
-# Sync with plutus_agent/pricing.py PRICE_TABLE when providers change prices.
+# Sync with ledger_agent/pricing.py PRICE_TABLE when providers change prices.
 
 PRICES = {
     # Flagship (used for full-context / prompt-cached baselines)
@@ -256,7 +256,7 @@ systems.forEach(sys => {{
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Plutus cost-to-quality frontier benchmark")
+    parser = argparse.ArgumentParser(description="Ledger cost-to-quality frontier benchmark")
     parser.add_argument("--seed", type=int, default=0, help="Benchmark seed (default: 0)")
     parser.add_argument("--lme-dir", default="~/lme-run", help="LongMemEval harness directory")
     parser.add_argument("--run-dir", default=None, help="Output directory (default: runs/seed<N>)")
@@ -275,7 +275,7 @@ def main():
             print(f"  {s['id']:12s} → {s['name']:20s}  model={s['model']}")
         print()
         print("After running, call this script again without --dry-run to generate the frontier report.")
-        print("To integrate with the harness, use plutus_harness.py's MeteredClient + Recorder.")
+        print("To integrate with the harness, use ledger_harness.py's MeteredClient + Recorder.")
         return 0
 
     # Load existing runs (if any) and compute the frontier
@@ -286,12 +286,12 @@ def main():
             results.append(r)
             print(f"  ✓ {s['id']:12s} loaded: {r.n_tasks} tasks, {r.accuracy:.1%} accuracy, ${r.total_cost:.2f}")
         else:
-            print(f"  ✗ {s['id']:12s} not found — run the LongMemEval harness with plutus_harness.py first")
+            print(f"  ✗ {s['id']:12s} not found — run the LongMemEval harness with ledger_harness.py first")
 
     if not results:
         print("\nNo runs found. To run the full benchmark:")
         print(f"  1. cd {args.lme_dir}")
-        print(f"  2. Copy plutus_harness.py to the harness directory")
+        print(f"  2. Copy ledger_harness.py to the harness directory")
         print(f"  3. For each system, run: python3 longmemeval_official.py --seed {args.seed} --system <system_id>")
         print(f"  4. Re-run this script to generate the frontier report")
         return 0

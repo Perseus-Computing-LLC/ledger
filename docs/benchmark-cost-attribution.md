@@ -1,6 +1,6 @@
 # Benchmark Cost Attribution (Perseus patent support)
 
-`plutus_agent/benchmark_cost.py` turns a Perseus benchmark run into a
+`ledger_agent/benchmark_cost.py` turns a Perseus benchmark run into a
 deterministic, dollar-denominated comparison of two ways to assemble the same
 context, for the resolve-before-context patent's §101 technical-effect evidence.
 
@@ -20,7 +20,7 @@ cost; plus the reduction deltas (round-trips eliminated, % round-trips, $ saved,
 
 ## Determinism (issue #86)
 
-- Cost is computed solely from Plutus's **frozen price table**
+- Cost is computed solely from Ledger's **frozen price table**
   (`pricing.PRICE_TABLE`, dated `pricing.PRICE_TABLE_AS_OF`) and the run's token
   counts. No wall-clock, no network, no live pricing.
 - `attribute(...)` is a pure function — its JSON is byte-identical for identical
@@ -33,7 +33,7 @@ cost; plus the reduction deltas (round-trips eliminated, % round-trips, $ saved,
 ## Usage
 
 ```python
-from plutus_agent.benchmark_cost import (
+from ledger_agent.benchmark_cost import (
     AGENTIC, RESOLVE_BEFORE_CONTEXT, ApproachRun, CallRecord,
     attribute, write_exhibit,
 )
@@ -74,7 +74,7 @@ Prices per the frozen table as of `2026-06-26` (`claude-opus-4-8`: $15/M input,
 $75/M output). Regenerate with pinned timestamp:
 
 ```python
-from plutus_agent.benchmark_cost import emit_exhibit, to_csv
+from ledger_agent.benchmark_cost import emit_exhibit, to_csv
 env = emit_exhibit(attribution, generated_at="2026-06-28T00:00:00Z")
 ```
 

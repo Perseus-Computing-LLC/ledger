@@ -1,4 +1,4 @@
-# Plutus — Roadmap to 1.0
+# Ledger — Roadmap to 1.0
 
 > Last updated: 2026-07-11 · Current: **1.0.1 (shipped: tagged, on PyPI + GHCR)**
 > This is the **billing-engine** roadmap. The older `ROADMAP.md` is the long-term monitor/FinOps vision.
@@ -12,7 +12,7 @@
 > (DB-backed per-day org cap), #37 (500 error-leak / 404 XSS / OIDC test-bypass
 > gated). 1.0.0 then shipped (#67), followed by the **1.0.1 security-hardening
 > release** (#92–#96: OIDC login-CSRF, HTTP hardening, money-atomicity,
-> fail-closed public bind). v1.0.1 is tagged and live on PyPI (`plutus-agent`) +
+> fail-closed public bind). v1.0.1 is tagged and live on PyPI (`ledger-agent`) +
 > GHCR. Independently verified in [`docs/HERMES-VERIFICATION-2026-07.md`] and
 > reviewed in [`docs/REVIEW-2026-07.md`].
 >
@@ -30,7 +30,7 @@
 
 ## What 1.0 means
 
-Plutus 1.0 is a **production-grade billing layer for AI agents** that a stranger can self-host or sign up for and trust with real money. That bar means four things, in priority order:
+Ledger 1.0 is a **production-grade billing layer for AI agents** that a stranger can self-host or sign up for and trust with real money. That bar means four things, in priority order:
 
 1. **Money is correct** — no double-credit, ingest is atomic, prepaid credit is enforceable, amounts reconcile with Stripe.
 2. **It's safe to expose publicly** — the self-serve funnel (open signup + ingest API + Stripe) is hardened against abuse, CSRF, DoS, and injection.
@@ -72,7 +72,7 @@ A 2026-06-26 foundation review verified v0.6/v0.7 against `main`. The items belo
 - **#32** CSRF: fail closed in `_same_origin` when `base_url` is unset, and/or add a per-session token.
 - **#33** DB-backed per-day org-creation cap alongside the hourly limiter.
 - **#37** stop leaking `str(e)` to clients on 500s; escape the 404 `path`; gate the OIDC `"hdr"` test-bypass behind an explicit flag.
-- **#47** `plutus --db` crash (`os` not imported in `cli.py`).
+- **#47** `ledger --db` crash (`os` not imported in `cli.py`).
 - **#48** add `windows-latest`/`macos-latest` CI; align the Python matrix with the classifiers (3.10/3.13); fix the `release.yml` double-publish trigger; drop stale `assets/` packaging.
 - *Exit:* every reopened/new issue above closed; a concurrency test covers the #28/#30 transaction; CI green on Linux + Windows across the advertised Python versions.
 
@@ -80,7 +80,7 @@ A 2026-06-26 foundation review verified v0.6/v0.7 against `main`. The items belo
 - **Team tier (~$149/mo)** — multi-seat, more workspaces, the missing money tier (drives ramen MRR).
 - Per-org credit-enforcement policy (the #28 hard-stop, surfaced in dashboard + API).
 - **Usage export** — CSV + webhook out (cost-attribution / "$/task" for customers' own billing).
-- **First-class integrations** — LangChain & CrewAI callback handlers, and a Plutus **MCP server** so agents meter themselves.
+- **First-class integrations** — LangChain & CrewAI callback handlers, and a Ledger **MCP server** so agents meter themselves.
 - Dashboard: date-range selector, per-workspace drill-down, API-key last-used/usage view.
 
 ### v0.9 — Hardening, observability & docs
@@ -98,17 +98,17 @@ A 2026-06-26 foundation review verified v0.6/v0.7 against `main`. The items belo
 
 ## Get it out there  *(parallel GTM track — start now)*
 
-Already done: README reframed, `pip install plutus-agent`, GHCR image, hosted dashboard, Hermes dogfooding live.
+Already done: README reframed, `pip install ledger-agent`, GHCR image, hosted dashboard, Hermes dogfooding live.
 
 **Pre-launch (do alongside v0.6/v0.7):**
 - Merge + release the **v0.5.1 Cloudflare-UA fix** (#PR 25) — external SDK ingest is broken through CF without it; hard launch blocker.
-- Turn on `PLUTUS_ALLOW_SIGNUP` on the hosted instance once v0.7 abuse controls land.
-- Launch assets: a 60-second "meter your agent in 3 lines" asciinema/GIF, dashboard screenshots, polish `/pricing`, a landing section on perseus.observer/plutus.
-- A short **"Plutus vs Helicone / Langfuse / OpenMeter"** positioning post — own *billing* (charging end-users), not just observability.
+- Turn on `LEDGER_ALLOW_SIGNUP` on the hosted instance once v0.7 abuse controls land.
+- Launch assets: a 60-second "meter your agent in 3 lines" asciinema/GIF, dashboard screenshots, polish `/pricing`, a landing section on perseus.observer/ledger.
+- A short **"Ledger vs Helicone / Langfuse / OpenMeter"** positioning post — own *billing* (charging end-users), not just observability.
 
 **Launch (after v0.7):**
 - Show HN, r/LocalLLaMA, MCP/agent-framework communities; list in LangChain/CrewAI integration directories.
-- First 5 design-partner orgs from the warm network; 1–2 reference customers billing their own users through Plutus.
+- First 5 design-partner orgs from the warm network; 1–2 reference customers billing their own users through Ledger.
 
 **Don't launch publicly before** the v0.7 items (CSRF, body limits, signup rate-limit) — open signup + live money are exposed today.
 

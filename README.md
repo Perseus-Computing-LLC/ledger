@@ -17,7 +17,7 @@ For each recorded event, the stable ledger captures the operational facts alread
 - **Evidence linkage** — external references and retained checkpoints where supplied
 - **Integrity** — an append-only cryptographic hash chain that can be verified independently
 
-The current ingestion contract is deliberately stable during the product transition: `plutus_agent`, the `plutus` CLI, `/v1/usage`, existing database paths, and deployed integrations remain supported compatibility surfaces. Stripe is an **optional settlement adapter**, not the product boundary.
+The current ingestion contract is deliberately stable during the product transition: `ledger_agent`, the `ledger` CLI, `/v1/usage`, existing database paths, and deployed integrations remain supported compatibility surfaces. Stripe is an **optional settlement adapter**, not the product boundary.
 
 ## Why it matters
 
@@ -53,8 +53,8 @@ For a copy-pasteable local setup, see [Local Perseus + Vault + Ledger integratio
 ## Quick start: record a verifiable event
 
 ```bash
-pip install plutus-agent  # compatibility package name during transition
-plutus demo
+pip install ledger-agent  # compatibility package name during transition
+ledger demo
 # → opens the local Ledger console on http://localhost:8420
 ```
 
@@ -67,11 +67,11 @@ docker pull ghcr.io/perseus-computing-llc/ledger:latest
 docker run --rm -p 8420:8420 ghcr.io/perseus-computing-llc/ledger:latest
 ```
 
-The `plutus-agent` package, `plutus` CLI, and `PLUTUS_*` environment variables
-remain compatibility interfaces for existing integrations.
+The `ledger-agent` package, `ledger` CLI, and `LEDGER_*` environment variables
+are the canonical interfaces.
 
 ```python
-from plutus_agent import Meter
+from ledger_agent import Meter
 
 ledger = Meter(org="Acme Autonomous Systems")
 ledger.track(

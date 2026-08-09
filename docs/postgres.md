@@ -5,7 +5,7 @@
 
 ## Context
 
-Plutus stores state in one SQLite file and runs a thread-per-request server with
+Ledger stores state in one SQLite file and runs a thread-per-request server with
 a connection per request. Writes are serialized with `BEGIN IMMEDIATE`
 (`db.immediate()`), which closes the metering/hard-stop races correctly but means
 **`/v1/usage` admits one writer at a time**. For a homelab / single-tenant

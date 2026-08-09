@@ -11,9 +11,9 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import db
-from plutus_agent.config import DEFAULT_CONFIG
-from plutus_agent.server import app
+from ledger_agent import db
+from ledger_agent.config import DEFAULT_CONFIG
+from ledger_agent.server import app
 
 ADMIN_TOKEN = "tok_admin_secret"
 
@@ -163,7 +163,7 @@ class TestVerifyEndpoint(_Base):
     def setUpClass(cls):
         cls.httpd, cls.port, cls.dbpath = _start()
         # seed an org with a few metered events (builds the hash chain)
-        from plutus_agent import metering
+        from ledger_agent import metering
         conn = db.connect(cls.dbpath)
         cls.org_id = db.create_org(conn, "Verify Co", tier="pro")["id"]
         db.add_ledger(conn, cls.org_id, 100.0, "topup", reason="seed")
@@ -198,7 +198,7 @@ class TestVerifyEndpoint(_Base):
 
     def test_verify_detects_tamper(self):
         # Use a dedicated org so the shared seed org stays clean for other tests.
-        from plutus_agent import metering
+        from ledger_agent import metering
         conn = db.connect(self.dbpath)
         org = db.create_org(conn, "Tamper Co", tier="pro")["id"]
         db.add_ledger(conn, org, 50.0, "topup", reason="seed")

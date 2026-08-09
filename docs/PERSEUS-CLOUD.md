@@ -33,13 +33,13 @@ Perseus Ledger is self-hostable and local-first. Its stable compatibility
 installation surface remains:
 
 ```bash
-pip install plutus-agent
-plutus serve
+pip install ledger-agent
+ledger serve
 ```
 
-The product name is **Perseus Ledger**. The package name, `plutus` CLI,
-`plutus_agent` import, `PLUTUS_*` configuration, `/v1` routes, database paths,
-and `plutus.perseus.observer` endpoint remain compatibility contracts during the
+The product name is **Perseus Ledger**. The package name, `ledger` CLI,
+`ledger_agent` import, `LEDGER_*` configuration, `/v1` routes, database paths,
+and `ledger.perseus.observer` endpoint remain compatibility contracts during the
 transition.
 
 Ledger's core is an append-only, hash-chained record. It can record actor,
@@ -51,7 +51,7 @@ adapters rather than product prerequisites.
 ## Hosted endpoints
 
 - Product site: `https://perseus.observer/ledger/`
-- Hosted Ledger: `https://plutus.perseus.observer/` (legacy host name retained)
+- Hosted Ledger: `https://ledger.perseus.observer/` (legacy host name retained)
 - Stable ingestion: `POST /v1/usage`
 
 Deployments must treat the hosted endpoint as an integration choice, not a

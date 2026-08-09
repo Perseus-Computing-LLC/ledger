@@ -1,7 +1,7 @@
-"""Claude Code / Codex CLI → Plutus, via a Stop hook.
+"""Claude Code / Codex CLI → Ledger, via a Stop hook.
 
 Claude Code can run a command when a turn finishes (a `Stop` hook). Point it at
-this script to meter each turn's token usage into Plutus. Codex CLI works the
+this script to meter each turn's token usage into Ledger. Codex CLI works the
 same way — pipe its usage JSON to stdin.
 
 settings.json (Claude Code):
@@ -21,7 +21,7 @@ ignored; missing usage just records a zero-cost event so call counts stay right.
 import json
 import sys
 
-from plutus_agent import Meter
+from ledger_agent import Meter
 
 
 def _dig(d, *keys, default=0):
@@ -60,7 +60,7 @@ def main():
     meter.close()
     # Hooks should be quiet on success; surface only alerts.
     for a in res.alerts:
-        print(f"[plutus] {a['kind']}: {a['message']}", file=sys.stderr)
+        print(f"[ledger] {a['kind']}: {a['message']}", file=sys.stderr)
 
 
 if __name__ == "__main__":

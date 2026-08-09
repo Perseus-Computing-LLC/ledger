@@ -1,20 +1,20 @@
 # Perseus Ledger usage ingest API
 
 Send event and resource-allocation data to a Perseus Ledger instance over HTTP —
-no SDK or shared database required. The `/v1` route and `plutus_*` identifiers
+no SDK or shared database required. The `/v1` route and `ledger_*` identifiers
 below remain supported legacy compatibility contracts during the transition.
 
 ## 1. Get an API key
 
 From the dashboard: **API keys** panel → name it → **Create key**. The secret
-(`plutus_sk_…`) is shown **once** — Plutus stores only its hash, so copy it now.
+(`ledger_sk_…`) is shown **once** — Ledger stores only its hash, so copy it now.
 
 Self-hosting from the box:
 
 ```bash
-plutus keys create --name "prod agent"   # prints the secret once
-plutus keys list
-plutus keys revoke key_xxxx…
+ledger keys create --name "prod agent"   # prints the secret once
+ledger keys list
+ledger keys revoke key_xxxx…
 ```
 
 ## 2. Send usage
@@ -22,8 +22,8 @@ plutus keys revoke key_xxxx…
 `POST /v1/usage` with `Authorization: Bearer <key>` and a JSON body:
 
 ```bash
-curl -X POST https://plutus.perseus.observer/v1/usage \
-  -H 'Authorization: Bearer plutus_sk_…' \
+curl -X POST https://ledger.perseus.observer/v1/usage \
+  -H 'Authorization: Bearer ledger_sk_…' \
   -d '{"provider":"anthropic","model":"claude-opus-4-8",
        "input_tokens":1200,"output_tokens":800,
        "task_type":"code_review","workspace":"prod"}'
@@ -72,14 +72,14 @@ fields.
 The bundled `Meter` can post to `/v1/usage` for you — same call as local mode:
 
 ```python
-from plutus_agent import Meter
+from ledger_agent import Meter
 
-plutus = Meter(remote="https://plutus.perseus.observer", api_key="plutus_sk_…")
-plutus.track(provider="anthropic", model="claude-opus-4-8",
+ledger = Meter(remote="https://ledger.perseus.observer", api_key="ledger_sk_…")
+ledger.track(provider="anthropic", model="claude-opus-4-8",
              input_tokens=1200, output_tokens=800, task_type="code_review")
 ```
 
-Set `PLUTUS_REMOTE_URL` + `PLUTUS_API_KEY` instead and remote mode is
+Set `LEDGER_REMOTE_URL` + `LEDGER_API_KEY` instead and remote mode is
 auto-detected — the provider adapters (`track_anthropic` / `track_openai`) and
 the Claude Code hook then report to your hosted instance with no code change.
 Over-quota events come back as `recorded=False` rather than raising, so they
@@ -94,13 +94,13 @@ never break an agent. `balance()` / `summary()` / `topup()` are local-only.
 | `401` | missing/invalid/revoked API key |
 | `402` | free-tier token quota reached **and** `pricing.block_over_free_limit` is on — body carries `upgrade_url` |
 
-By default Plutus never drops billing data: past the free cap, events are still
+By default Ledger never drops billing data: past the free cap, events are still
 recorded but flagged `over_free_limit`. Set `pricing.block_over_free_limit: true`
 to hard-stop ingestion (and return 402) once the cap is hit.
 
 ## Security
 
-- Keys are random `plutus_sk_…` secrets; only a SHA-256 hash is stored, so a
+- Keys are random `ledger_sk_…` secrets; only a SHA-256 hash is stored, so a
   leaked database never exposes usable keys.
 - Revoking a key takes effect immediately.
 - `/v1/usage` is reachable without a dashboard session — it authenticates by key

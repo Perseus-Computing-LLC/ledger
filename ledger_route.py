@@ -1,0 +1,602 @@
+#!/usr/bin/env python3
+"""
+ledger_route.py — Ledger's balancing arm.
+
+Reads live runway from ledger.py, then rebalances Hermes model routing so the
+provider with the MOST runway runs its flagship as primary, and the other two
+providers supply the best subtask/fallback models. Edits config.yaml in place
+(targeted, backed up, re-verified — never a blind full rewrite).
+
+Routing policy
+--------------
+1. Rank deepseek / anthropic / google by projected days-left (runway).
+   - deepseek: live API balance / burn
+   - anthropic, google: (calibrated budget - ledger spend) / burn
+   - infinite/unknown runway sorts last-resort high (lots of headroom).
+2. PRIMARY  = flagship model of the highest-runway provider.
+3. FALLBACKS = the other two providers, flagship first (capable subtask work),
+   then their fast/cheap model for lighter subtasks.
+4. DELEGATION (subagent/subtask model) = best fast model of the highest-runway
+   NON-primary provider, so heavy primary spend doesn't bleed onto subtasks.
+
+Model IDs below are verified live against each provider's /models endpoint.
+"""
+from __future__ import annotations
+import json, os, re, shutil, subprocess, sys, time
+from datetime import datetime
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CONFIG = os.environ.get("LEDGER_HERMES_CONFIG",
+                        "/opt/data/webui/minions-hermes-config/config.yaml")
+LEDGER = os.path.join(HERE, "ledger.py")
+ROUTE_LOG = os.path.join(HERE, "ledger.routing.jsonl")
+
+def _resolve_version():
+    """Single-source the version from ``ledger_agent.__version__`` (this router
+    ships in the same release as the package). Runs standalone with no install:
+    try the package, else read the sibling ``__init__.py``, else a sentinel."""
+    try:
+        from ledger_agent import __version__ as v
+        return v
+    except Exception:
+        pass
+    init = os.path.join(HERE, "ledger_agent", "__init__.py")
+    try:
+        with open(init, encoding="utf-8") as f:
+            m = re.search(r'__version__\s*=\s*"([^"]+)"', f.read())
+            if m:
+                return m.group(1)
+    except Exception:
+        pass
+    return "0.0.0+unknown"
+
+
+VERSION = _resolve_version()
+
+# Verified model catalogs (from live /models calls 2026-06-19).
+# Override any provider's model via ledger.budgets.json → models.flagship / models.subtask.
+FLAGSHIP = {
+    "deepseek":  "deepseek-v4-pro",
+    "anthropic": "claude-opus-4-8",
+    "google":    "gemini-3.1-pro-preview",
+}
+SUBTASK = {  # fast / cheaper model for delegation + light fallbacks
+    "deepseek":  "deepseek-v4-flash",
+    "anthropic": "claude-sonnet-4-5-20250929",
+    "google":    "gemini-2.5-flash",
+}
+
+def _load_models():
+    """Merge model overrides from ledger.budgets.json into FLAGSHIP/SUBTASK defaults."""
+    budgets_path = os.environ.get("LEDGER_BUDGETS",
+                                   os.path.join(HERE, "ledger.budgets.json"))
+    try:
+        if os.path.exists(budgets_path):
+            cfg = json.load(open(budgets_path, encoding='utf-8'))
+            models = cfg.get("models", {})
+            for kind, target in (("flagship", FLAGSHIP), ("subtask", SUBTASK)):
+                if kind in models and isinstance(models[kind], dict):
+                    for prov, model_id in models[kind].items():
+                        target[prov] = model_id
+    except Exception:
+        pass  # budgets.json is optional; defaults are always present
+
+_load_models()
+PROVIDERS = ["deepseek", "anthropic", "google"]
+
+# ------------------------------------------------------------- routing policies ---
+# Estimated cost per 1M input tokens (USD). Updated 2026-06-20.
+# For models not in this table, cost-cap policy treats them as unknown (skipped).
+MODEL_COST_PER_1M_IN = {
+    "deepseek-v4-pro":  2.50,
+    "deepseek-v4-flash": 0.26,
+    "claude-opus-4-8":  15.00,
+    "claude-sonnet-4-5-20250929": 3.00,
+    "gemini-3.1-pro-preview": 2.50,
+    "gemini-2.5-flash":  0.15,
+}
+
+# Estimated latency tier (1=fastest, 5=slowest). For latency-weighted routing.
+MODEL_LATENCY_TIER = {
+    "deepseek-v4-pro":  3,
+    "deepseek-v4-flash": 1,
+    "claude-opus-4-8":  4,
+    "claude-sonnet-4-5-20250929": 2,
+    "gemini-3.1-pro-preview": 3,
+    "gemini-2.5-flash":  1,
+}
+
+# Quality benchmark score (0-100). For quality-floor filtering.
+# Rough scores based on LMSYS/Arena Elo approximations June 2026.
+MODEL_QUALITY_SCORE = {
+    "deepseek-v4-pro":  85,
+    "deepseek-v4-flash": 65,
+    "claude-opus-4-8":  88,
+    "claude-sonnet-4-5-20250929": 78,
+    "gemini-3.1-pro-preview": 84,
+    "gemini-2.5-flash":  72,
+}
+
+# ── quantization-aware routing (#128 step 3) ────────────────────────────
+# Measured quality retention per quantization tier vs the INT8 baseline.
+# These are conservative lower bounds from perseus-vault#630 benchmarks:
+#   - 1bit: 0.91 recall@1 retention (24-entity recall dataset)
+#   - fp16: 0.989 cosine similarity vs INT8 (2000-entity embedding benchmark)
+#   - int8: 1.0 (the baseline — shipped default)
+# Uncalibrated tiers get 1.0 (no assumed quality loss until measured).
+QUANTIZATION_QUALITY_FLOOR = {
+    "1bit": 0.90,   # measured: ~91% recall@1 vs binary dense
+    "int8": 1.00,   # baseline
+    "int4": 1.00,   # uncalibrated
+    "nvfp4": 1.00,  # measured (#131): 1.0 tool-use retention (10/10 tool-select,
+                    # Llama-3.3-70B NVFP4 vs FP8 on B200; N=10 — see benchmark/quantization)
+    "fp8":  1.00,   # baseline for the NVFP4 measurement
+    "fp16": 0.99,   # measured: 0.989 cosine vs INT8, NN agreement 71-85%
+}
+
+# Per-model availability of quantization tiers.
+# Currently: all models are served at fp8/fp16 (the API default).
+# NVFP4/1bit tiers will become available as providers deploy Blackwell/Rubin.
+# This table is the input to quantization-aware routing: it tells the router
+# which models can be served at which quantizations. Expand as providers
+# add quantized serving endpoints.
+MODEL_QUANTIZATION_TIERS = {
+    # All flagship models support fp16 (API default) and fp8 (inference optimization)
+    "deepseek-v4-pro":           ["fp16", "fp8"],
+    "deepseek-v4-flash":         ["fp16", "fp8"],
+    "claude-opus-4-8":           ["fp16", "fp8"],
+    "claude-sonnet-4-5-20250929": ["fp16", "fp8"],
+    "gemini-3.1-pro-preview":    ["fp16", "fp8"],
+    "gemini-2.5-flash":          ["fp16", "fp8"],
+}
+
+def _load_policy_config():
+    """Read routing.policy from ledger.budgets.json."""
+    budgets_path = os.environ.get("LEDGER_BUDGETS",
+                                   os.path.join(HERE, "ledger.budgets.json"))
+    try:
+        if os.path.exists(budgets_path):
+            cfg = json.load(open(budgets_path, encoding='utf-8'))
+            return cfg.get("routing", {}).get("policy", "runway")
+    except Exception:
+        pass
+    return "runway"
+
+def _apply_policy(order, rw, policy_name, policy_config):
+    """Apply a routing policy to reorder/suppress providers.
+    
+    Policies are stackable when comma-separated: 'cost-cap,quality-floor'.
+    Returns (reordered_providers, skipped_providers, policy_notes).
+    """
+    if not policy_name or policy_name == "runway":
+        return order, [], []
+    
+    policies = [p.strip() for p in policy_name.split(",")]
+    skipped = []
+    notes = []
+    
+    for pol in policies:
+        if pol == "cost-cap":
+            cap = policy_config.get("cost_max_per_1m", 5.0)  # default $5/M
+            filtered = []
+            for p in order:
+                model = FLAGSHIP.get(p)
+                cost = MODEL_COST_PER_1M_IN.get(model)
+                if cost is not None and cost <= cap:
+                    filtered.append(p)
+                elif cost is not None:
+                    skipped.append(p)
+                    notes.append(f"cost-cap: {p}/{model} (${cost:.2f}/M > ${cap:.2f}/M cap)")
+            order = filtered if filtered else order  # keep all if none qualify
+            
+        elif pol == "cost-prefer-cheapest":
+            def cost_sort(p):
+                cost = MODEL_COST_PER_1M_IN.get(FLAGSHIP.get(p), 999)
+                return cost
+            order = sorted(order, key=cost_sort)
+            notes.append(f"cost-prefer-cheapest: order={[FLAGSHIP[p] for p in order]}")
+            
+        elif pol == "latency-weighted":
+            def latency_sort(p):
+                tier = MODEL_LATENCY_TIER.get(FLAGSHIP.get(p), 5)
+                # Weight days_left by latency: faster models get a bonus
+                return rw[p]["days_left"] / (1 + tier * 0.2)
+            order = sorted(order, key=latency_sort, reverse=True)
+            notes.append(f"latency-weighted: penalized slow models")
+            
+        elif pol == "quality-floor":
+            floor = policy_config.get("quality_min_score", 70)
+            filtered = []
+            for p in order:
+                score = MODEL_QUALITY_SCORE.get(FLAGSHIP.get(p), 0)
+                if score >= floor:
+                    filtered.append(p)
+                else:
+                    skipped.append(p)
+                    notes.append(f"quality-floor: {p}/{FLAGSHIP[p]} (score {score} < {floor})")
+            order = filtered if filtered else order
+            
+        elif pol == "cost-cap,quality-floor" or pol == "cost-cap+quality-floor":
+            # Handled by comma splitting above — two passes
+            pass
+
+        elif pol == "quantization-aware":
+            # #128 step 3: prefer cheaper quantization tiers when quality
+            # delta is acceptable. Applies precision multipliers to model
+            # costs via ledger_agent.pricing, then re-ranks by effective cost.
+            # Only keeps models whose quantization quality retention is above
+            # the configured floor (quality_min_retention, default 0.90).
+            try:
+                from ledger_agent import pricing
+            except ImportError:
+                notes.append("quantization-aware: ledger_agent not importable, skipped")
+                continue
+
+            min_retention = policy_config.get("quality_min_retention", 0.90)
+
+            def effective_cost(p):
+                """Best effective cost across available quantization tiers."""
+                model = FLAGSHIP.get(p)
+                tiers = MODEL_QUANTIZATION_TIERS.get(model, ["fp16"])
+                best = float("inf")
+                for tier in tiers:
+                    retention = QUANTIZATION_QUALITY_FLOOR.get(tier, 1.0)
+                    if retention < min_retention:
+                        continue
+                    mult, _ = pricing.resolve_precision_multiplier(tier)
+                    base_cost = MODEL_COST_PER_1M_IN.get(model, 999)
+                    effective = base_cost * mult
+                    if effective < best:
+                        best = effective
+                return best
+
+            filtered = []
+            for p in order:
+                ec = effective_cost(p)
+                if ec < float("inf"):
+                    filtered.append(p)
+                else:
+                    skipped.append(p)
+                    notes.append(
+                        f"quantization-aware: {p} has no tier meeting quality floor"
+                    )
+            if filtered:
+                order = sorted(filtered, key=effective_cost)
+                notes.append(
+                    f"quantization-aware: re-ranked by effective cost "
+                    f"(min_retention={min_retention})"
+                )
+            else:
+                notes.append(
+                    "quantization-aware: no models pass quality floor, "
+                    "keeping runway order"
+                )
+    
+    return order, skipped, notes
+
+
+def runway():
+    """Pull per-provider days_left + balance from ledger.py --json."""
+    out = subprocess.run([sys.executable, LEDGER, "--json"],
+                         capture_output=True, text=True)
+    data = json.loads(out.stdout)
+    rw = {}
+    for e in data["providers"]:
+        p = e["provider"]
+        if p not in PROVIDERS:
+            continue
+        dl = e.get("days_left")
+        # None days_left = no burn / unknown -> treat as very high runway
+        rw[p] = {
+            "days_left": dl if dl is not None else 1e9,
+            "balance": e.get("balance"),
+            "remaining": e.get("remaining"),
+            "burn_per_day": e.get("burn_per_day"),
+        }
+    # ensure all three present
+    for p in PROVIDERS:
+        rw.setdefault(p, {"days_left": 1e9, "balance": None,
+                          "remaining": None, "burn_per_day": 0})
+    return rw, data
+
+
+def backtest(policy_name, policy_config):
+    """Replay session history against a routing policy."""
+    import sqlite3
+    STATE_DB = os.environ.get("LEDGER_STATE_DB",
+                               "/opt/data/webui/minions-hermes-config/state.db")
+    if not os.path.exists(STATE_DB):
+        print(f"State DB not found: {STATE_DB}")
+        return
+    
+    sessions = []
+    try:
+        c = sqlite3.connect(f"file:{STATE_DB}?mode=ro", uri=True)
+        cur = c.execute("""
+            select coalesce(nullif(billing_provider,''),'unknown') as prov,
+                   coalesce(model,'') as model,
+                   coalesce(nullif(actual_cost_usd,0), estimated_cost_usd, 0) as cost,
+                   started_at
+            from sessions
+            order by started_at
+        """)
+        for prov, model, cost, started in cur.fetchall():
+            if cost > 0 and started:
+                sessions.append({
+                    "provider": prov, "model": model,
+                    "cost": float(cost), "started": float(started or 0),
+                })
+        c.close()
+    except Exception as e:
+        print(f"Error reading state.db: {e}")
+        return
+    
+    if not sessions:
+        print("No session data available for backtest.")
+        return
+    
+    sessions.sort(key=lambda s: s["started"])
+    actual_cost = sum(s["cost"] for s in sessions)
+    
+    projected = 0
+    decisions_changed = 0
+    for s in sessions:
+        actual_model = s["model"]
+        actual_cost_s = s["cost"]
+        actual_cost_per_m = MODEL_COST_PER_1M_IN.get(actual_model)
+        if actual_cost_per_m is None:
+            projected += actual_cost_s
+            continue
+        
+        best_model = actual_model
+        best_cost = actual_cost_per_m
+        for prov in PROVIDERS:
+            for model in [FLAGSHIP.get(prov), SUBTASK.get(prov)]:
+                if not model:
+                    continue
+                cost_m = MODEL_COST_PER_1M_IN.get(model)
+                if cost_m is None:
+                    continue
+                passes = True
+                if "cost-cap" in policy_name:
+                    cap = policy_config.get("cost_max_per_1m", 5.0)
+                    if cost_m > cap:
+                        passes = False
+                if "quality-floor" in policy_name:
+                    floor = policy_config.get("quality_min_score", 70)
+                    if MODEL_QUALITY_SCORE.get(model, 0) < floor:
+                        passes = False
+                if passes and cost_m < best_cost:
+                    best_model = model
+                    best_cost = cost_m
+        
+        if best_model != actual_model:
+            decisions_changed += 1
+        if actual_cost_per_m > 0:
+            projected += actual_cost_s * (best_cost / actual_cost_per_m)
+        else:
+            projected += actual_cost_s
+    
+    delta = actual_cost - projected
+    n = len(sessions)
+    first_ts = sessions[0]["started"]
+    last_ts = sessions[-1]["started"]
+    days = max((last_ts - first_ts) / 86400, 1)
+    
+    print(f"\nBacktest: policy='{policy_name}'")
+    print(f"  Sessions:    {n} over {days:.1f} days")
+    print(f"  Actual cost: ${actual_cost:.2f}")
+    print(f"  Projected:   ${projected:.2f}")
+    if delta > 0:
+        print(f"  Savings:     ${delta:.2f} ({delta/actual_cost*100:.1f}%)")
+    else:
+        print(f"  Delta:       ${delta:.2f} — policy would increase costs")
+    print(f"  Decisions changed: {decisions_changed}/{n}")
+    print(f"  Summary: Policy '{policy_name}' would have {'saved' if delta > 0 else 'cost an extra'} ${abs(delta):.2f} over {days:.0f} days.\n")
+
+
+def load_yaml(path):
+    import yaml
+    with open(path, encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+
+def plan(rw, policy=None, policy_config=None):
+    # highest runway first (base order)
+    order = sorted(PROVIDERS, key=lambda p: rw[p]["days_left"], reverse=True)
+    skipped = []
+    notes = []
+    
+    # Apply routing policy if configured
+    if policy and policy != "runway":
+        order, skipped, notes = _apply_policy(order, rw, policy, policy_config or {})
+    
+    # Only available providers become primary/delegation
+    available = [p for p in order if p not in skipped]
+    if not available:
+        available = order  # fall back to runway if all skipped
+    
+    primary = available[0]
+    others = available[1:]
+    # delegation: fast model of the best non-primary provider
+    deleg_provider = others[0] if others else order[-1]  # last resort
+    fallbacks = []
+    for p in others:
+        fallbacks.append((p, FLAGSHIP[p]))   # capable fallback
+    for p in others:
+        fallbacks.append((p, SUBTASK[p]))    # light subtask fallback
+    
+    result = {
+        "order": order,
+        "primary": primary,
+        "primary_model": FLAGSHIP[primary],
+        "delegation_provider": deleg_provider,
+        "delegation_model": SUBTASK[deleg_provider],
+        "fallbacks": fallbacks,
+    }
+    if skipped:
+        result["skipped"] = skipped
+    if notes:
+        result["policy_notes"] = notes
+    return result
+
+
+def apply(cfg_path, p, providers_cfg, dry=False):
+    import yaml
+    cfg = load_yaml(cfg_path)
+    pre_keys = set(cfg.keys())
+    pre_provs = set((cfg.get("providers") or {}).keys())
+
+    def pcfg(name):
+        c = providers_cfg[name]
+        return {"base_url": c.get("base_url"), "api_key": c.get("api_key")}
+
+    # --- primary ---
+    prim = pcfg(p["primary"])
+    cfg["model"]["default"] = f"{p['primary']}/{p['primary_model']}" \
+        if p["primary"] != "deepseek" else p["primary_model"]
+    cfg["model"]["provider"] = p["primary"]
+    # keep provider block's base_url/api_key authoritative; set top-level provider only
+
+    # --- fallbacks ---
+    fb = []
+    for prov, model in p["fallbacks"]:
+        c = pcfg(prov)
+        entry = {"provider": prov, "model": model,
+                 "base_url": c["base_url"], "api_key": c["api_key"]}
+        if prov == "anthropic":
+            entry["api_mode"] = "anthropic_messages"
+            entry["context_length"] = 200000
+        else:
+            entry["context_length"] = providers_cfg[prov].get("context_length", 1048576)
+        fb.append(entry)
+    cfg["fallback_providers"] = fb
+
+    # --- delegation (subtask model) ---
+    dc = pcfg(p["delegation_provider"])
+    cfg.setdefault("delegation", {})
+    cfg["delegation"]["provider"] = p["delegation_provider"]
+    cfg["delegation"]["model"] = p["delegation_model"]
+    cfg["delegation"]["base_url"] = dc["base_url"]
+    cfg["delegation"]["api_key"] = dc["api_key"]
+
+    # --- VERIFY before writing: no top-level keys or provider blocks lost ---
+    post_keys = set(cfg.keys())
+    post_provs = set((cfg.get("providers") or {}).keys())
+    if pre_keys - post_keys:
+        raise RuntimeError(f"REFUSING WRITE: top-level keys would be lost: {pre_keys-post_keys}")
+    if pre_provs - post_provs:
+        raise RuntimeError(f"REFUSING WRITE: provider blocks would be lost: {pre_provs-post_provs}")
+
+    if dry:
+        return cfg, None
+
+    # backup then write
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = f"{cfg_path}.ledger-bak-{ts}"
+    shutil.copy2(cfg_path, backup)
+    with open(cfg_path, "w", encoding='utf-8') as f:
+        yaml.safe_dump(cfg, f, sort_keys=False, default_flow_style=False, allow_unicode=True)
+
+    # re-read & re-verify round-trip
+    rt = load_yaml(cfg_path)
+    assert set(rt.keys()) == post_keys, "post-write top-level key mismatch"
+    assert set((rt.get("providers") or {}).keys()) == post_provs, "post-write provider mismatch"
+    assert rt["model"]["provider"] == p["primary"], "primary not applied"
+    return cfg, backup
+
+
+def main():
+    import argparse
+    ap = argparse.ArgumentParser(description="Ledger route — credit-aware model routing for Hermes")
+    ap.add_argument("--version", action="version", version=f"ledger v{VERSION}")
+    ap.add_argument("--dry-run", action="store_true", help="preview routing without writing config")
+    ap.add_argument("--apply", action="store_true", help="write routing to config.yaml")
+    ap.add_argument("--policy", metavar="NAME", help="override routing policy (runway, cost-cap, cost-prefer-cheapest, latency-weighted, quality-floor, quantization-aware, or comma-separated stack)")
+    ap.add_argument("--backtest", metavar="POLICY", help="replay session history against a policy and report savings")
+    args = ap.parse_args()
+    dry = args.dry_run
+    rw, data = runway()
+    providers_cfg = load_yaml(CONFIG).get("providers", {})
+    
+    # Load policy: CLI --policy overrides config
+    policy_name = args.policy or _load_policy_config()
+    policy_config = {}
+    budgets_path = os.environ.get("LEDGER_BUDGETS", os.path.join(HERE, "ledger.budgets.json"))
+    try:
+        if os.path.exists(budgets_path):
+            cfg = json.load(open(budgets_path, encoding='utf-8'))
+            policy_config = cfg.get("routing", {})
+    except Exception:
+        pass
+    
+    pl = plan(rw, policy=policy_name, policy_config=policy_config)
+
+    if args.backtest:
+        backtest(args.backtest, policy_config)
+        return
+
+    print("Runway (days left):")
+    for prov in pl["order"]:
+        dl = rw[prov]["days_left"]
+        dls = "∞" if dl >= 1e8 else f"{dl:.0f}"
+        bal = rw[prov]["balance"]
+        rem = rw[prov]["remaining"]
+        amt = f"${bal:.2f} live" if bal is not None else (f"${rem:.2f} est" if rem is not None else "—")
+        print(f"  {prov:10} {dls:>6} days   {amt}")
+    print()
+    print(f"POLICY      {policy_name}")
+    if pl.get("skipped"):
+        print(f"SKIPPED     {', '.join(pl['skipped'])}")
+    if pl.get("policy_notes"):
+        for note in pl["policy_notes"]:
+            print(f"  {note}")
+    print(f"PRIMARY     {pl['primary']} / {pl['primary_model']}")
+    print(f"DELEGATION  {pl['delegation_provider']} / {pl['delegation_model']}  (subtasks)")
+    print("FALLBACKS   " + " -> ".join(f"{p}/{m}" for p, m in pl["fallbacks"]))
+    print()
+
+    if not (dry or args.apply):
+        print("No action. Re-run with --dry-run (preview write) or --apply (write config).")
+        return
+
+    cfg, backup = None, None
+    # no-op guard: skip write if current config already matches the plan
+    cur = load_yaml(CONFIG)
+    cur_default = (cur.get("model") or {}).get("default")
+    want_default = f"{pl['primary']}/{pl['primary_model']}" \
+        if pl["primary"] != "deepseek" else pl["primary_model"]
+    cur_deleg = (cur.get("delegation") or {}).get("model")
+    cur_fb = []
+    for f in (cur.get("fallback_providers") or []):
+        if isinstance(f, dict):
+            cur_fb.append(f"{f.get('provider')}/{f.get('model')}")
+        elif isinstance(f, str) and '/' in f:
+            cur_fb.append(f)
+    want_fb = [f"{p}/{m}" for p, m in pl["fallbacks"]]
+    already = (cur_default == want_default and cur_deleg == pl["delegation_model"]
+               and cur_fb == want_fb)
+    if already and not dry:
+        print(f"No change — already routed to {want_default}. Skipping write.")
+        return
+
+    cfg, backup = apply(CONFIG, pl, providers_cfg, dry=dry)
+    if dry:
+        print("DRY RUN — config not written. Verification passed (no keys/providers lost).")
+        print(f"  would set model.default = {cfg['model']['default']}")
+    else:
+        rec = {"t": round(time.time(), 1), "primary": pl["primary"],
+               "primary_model": pl["primary_model"],
+               "delegation": f"{pl['delegation_provider']}/{pl['delegation_model']}",
+               "fallbacks": [f"{p}/{m}" for p, m in pl["fallbacks"]],
+               "runway": {k: (None if v["days_left"] >= 1e8 else round(v["days_left"], 1))
+                          for k, v in rw.items()}}
+        with open(ROUTE_LOG, "a", encoding='utf-8') as f:
+            f.write(json.dumps(rec) + "\n")
+        print(f"APPLIED. Backup: {backup}")
+        print(f"  model.default = {cfg['model']['default']}")
+        print("  New sessions pick this up. Routing logged to ledger.routing.jsonl")
+
+
+if __name__ == "__main__":
+    main()

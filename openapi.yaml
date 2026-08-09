@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Perseus Ledger /v1 API
   # Frozen legacy-compatible `/v1` contract (SemVer), pinned to
-  # plutus_agent.__api_version__.
+  # ledger_agent.__api_version__.
   # Intentionally independent of the package version: bump ONLY on a wire change
   # (additive = minor, breaking = major), NOT on every package release.
   # test_version_single_source.py asserts this equals __api_version__.
@@ -18,12 +18,11 @@ info:
 
     ## Authentication
     Three independent schemes, by path:
-    - **`/v1/usage*`** — a per-org **API key** as `Authorization: Bearer plutus_sk_…`
+    - **`/v1/usage*`** — a per-org **API key** as `Authorization: Bearer ledger_sk_…`
       (minted in the dashboard or via the admin API).
     - **`/v1/admin/*`** — the single operator **admin token** as
       `Authorization: Bearer <admin token>` (config `admin.token` /
-      `PLUTUS_ADMIN_TOKEN`). Disabled (404) when no token is configured. The
-      `PLUTUS_*` name is a legacy compatibility contract.
+      `LEDGER_ADMIN_TOKEN`). Disabled (404) when no token is configured.
     - The dashboard and `/webhook/stripe` use session cookies and Stripe
       signatures respectively and are out of scope for `/v1`.
 
@@ -278,11 +277,11 @@ components:
     apiKey:
       type: http
       scheme: bearer
-      description: A per-org API key (`plutus_sk_…`).
+      description: A per-org API key (`ledger_sk_…`).
     adminToken:
       type: http
       scheme: bearer
-      description: The operator admin token (`admin.token` / `PLUTUS_ADMIN_TOKEN`).
+      description: The operator admin token (`admin.token` / `LEDGER_ADMIN_TOKEN`).
 
   parameters:
     IdempotencyKey:

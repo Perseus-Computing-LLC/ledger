@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the Hermes → Plutus sync bridge (examples/hermes_sync.py)."""
+"""Tests for the Hermes → Ledger sync bridge (examples/hermes_sync.py)."""
 import hashlib
 import json
 import os
@@ -167,7 +167,7 @@ def _make_pm_db():
 
 
 class TestDefaultStateDb(unittest.TestCase):
-    """#171: state.db default resolution — PLUTUS_STATE_DB > $HERMES_HOME/
+    """#171: state.db default resolution — LEDGER_STATE_DB > $HERMES_HOME/
     state.db (when it exists) > the legacy hardcoded path."""
 
     def setUp(self):
@@ -176,7 +176,7 @@ class TestDefaultStateDb(unittest.TestCase):
         open(self.hh_db, "w").close()
 
     def test_explicit_env_wins(self):
-        env = {"PLUTUS_STATE_DB": "/explicit/x.db", "HERMES_HOME": self.tmp}
+        env = {"LEDGER_STATE_DB": "/explicit/x.db", "HERMES_HOME": self.tmp}
         self.assertEqual(hermes_sync.default_state_db(env), "/explicit/x.db")
 
     def test_hermes_home_state_db_when_present(self):

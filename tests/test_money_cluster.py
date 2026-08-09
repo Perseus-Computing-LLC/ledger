@@ -13,10 +13,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import db, metering
-from plutus_agent.billing import handle_webhook_event, BillingError
-from plutus_agent.billing.stripe_client import StripeClient
-from plutus_agent.server.app import _parse_credit_amount
+from ledger_agent import db, metering
+from ledger_agent.billing import handle_webhook_event, BillingError
+from ledger_agent.billing.stripe_client import StripeClient
+from ledger_agent.server.app import _parse_credit_amount
 
 
 class TestUtcMonthFloor(unittest.TestCase):

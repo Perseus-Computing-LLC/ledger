@@ -1,6 +1,6 @@
 # Roadmap — efficiency leakage & policy adherence
 
-Plutus measures efficiency **achieved**. It should also measure efficiency
+Ledger measures efficiency **achieved**. It should also measure efficiency
 **leaked** — the turns where Claude Code / Hermes / Perseus did *not* use their
 routing, tools, or memory the way they were configured to. Together those two
 halves are the honest, complete efficiency picture, and they yield the metric
@@ -32,7 +32,7 @@ the server prices it from the published table (exactly like the baseline). Then:
 
 - **leaked** = `Σ max(0, actual − optimal)` over events that carry an optimal.
 - **adherence** = fraction of policy-covered events where `actual ≤ optimal` (on-policy).
-- Surfaced in `plutus savings` / `plutus efficiency` next to achieved savings.
+- Surfaced in `ledger savings` / `ledger efficiency` next to achieved savings.
 
 This reuses the `baseline_micros` machinery (nullable, hash-chained, optional
 trailing chain field) — no new mechanism, just a second counterfactual. It

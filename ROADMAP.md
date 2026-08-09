@@ -1,13 +1,13 @@
-# Plutus Roadmap
+# Ledger Roadmap
 
 > **For the active path to a 1.0 release of the billing engine, see [ROADMAP-1.0.md](ROADMAP-1.0.md).**
 > This document is the longer-term monitor/FinOps vision.
 
 > Last updated: 2026-06-19 · Horizon: 12 months
 
-## What Plutus Is
+## What Ledger Is
 
-Plutus (Greek god of wealth) is a credit & spend monitor and runway-based model router
+Ledger (Greek god of wealth) is a credit & spend monitor and runway-based model router
 for Hermes Agent. It tracks money draining from LLM providers and automatically rebalances
 routing toward the provider with the most projected days-left. Part of the Perseus / Perseus Vault /
 Minions toolset.
@@ -16,7 +16,7 @@ Tracks three providers today: **deepseek, anthropic, google**.
 
 ## Current State (Jun 2026)
 
-- **Version:** untagged (629 LOC: `plutus.py` 404, `plutus_route.py` 225)
+- **Version:** untagged (629 LOC: `ledger.py` 404, `ledger_route.py` 225)
 - **Monitors:** live DeepSeek balance API + local `state.db` ledger; budget back-solving via `--calibrate`
 - **Balancer:** ranks providers by days-left, rewrites Hermes `config.yaml` routing with backup + round-trip verification + no-op guard
 - **Outputs:** CLI table, `--json`, `--html` dashboard, `--snapshot` history
@@ -29,11 +29,11 @@ Tracks three providers today: **deepseek, anthropic, google**.
 
 - **Tag v0.1.0** — first public release; freeze the CLI surface.
 - **README dashboard screenshot / asciinema** so the repo shows what it does.
-- **CI workflow** — lint + `python3 plutus.py --json` smoke test on push.
+- **CI workflow** — lint + `python3 ledger.py --json` smoke test on push.
 
 ## 🟡 High Priority (Q3 2026)
 
-- **Low-balance email alert via Himalaya** — fire when DeepSeek < $threshold OR any provider days-left < N. Configurable in `plutus.budgets.json`.
+- **Low-balance email alert via Himalaya** — fire when DeepSeek < $threshold OR any provider days-left < N. Configurable in `ledger.budgets.json`.
 - **Calibration UX** — make the 3-day check-in reply flow (`--calibrate anthropic=NN --calibrate google=NN`) self-documenting in the cron prompt.
 - **Add a 4th live-balance provider** — implement a fetcher returning `{"balance_usd":..,"ok":True}` and register in `BALANCE_FETCHERS` + `LEDGER_ALIASES` (OpenAI or OpenRouter first).
 
@@ -61,7 +61,7 @@ Tracks three providers today: **deepseek, anthropic, google**.
 - Route decisions learn from outcomes: if Claude Opus tasks have 95% success vs 80% for Gemini, weight accordingly.
 - Per-task-type routing profiles: code review → Opus, quick fix → Flash, research → Gemini.
 - Routing audit log: every decision recorded with rationale for later analysis.
-- Integration with Perseus task classification: Perseus says what kind of task; Plutus routes to the best model.
+- Integration with Perseus task classification: Perseus says what kind of task; Ledger routes to the best model.
 
 ### v1.2 — Multi-Workspace Accounting (Q4 2027)
 - Track spend per workspace, per project, per task type.
@@ -94,8 +94,8 @@ Tracks three providers today: **deepseek, anthropic, google**.
 ### v2.1 — Spend Forecasting API (Q4 2028)
 - REST API for programmatic spend queries: `GET /forecast?workspace=X&days=30`.
 - Webhook alerts: POST to a URL when spend crosses a threshold.
-- Integration with Perseus context: `@plutus forecast` directive renders spend forecast inline.
-- SDK clients: Python, TypeScript for embedding Plutus in other tools.
+- Integration with Perseus context: `@ledger forecast` directive renders spend forecast inline.
+- SDK clients: Python, TypeScript for embedding Ledger in other tools.
 
 ### v2.2 — Cost-Aware Model Selection API (Q1 2029)
 - REST API: `POST /route` with task description → returns optimal model + provider + estimated cost.
@@ -117,7 +117,7 @@ Tracks three providers today: **deepseek, anthropic, google**.
 - Organizations with multiple users, multiple workspaces, multiple providers.
 - Per-user budgets, per-team budgets, organizational roll-up.
 - Invoice generation: monthly spend report as PDF with per-workspace breakdown.
-- Stripe integration for prepaid credits: teams load $X/month, Plutus routes until exhausted.
+- Stripe integration for prepaid credits: teams load $X/month, Ledger routes until exhausted.
 
 ### v3.1 — Organization-Wide FinOps (Q4 2029)
 - Multi-cloud provider spend aggregation: AWS Bedrock, Azure OpenAI, GCP Vertex AI.
@@ -129,7 +129,7 @@ Tracks three providers today: **deepseek, anthropic, google**.
 - SOC 2-ready audit logging for all spend decisions.
 - "Why was this task routed to Claude Opus at $0.03/1K tokens?" — every decision traceable.
 - Data residency controls: spend data stays in-region.
-- Enterprise SSO (SAML/OIDC) for the Plutus dashboard.
+- Enterprise SSO (SAML/OIDC) for the Ledger dashboard.
 
 ### v3.3 — Usage-Based Billing for Managed Services (Q2 2030)
 - Metered billing for Perseus Vault Cloud + Perseus Cloud: per-entity, per-render, per-synthesis-call.
@@ -143,8 +143,8 @@ Tracks three providers today: **deepseek, anthropic, google**.
 
 ### v4.0 — Financial Infrastructure for MCP (Q3 2030)
 - Billing API used by other MCP servers, not just Perseus Computing products.
-- "Add Plutus billing to your MCP server" — drop-in usage metering + Stripe integration.
-- Marketplace: third-party MCP servers listed with Plutus-managed pricing.
+- "Add Ledger billing to your MCP server" — drop-in usage metering + Stripe integration.
+- Marketplace: third-party MCP servers listed with Ledger-managed pricing.
 - Revenue share: Perseus Computing takes X% of marketplace transactions.
 
 ### v4.1 — AI Spend Marketplace (Q4 2030)
@@ -160,11 +160,11 @@ Tracks three providers today: **deepseek, anthropic, google**.
 - Model retirement planning: "GPT-5 is being deprecated. Here's what it would cost to migrate your workloads."
 
 ### v5.0 — The Billing Standard for AI Agents (Q2 2031)
-- Plutus is how AI agents pay for themselves.
-- Agent framework integrations: LangChain, CrewAI, AutoGen all have `plutus` as a billing backend.
+- Ledger is how AI agents pay for themselves.
+- Agent framework integrations: LangChain, CrewAI, AutoGen all have `ledger` as a billing backend.
 - "My agent spent $0.47 today. It completed 23 tasks. $0.02 per task."
 - The PayPal-for-AI-agents positioning: every agent framework needs a billing layer.
-- Plutus is the default billing layer for the MCP ecosystem.
+- Ledger is the default billing layer for the MCP ecosystem.
 
 ---
 
@@ -183,4 +183,4 @@ Tracks three providers today: **deepseek, anthropic, google**.
 1. **Never lose a key.** Config writes back up first and refuse to drop any provider block or API key.
 2. **Verify the round-trip.** Re-read config after every write; no-op guard skips unchanged decisions.
 3. **Estimate, then self-correct.** Budgets are back-solved from real console balances over time, not guessed once.
-4. **Cheap to run.** Plutus must never become a meaningful line item in the spend it monitors.
+4. **Cheap to run.** Ledger must never become a meaningful line item in the spend it monitors.

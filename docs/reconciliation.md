@@ -1,14 +1,14 @@
 # Cost reconciliation
 
-Plutus meters what your agents spend, but the wired providers return token
+Ledger meters what your agents spend, but the wired providers return token
 counts, not dollars. `record_usage` turns tokens into dollars using the static
-table in `plutus_agent/pricing.py` and marks the row `estimated = True`. That is
+table in `ledger_agent/pricing.py` and marks the row `estimated = True`. That is
 correct for a live estimate and the prepaid hard-stop, but it can drift from
 what a provider actually charged (price changes, committed-use discounts,
 enterprise rates, batch or cache pricing). You should not send an invoice built
 on the table.
 
-Reconciliation closes the gap: at the end of a billing period you feed Plutus
+Reconciliation closes the gap: at the end of a billing period you feed Ledger
 the provider's own authoritative total, and it writes one `adjust` ledger entry
 per provider so the ledger, and therefore the prepaid balance, matches the real
 bill.
@@ -42,17 +42,17 @@ Two things worth knowing:
 3. Dry-run to see the deltas (nothing is written):
 
    ```
-   plutus reconcile --org acme --period 2026-07 --totals totals.json
+   ledger reconcile --org acme --period 2026-07 --totals totals.json
    ```
 
 4. Apply when the numbers look right:
 
    ```
-   plutus reconcile --org acme --period 2026-07 --totals totals.json --apply
+   ledger reconcile --org acme --period 2026-07 --totals totals.json --apply
    ```
 
    For a single provider you can skip the file:
-   `plutus reconcile --period 2026-07 --provider openai --amount 812.44 --apply`.
+   `ledger reconcile --period 2026-07 --provider openai --amount 812.44 --apply`.
 
 ## How the adjustment is computed
 
@@ -76,18 +76,18 @@ that key. So:
 The `--period YYYY-MM` flag also windows which `usage_events` are counted (by
 timestamp, UTC month bounds). Omit it to reconcile all usage under one label.
 
-## Automated close: fetch → reconcile (`plutus close`)
+## Automated close: fetch → reconcile (`ledger close`)
 
-`plutus reconcile` needs the authoritative totals handed to it. `plutus close`
+`ledger reconcile` needs the authoritative totals handed to it. `ledger close`
 (#109) fetches them for you and reconciles in one step — the piece that lets a
 cron job true up billable dollars after month end without manual export:
 
 ```
 # dry run for the previous month (the default period), all providers with usage
-plutus close --org acme
+ledger close --org acme
 
 # apply, for a specific month and provider set
-plutus close --org acme --period 2026-07 --providers openai,anthropic --apply
+ledger close --org acme --period 2026-07 --providers openai,anthropic --apply
 ```
 
 - **Period** defaults to the *previous* month (UTC), so a job that runs on the
@@ -97,7 +97,7 @@ plutus close --org acme --period 2026-07 --providers openai,anthropic --apply
 - **Never zeros on a failed fetch.** If a provider's cost API can't be reached
   (missing key, API error, unrecognized response), that provider is reported
   under "could not fetch" and left untouched — same rule as a missing manual
-  total. `plutus close` exits non-zero when any requested provider failed, so a
+  total. `ledger close` exits non-zero when any requested provider failed, so a
   cron job surfaces the gap instead of silently under-reconciling.
 - The written `adjust` entries land in the ledger and show up on the dashboard
   balance like any other reconciliation.
@@ -107,14 +107,14 @@ plutus close --org acme --period 2026-07 --providers openai,anthropic --apply
 ```cron
 # 06:00 UTC on the 2nd of each month: true up the month that just closed.
 0 6 2 * *  OPENAI_ADMIN_KEY=... ANTHROPIC_ADMIN_KEY=... \
-           plutus close --org acme --apply --json >> /var/log/plutus-close.log 2>&1
+           ledger close --org acme --apply --json >> /var/log/ledger-close.log 2>&1
 ```
 
 ## Getting the authoritative total per provider
 
-Either let `plutus close` fetch it (above) or produce the normalized totals file
+Either let `ledger close` fetch it (above) or produce the normalized totals file
 yourself from the provider's own export. The authoritative sources — and the
-credentials `plutus close` uses for each:
+credentials `ledger close` uses for each:
 
 - **OpenAI** — the organization Costs API (`/v1/organization/costs`). Needs an
   **admin/organization** key in `OPENAI_ADMIN_KEY` (falls back to
@@ -124,7 +124,7 @@ credentials `plutus close` uses for each:
   `ANTHROPIC_API_KEY`). Install: no extra (stdlib only).
 - **Bedrock** (`bedrock`/`aws`) — the AWS Cost Explorer API, filtered to the
   Amazon Bedrock service. Uses the standard AWS credential chain. Install:
-  `pip install 'plutus-agent[fetchers]'` (boto3).
+  `pip install 'ledger-agent[fetchers]'` (boto3).
 
 The fetchers reconcile only in the **billed currency** (USD) and fail loudly on a
 non-USD figure rather than converting. They follow each provider's documented

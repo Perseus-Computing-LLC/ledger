@@ -1,6 +1,6 @@
 """Accuracy-gated savings via the Invarium bridge (docs/invarium-integration.md).
 
-The bridge forwards a task's counterfactual baseline to Plutus *only when the
+The bridge forwards a task's counterfactual baseline to Ledger *only when the
 task passed its Invarium behavioral contract*. A cheaper-but-wrong run therefore
 books $0 savings. These tests pin that gate and the "never bill a broken run"
 invariant it protects.
@@ -13,12 +13,12 @@ invarium = pytest.importorskip("invarium")
 
 from invarium import AgentResult, ToolCall, expect
 
-from plutus_agent import db, savings
-from plutus_agent.integrations.invarium import meter_agent_result
+from ledger_agent import db, savings
+from ledger_agent.integrations.invarium import meter_agent_result
 
 
 def _org(tmp_path, tier="pro"):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "Acme", tier=tier, owner_email="a@b.co")["id"]
     return conn, org_id

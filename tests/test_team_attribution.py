@@ -1,10 +1,10 @@
 import pytest
 
-from plutus_agent import db, metering
+from ledger_agent import db, metering
 
 
 def _org(tmp_path):
-    conn = db.connect(str(tmp_path / 'plutus.db'))
+    conn = db.connect(str(tmp_path / 'ledger.db'))
     db.init_schema(conn)
     org = db.create_org(conn, 'Team', tier='team', owner_email='owner@example.com')['id']
     member = db.ensure_user(conn, org, 'member@example.com', 'Member')

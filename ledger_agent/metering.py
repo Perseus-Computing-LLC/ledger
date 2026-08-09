@@ -1,0 +1,864 @@
+"""Metering — the revenue-bearing core.
+
+``record_usage`` is the single entry point every integration funnels through:
+
+    ledger_agent.metering.record_usage(conn, org_id, provider="anthropic",
+        model="claude-opus-4-8", task_type="code_review",
+        input_tokens=1200, output_tokens=800, workspace="prod")
+
+It (1) resolves/creates the workspace, (2) prices the event (exact cost if given,
+else estimated from token counts), (3) writes an immutable ``usage_events`` row,
+(4) **depletes prepaid credit** via the append-only ledger, and (5) runs budget /
+low-balance checks, queueing alerts when thresholds trip.
+
+Everything else here is read-side aggregation for the dashboard, reports, and
+the metered free-tier limit. All windows are computed relative to ``now`` so the
+numbers match the original monitor's today / 7d / 30d framing, plus
+month-to-date for billing periods.
+"""
+from __future__ import annotations
+
+import json
+import re
+import time
+from dataclasses import dataclass, asdict
+from typing import Optional
+
+from . import db, pricing
+from .prebind import validate_prebind
+from .receipts import (
+    build_served_claim, validate_served_claim,
+    validate_external_artifact_binding, validate_runtime_manifest,
+    EVIDENCE_STATUS_VALUES,
+)
+
+DAY = 86400
+_SHA256_HEX = re.compile(r"^[0-9a-fA-F]{64}$")
+_HUMAN_REVIEW_VALUES = {"approved", "rejected", "corrected"}
+_ACTION_STATUS_VALUES = {
+    "intent", "approval_requested", "approved", "denied", "expired",
+    "executed", "failed", "cancelled",
+}
+
+
+def _canonical_evidence_hashes(hashes: Optional[list[str]]) -> Optional[str]:
+    """Validate and canonically serialize source/artifact SHA-256 hashes.
+
+    The stored JSON string is itself chain-covered. Sorting/deduplicating makes
+    equivalent source sets hash identically regardless of caller order.
+    """
+    if hashes is None:
+        return None
+    if not isinstance(hashes, (list, tuple)):
+        raise ValueError("evidence_hashes must be a list of SHA-256 hex digests")
+    normalized = []
+    for digest in hashes:
+        if not isinstance(digest, str) or not _SHA256_HEX.fullmatch(digest):
+            raise ValueError("evidence_hashes must contain 64-character SHA-256 hex digests")
+        normalized.append(digest.lower())
+    return json.dumps(sorted(set(normalized)), separators=(",", ":"))
+
+
+def _optional_text(value, field: str) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string when supplied")
+    if len(value) > 512:
+        raise ValueError(f"{field} exceeds 512 characters")
+    return value
+
+
+@dataclass
+class MeterResult:
+    event_id: str
+    org_id: str
+    workspace_id: Optional[str]
+    provider: str
+    model: Optional[str]
+    task_type: str
+    cost_usd: float
+    estimated: bool
+    balance_after: float
+    alerts: list  # list of dicts {kind, message}
+    baseline_usd: Optional[float] = None  # counterfactual cost, if supplied (#7)
+    savings_usd: float = 0.0              # max(0, baseline - cost); 0 when no baseline
+    optimal_usd: Optional[float] = None   # cheapest policy-passing cost, if supplied (#8)
+    leaked_usd: float = 0.0               # max(0, cost - optimal); 0 when on-policy / none
+    external_ref: Optional[str] = None    # per-task attribution id, if supplied (#20-arc, A)
+    user_id: Optional[str] = None          # active seat/user attribution (#136)
+    recorded: bool = True        # False when a hard free-tier cap dropped the event
+    over_free_limit: bool = False  # org is on a limited tier and past its monthly quota
+    over_balance: bool = False  # Fix #28: org hit prepaid credit hard-stop
+    unpriced: bool = False  # Fix #64: cost is an estimate with no exact model price
+    # #170: the caller named a workspace that doesn't exist and the tier cap
+    # (Free = 1) forced the event into the org's earliest workspace instead of
+    # creating a new one — the recorded attribution differs from what was sent.
+    workspace_folded: bool = False
+
+
+def _resolve_workspace(conn, org_id: str, workspace: Optional[str],
+                       commit: bool = True) -> tuple[Optional[str], bool]:
+    """Accept a workspace id, slug, or name; create-by-name if not found.
+
+    Honors the org tier's workspace cap: once an org is at its limit (Free = 1),
+    a usage event tagged with a *new* workspace folds into the org's earliest
+    existing workspace instead of creating another. Tracking never breaks; the
+    cap just stops the workspace count from growing.
+
+    Returns ``(workspace_id, folded)`` — ``folded`` is True only when that
+    cap-fold actually happened (#170), so the ingest response can flag that
+    the recorded workspace differs from the one the client sent.
+
+    ``commit`` is forwarded to :func:`db.create_workspace` so that, inside a
+    batch/transaction (``record_usage(commit=False)`` under ``db.immediate``),
+    auto-creating a workspace does not commit the open transaction early.
+    """
+    if not workspace:
+        return None, False
+    ws = db.get_workspace(conn, workspace)
+    if ws and ws["org_id"] == org_id:
+        return ws["id"], False
+    row = conn.execute(
+        "SELECT * FROM workspaces WHERE org_id=? AND (slug=? OR name=?)",
+        (org_id, workspace, workspace),
+    ).fetchone()
+    if row:
+        return row["id"], False
+
+    existing = db.list_workspaces(conn, org_id)
+    org = db.get_org(conn, org_id)
+    cap = pricing.tier(org["tier"]).workspaces if org else None
+    if cap is not None and len(existing) >= cap:
+        return (existing[0]["id"] if existing else None), True
+    return db.create_workspace(conn, org_id, workspace, commit=commit)["id"], False
+
+
+def record_usage(conn, org_id: str, provider: str,
+                 input_tokens: int = 0, output_tokens: int = 0,
+                 cache_read_tokens: int = 0, reasoning_tokens: int = 0,
+                 cache_write_tokens: Optional[int] = None,
+                 model: Optional[str] = None, task_type: str = "general",
+                 workspace: Optional[str] = None,
+                 cost_usd: Optional[float] = None,
+                 baseline_cost_usd: Optional[float] = None,
+                 baseline_model: Optional[str] = None,
+                 baseline_input_tokens: Optional[int] = None,
+                 baseline_output_tokens: Optional[int] = None,
+                 optimal_cost_usd: Optional[float] = None,
+                 optimal_model: Optional[str] = None,
+                 external_ref: Optional[str] = None,
+                 evidence_hashes: Optional[list[str]] = None,
+                 policy_version: Optional[str] = None,
+                 result_hash: Optional[str] = None,
+                 human_review: Optional[str] = None,
+                 correction_ref: Optional[str] = None,
+                 agent_id: Optional[str] = None,
+                 authority_manifest_ref: Optional[str] = None,
+                 scope_anchor: Optional[str] = None,
+                 action_intent_hash: Optional[str] = None,
+                 action_status: Optional[str] = None,
+                 approval_ref: Optional[str] = None,
+                 context_render_schema: Optional[str] = None,
+                 context_render_hash: Optional[str] = None,
+                 served_memory_provenance_hash: Optional[str] = None,
+                 action_receipt_hash: Optional[str] = None,
+                 resource_constraints_version: Optional[str] = None,
+                 resource_constraints_hash: Optional[str] = None,
+                 user_id: Optional[str] = None, source: str = "api",
+                 pricing_overrides: Optional[dict] = None,
+                 ts: Optional[float] = None,
+                 alert_cfg: Optional[dict] = None,
+                 block_over_limit: bool = False,
+                 block_over_balance: bool = False,
+                 chain_hmac_key: Optional[bytes] = None,
+                 prebind: Optional[dict] = None,
+                 served_claim: Optional[dict] = None,
+                 evidence_status: Optional[str] = None,
+                 runtime_manifest: Optional[dict] = None,
+                 external_artifact: Optional[dict] = None,
+                 commit: bool = True) -> MeterResult:
+    """Meter one LLM/agent call. Returns a :class:`MeterResult`.
+
+    Free-tier quota: an org on a limited tier is flagged ``over_free_limit``
+    once its month-to-date tracked tokens reach the tier cap. With
+    ``block_over_limit`` the event past the cap is *not* recorded (``recorded``
+    is False) — otherwise it is still recorded so no billing data is lost.
+    
+    Prepaid credit hard-stop (fix #28): with ``block_over_balance`` on, if the
+    org has ever had credit and the event would push balance negative, it is
+    rejected (not recorded).
+
+    Savings-share (#7): the counterfactual cost of this same call *without*
+    Perseus — the same token counts priced at the customer's designated baseline
+    model. Supply it one of two ways:
+
+    * ``baseline_cost_usd`` — an explicit USD figure, or
+    * ``baseline_model`` — the baseline model name; the SAME token counts are
+      then priced from Ledger's published table (honoring ``pricing_overrides``).
+      Preferred: the baseline is derived from published prices on chained token
+      counts, so the customer can independently reconstruct it — the client only
+      asserts *which model*, not the dollar amount. This measures model
+      SUBSTITUTION savings (same work, cheaper model), or
+    * ``baseline_input_tokens`` / ``baseline_output_tokens`` (#134) — the token
+      counts the same call would have sent WITHOUT the optimization (e.g. the
+      full-context / pre-trim prompt Perseus replaced with a recall). Priced
+      from the published table at ``baseline_model`` if also given, else at
+      this event's own model. This measures token REDUCTION savings — the
+      counterfactual the model-substitution path structurally cannot see,
+      because the ledger only ever receives the already-reduced counts. The
+      caller asserts only the counterfactual token counts; the dollars stay
+      reconstructable from the published table.
+
+    When resolved it is stored (and hash-chained) alongside the actual cost; the
+    per-event saving is ``max(0, baseline - cost)`` and periodic savings-share
+    billing sums it. Omit both (the default) and the event never contributes to
+    billable savings. Neither affects the prepaid-credit debit, which always
+    follows the actual ``cost_usd``.
+    """
+    ts = ts if ts is not None else time.time()
+    if prebind is not None:
+        valid, errors = validate_prebind(prebind)
+        if not valid:
+            raise ValueError("invalid prebind: " + ", ".join(errors))
+    evidence_hashes_json = _canonical_evidence_hashes(evidence_hashes)
+    policy_version = _optional_text(policy_version, "policy_version")
+    correction_ref = _optional_text(correction_ref, "correction_ref")
+    if result_hash is not None and (not isinstance(result_hash, str)
+                                    or not _SHA256_HEX.fullmatch(result_hash)):
+        raise ValueError("result_hash must be a 64-character SHA-256 hex digest")
+    result_hash = result_hash.lower() if result_hash else None
+    if human_review is not None and human_review not in _HUMAN_REVIEW_VALUES:
+        raise ValueError("human_review must be approved, rejected, or corrected")
+    if human_review == "corrected" and correction_ref is None:
+        raise ValueError("correction_ref is required when human_review is corrected")
+    agent_id = _optional_text(agent_id, "agent_id")
+    authority_manifest_ref = _optional_text(authority_manifest_ref, "authority_manifest_ref")
+    scope_anchor = _optional_text(scope_anchor, "scope_anchor")
+    approval_ref = _optional_text(approval_ref, "approval_ref")
+    if action_intent_hash is not None and (
+        not isinstance(action_intent_hash, str)
+        or not _SHA256_HEX.fullmatch(action_intent_hash)
+    ):
+        raise ValueError("action_intent_hash must be a 64-character SHA-256 hex digest")
+    action_intent_hash = action_intent_hash.lower() if action_intent_hash else None
+    if action_status is not None and action_status not in _ACTION_STATUS_VALUES:
+        raise ValueError(
+            "action_status must be one of " + ", ".join(sorted(_ACTION_STATUS_VALUES))
+        )
+    if any((agent_id, authority_manifest_ref, scope_anchor, action_intent_hash, action_status, approval_ref)):
+        if not agent_id:
+            raise ValueError("agent_id is required when action provenance is supplied")
+        if not authority_manifest_ref or not scope_anchor or not action_intent_hash or not action_status:
+            raise ValueError(
+                "authority_manifest_ref, scope_anchor, action_intent_hash, and action_status "
+                "are required together for action provenance"
+            )
+    if action_status in {"approved", "denied", "expired"} and not approval_ref:
+        raise ValueError("approval_ref is required for an approval decision status")
+
+    context_render_schema = _optional_text(context_render_schema, "context_render_schema")
+    context_hashes = {
+        "context_render_hash": context_render_hash,
+        "served_memory_provenance_hash": served_memory_provenance_hash,
+        "action_receipt_hash": action_receipt_hash,
+    }
+    if any(value is not None for value in context_hashes.values()) and not context_render_schema:
+        raise ValueError("context_render_schema is required with context-render evidence")
+    for field, digest in context_hashes.items():
+        if digest is not None and (not isinstance(digest, str) or not _SHA256_HEX.fullmatch(digest)):
+            raise ValueError(f"{field} must be a 64-character SHA-256 hex digest")
+    context_render_hash = context_render_hash.lower() if context_render_hash else None
+    served_memory_provenance_hash = (served_memory_provenance_hash.lower()
+                                     if served_memory_provenance_hash else None)
+    action_receipt_hash = action_receipt_hash.lower() if action_receipt_hash else None
+    if resource_constraints_version is not None and not isinstance(resource_constraints_version, str):
+        raise ValueError("resource_constraints_version must be a string")
+    if resource_constraints_hash is not None and not _SHA256_HEX.fullmatch(resource_constraints_hash):
+        raise ValueError("resource_constraints_hash must be a 64-character SHA-256 hex digest")
+    resource_constraints_hash = resource_constraints_hash.lower() if resource_constraints_hash else None
+
+    # v18: stage-aware action receipts and evidence bindings (#219–#224)
+    served_claim_json: Optional[str] = None
+    served_claim_hash: Optional[str] = None
+    if served_claim is not None:
+        if not isinstance(served_claim, dict):
+            raise ValueError("served_claim must be a dict")
+        valid, errors = validate_served_claim(served_claim)
+        if not valid:
+            raise ValueError("invalid served_claim: " + ", ".join(errors))
+        served_claim_json = json.dumps(served_claim, sort_keys=True, separators=(",", ":"))
+        served_claim_hash = served_claim.get("claim_digest")
+
+    if evidence_status is not None:
+        if evidence_status not in EVIDENCE_STATUS_VALUES:
+            raise ValueError(f"evidence_status must be one of {sorted(EVIDENCE_STATUS_VALUES)}")
+
+    runtime_manifest_json: Optional[str] = None
+    runtime_manifest_hash: Optional[str] = None
+    if runtime_manifest is not None:
+        if not isinstance(runtime_manifest, dict):
+            raise ValueError("runtime_manifest must be a dict")
+        valid, errors = validate_runtime_manifest(runtime_manifest)
+        if not valid:
+            raise ValueError("invalid runtime_manifest: " + ", ".join(errors))
+        runtime_manifest_json = json.dumps(runtime_manifest, sort_keys=True, separators=(",", ":"))
+        runtime_manifest_hash = runtime_manifest.get("manifest_digest")
+
+    external_artifact_json: Optional[str] = None
+    external_artifact_hash: Optional[str] = None
+    if external_artifact is not None:
+        if not isinstance(external_artifact, dict):
+            raise ValueError("external_artifact must be a dict")
+        valid, errors = validate_external_artifact_binding(external_artifact)
+        if not valid:
+            raise ValueError("invalid external_artifact: " + ", ".join(errors))
+        external_artifact_json = json.dumps(external_artifact, sort_keys=True, separators=(",", ":"))
+        external_artifact_hash = external_artifact.get("binding_digest")
+
+    # Fix #80: never let a negative token count through...
+    # month-to-date tracked total (bypassing the free-tier quota) and corrupt
+    # every SUM(tokens) aggregate. Authoritative guard; the /v1/usage boundary
+    # also rejects negatives with a 400 before reaching here.
+    if (int(input_tokens) < 0 or int(output_tokens) < 0
+            or int(cache_read_tokens) < 0 or int(reasoning_tokens) < 0
+            or (cache_write_tokens is not None and int(cache_write_tokens) < 0)):
+        raise ValueError("token counts must be non-negative")
+
+    org = db.get_org(conn, org_id)
+    if user_id is not None:
+        user = db.get_user(conn, user_id)
+        if not user or user["org_id"] != org_id or not user["active"]:
+            raise ValueError("user_id must identify an active user in this organization")
+    limit = pricing.tier(org["tier"]).tracked_tokens_month if org else None
+    event_tokens = (int(input_tokens) + int(output_tokens)
+                    + int(cache_read_tokens) + int(reasoning_tokens)
+                    + int(cache_write_tokens or 0))
+    tracked_before = tracked_tokens_mtd(conn, org_id, ts) if limit is not None else 0
+    if limit is not None and block_over_limit and tracked_before >= limit:
+        return MeterResult(
+            event_id="", org_id=org_id, workspace_id=None,
+            provider=provider, model=model, task_type=task_type,
+            cost_usd=0.0, estimated=cost_usd is None,
+            balance_after=db.get_balance(conn, org_id), alerts=[],
+            recorded=False, over_free_limit=True,
+        )
+
+    workspace_id, workspace_folded = _resolve_workspace(
+        conn, org_id, workspace, commit=commit)
+
+    estimated = cost_usd is None
+    unpriced = False
+    if estimated:
+        # Fix #64: flag estimates that fell back to a provider/global default
+        # (no exact model price) so a coarse estimate is never mistaken for an
+        # authoritative cost. The caller should pass exact cost_usd or calibrate.
+        price, exact = pricing.resolve_price(provider, model, pricing_overrides)
+        cost_usd = price.cost_with_cache_write(
+            input_tokens, output_tokens, cache_read_tokens, reasoning_tokens,
+            int(cache_write_tokens or 0))
+        unpriced = not exact
+    cost_usd = round(float(cost_usd), 6)
+
+    # Fix #61: never let a negative cost through the debit hot path. A negative
+    # cost_usd would be passed to db.add_ledger(..., -cost_usd, "debit") where
+    # -(-x) becomes a *positive* delta — minting prepaid credit out of thin air —
+    # and would also defeat the hard-stop below (balance - cost_usd can't go
+    # negative when cost_usd < 0). Genuine corrections/credits must go through an
+    # explicit adjust/grant/refund ledger path, never metering. This is the
+    # authoritative guard; the /v1/usage boundary also rejects negatives with a
+    # 400 so HTTP callers get a clean error before ever reaching here.
+    if cost_usd < 0:
+        raise ValueError(
+            f"cost_usd must be non-negative, got {cost_usd}; credits/refunds "
+            "must go through the adjust/grant/refund ledger path, not metering"
+        )
+
+    if prebind is not None:
+        resource_used = (
+            any(int(value or 0) > 0 for value in (
+                input_tokens, output_tokens, cache_read_tokens,
+                reasoning_tokens, cache_write_tokens,
+            ))
+            or cost_usd > 0
+        )
+        execution_claimed = action_status == "executed" or resource_used
+        if execution_claimed and (
+            prebind["boundary_outcome"] != "allow"
+            or prebind["non_effective_result"] != "not_executed"
+        ):
+            raise ValueError("prebind result contradicts executed action or resource usage")
+
+    # #7: savings-share counterfactual. A negative baseline is nonsensical and
+    # could only inflate savings, so reject it rather than clamp silently. None
+    # stays None (no baseline recorded). The per-event saving is clamped at 0 so
+    # a baseline *below* actual cost never produces "negative savings" that would
+    # net against a genuine saving elsewhere in the period.
+    baseline_micros = None
+    savings_usd = 0.0
+    # #134: validate counterfactual token counts up front, same rule as the
+    # actual counts (#80) — a negative count could only inflate the baseline.
+    has_baseline_tokens = (baseline_input_tokens is not None
+                           or baseline_output_tokens is not None)
+    if has_baseline_tokens:
+        b_in = int(baseline_input_tokens or 0)
+        b_out = int(baseline_output_tokens or 0)
+        if b_in < 0 or b_out < 0:
+            raise ValueError("baseline token counts must be non-negative")
+    if baseline_cost_usd is not None:
+        # Caller asserted an explicit baseline USD — use it as-is; the saving is
+        # baseline minus the recorded actual.
+        baseline_cost_usd = round(float(baseline_cost_usd), 6)
+        if baseline_cost_usd < 0:
+            raise ValueError(
+                f"baseline_cost_usd must be non-negative, got {baseline_cost_usd}"
+            )
+        baseline_micros = db.usd_to_micros(baseline_cost_usd)
+        savings_usd = round(max(0.0, baseline_cost_usd - cost_usd), 6)
+    elif has_baseline_tokens:
+        # #134: token-reduction counterfactual. Price the counterfactual counts
+        # at the named baseline model (or this event's own model), floor the
+        # recorded actual at its own list price over the ACTUAL chained counts
+        # (same defensibility rule as the routing path below: a broken/too-low
+        # cost field must not inflate the saving), and store a baseline such
+        # that (baseline - cost) equals the floored saving. Reconstructable
+        # from the chained actual counts + the asserted counterfactual counts
+        # + the published table.
+        bp, _ = pricing.resolve_price(provider, baseline_model or model,
+                                      pricing_overrides)
+        ap, _ = pricing.resolve_price(provider, model, pricing_overrides)
+        baseline_est = bp.cost(b_in, b_out, 0, 0)
+        actual_floor = ap.cost(int(input_tokens), int(output_tokens),
+                               int(cache_read_tokens), int(reasoning_tokens))
+        effective_cost = max(cost_usd, actual_floor)
+        savings_usd = round(max(0.0, baseline_est - effective_cost), 6)
+        baseline_cost_usd = round(cost_usd + savings_usd, 6)
+        baseline_micros = db.usd_to_micros(baseline_cost_usd)
+    elif baseline_model:
+        # Token-derived saving, immune to a mis-recorded actual cost. Both the
+        # flagship baseline AND a floor for the actual are priced from the SAME
+        # token counts at published prices, so the saving is exactly
+        #   (flagship_price - actual_model_price) x tokens
+        # — the true routing benefit. Flooring the recorded cost at the actual
+        # model's list price means a broken/too-low cost field (Hermes has emitted
+        # $0.44 for a call worth $60) can't inflate the saving; a genuinely higher
+        # provider-billed cost still narrows it. Fully reconstructable from the
+        # chained tokens + the published table. (defensibility, #7)
+        fp, _ = pricing.resolve_price(provider, baseline_model, pricing_overrides)
+        ap, _ = pricing.resolve_price(provider, model, pricing_overrides)
+        toks = (int(input_tokens), int(output_tokens),
+                int(cache_read_tokens), int(reasoning_tokens))
+        flagship_est = fp.cost(*toks)
+        actual_floor = ap.cost(*toks)
+        effective_cost = max(cost_usd, actual_floor)
+        savings_usd = round(max(0.0, flagship_est - effective_cost), 6)
+        # Store baseline s.t. (baseline - cost) == the floored saving, since the
+        # period aggregation subtracts the recorded cost_micros.
+        baseline_cost_usd = round(cost_usd + savings_usd, 6)
+        baseline_micros = db.usd_to_micros(baseline_cost_usd)
+
+    # #8: efficiency-leakage counterfactual — the cheapest option the configured
+    # routing policy WOULD have picked (and that passed the quality bar). Same
+    # shape as the baseline: an explicit ``optimal_cost_usd``, or an
+    # ``optimal_model`` priced from the token counts. leaked = max(0, cost -
+    # optimal): what this turn cost ABOVE the on-policy ideal. A None optimal
+    # (the default) never counts as leakage.
+    optimal_micros = None
+    leaked_usd = 0.0
+    if optimal_cost_usd is None and optimal_model:
+        op, _ = pricing.resolve_price(provider, optimal_model, pricing_overrides)
+        optimal_cost_usd = round(op.cost(int(input_tokens), int(output_tokens),
+                                         int(cache_read_tokens),
+                                         int(reasoning_tokens)), 6)
+    if optimal_cost_usd is not None:
+        optimal_cost_usd = round(float(optimal_cost_usd), 6)
+        if optimal_cost_usd < 0:
+            raise ValueError(
+                f"optimal_cost_usd must be non-negative, got {optimal_cost_usd}")
+        optimal_micros = db.usd_to_micros(optimal_cost_usd)
+        leaked_usd = round(max(0.0, cost_usd - optimal_cost_usd), 6)
+
+    # Fix #28: prepaid credit hard-stop. Skipped for orgs explicitly flagged
+    # allow_negative_balance (trusted/internal track-only mode) so they keep
+    # full tracking even past zero.
+    balance = db.get_balance(conn, org_id)
+    exempt = bool(org and org["allow_negative_balance"])
+    if block_over_balance and not exempt:
+        # Check if org has ever had credit
+        had_credit = conn.execute(
+            "SELECT 1 FROM credit_ledger WHERE org_id=? AND kind IN ('topup','grant') LIMIT 1",
+            (org_id,),
+        ).fetchone()
+        # Fix (#14): decide the hard-stop in integer micro-dollars, not float USD.
+        # `balance` above stays float only for the balance_after display field;
+        # a sub-micro float error must not let a debit slip past zero (or wrongly
+        # block one). get_balance_micros/usd_to_micros are exact integers.
+        if had_credit and db.get_balance_micros(conn, org_id) - db.usd_to_micros(cost_usd) < 0:
+            return MeterResult(
+                event_id="", org_id=org_id, workspace_id=workspace_id,
+                provider=provider, model=model, task_type=task_type,
+                cost_usd=cost_usd, estimated=estimated,
+                balance_after=balance, alerts=[],
+                recorded=False, over_free_limit=False, over_balance=True,
+                unpriced=unpriced, workspace_folded=workspace_folded,
+            )
+
+    eid = db.new_id("evt")
+    # #108: tamper-evidence. Chain this row onto the org's current chain head so
+    # any later edit/delete/reorder/insert breaks verification. Computed here,
+    # inside the caller's transaction (the server wraps this in db.immediate),
+    # so read-head + insert are atomic under the write lock.
+    cost_micros = db.usd_to_micros(cost_usd)
+    prev_hash = db.chain_head(conn, org_id)
+    row_fields = {
+        "id": eid, "org_id": org_id, "workspace_id": workspace_id,
+        "provider": provider, "model": model, "task_type": task_type,
+        "input_tokens": int(input_tokens), "output_tokens": int(output_tokens),
+        "cache_read_tokens": int(cache_read_tokens),
+        "cache_write_tokens": (int(cache_write_tokens)
+                                if cache_write_tokens is not None else None),
+        "reasoning_tokens": int(reasoning_tokens), "cost_micros": cost_micros,
+        "estimated": int(estimated), "source": source, "ts": ts,
+        # Optional trailing chain fields; None => omitted from the hash so rows
+        # without these counterfactuals stay byte-identical to the older canonical
+        # form (pre-#7 for baseline, pre-#8 for optimal), preserving prior chains.
+        "baseline_micros": baseline_micros,
+        "optimal_micros": optimal_micros,
+        "external_ref": external_ref,
+        "user_id": user_id,
+        "evidence_hashes": evidence_hashes_json,
+        "policy_version": policy_version,
+        "result_hash": result_hash,
+        "human_review": human_review,
+        "correction_ref": correction_ref,
+        "agent_id": agent_id,
+        "authority_manifest_ref": authority_manifest_ref,
+        "scope_anchor": scope_anchor,
+        "action_intent_hash": action_intent_hash,
+        "action_status": action_status,
+        "approval_ref": approval_ref,
+        "context_render_schema": context_render_schema,
+        "context_render_hash": context_render_hash,
+        "served_memory_provenance_hash": served_memory_provenance_hash,
+        "action_receipt_hash": action_receipt_hash,
+        "resource_constraints_version": resource_constraints_version,
+        "resource_constraints_hash": resource_constraints_hash,
+        "prebind_json": json.dumps(prebind, sort_keys=True, separators=(",", ":")) if prebind else None,
+        "prebind_hash": prebind.get("prebind_hash") if prebind else None,
+        # v18 fields (#219–#224)
+        "served_claim_json": served_claim_json,
+        "served_claim_hash": served_claim_hash,
+        "evidence_status": evidence_status,
+        "runtime_manifest_json": runtime_manifest_json,
+        "runtime_manifest_hash": runtime_manifest_hash,
+        "external_artifact_json": external_artifact_json,
+        "external_artifact_hash": external_artifact_hash,
+    }
+    row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
+    conn.execute(
+        "INSERT INTO usage_events(id,org_id,workspace_id,provider,model,task_type,"
+        "input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,cost_micros,"
+        "baseline_micros,optimal_micros,external_ref,user_id,evidence_hashes,policy_version,"
+        "result_hash,human_review,correction_ref,agent_id,authority_manifest_ref,scope_anchor,"
+        "action_intent_hash,action_status,approval_ref,context_render_schema,context_render_hash,"
+        "served_memory_provenance_hash,action_receipt_hash,resource_constraints_version,resource_constraints_hash,prebind_json,prebind_hash,"
+        "served_claim_json,served_claim_hash,evidence_status,runtime_manifest_json,runtime_manifest_hash,external_artifact_json,external_artifact_hash,"
+        "estimated,source,ts,prev_hash,row_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (eid, org_id, workspace_id, provider, model, task_type,
+         int(input_tokens), int(output_tokens), int(cache_read_tokens),
+         (int(cache_write_tokens) if cache_write_tokens is not None else None),
+         int(reasoning_tokens), cost_micros, baseline_micros, optimal_micros,
+         external_ref, user_id, evidence_hashes_json, policy_version, result_hash,
+         human_review, correction_ref, agent_id, authority_manifest_ref, scope_anchor,
+         action_intent_hash, action_status, approval_ref, context_render_schema,
+         context_render_hash, served_memory_provenance_hash, action_receipt_hash,
+         resource_constraints_version, resource_constraints_hash,
+         (json.dumps(prebind, sort_keys=True, separators=(",", ":")) if prebind else None),
+         (prebind.get("prebind_hash") if prebind else None),
+         served_claim_json, served_claim_hash, evidence_status,
+         runtime_manifest_json, runtime_manifest_hash,
+         external_artifact_json, external_artifact_hash,
+         int(estimated), source, ts, prev_hash, row_hash),
+    )
+
+    # Deplete prepaid credit (only when there's credit to deplete; orgs on the
+    # free tier with no balance still get full usage tracking, just no debit).
+    if balance > 0 or cost_usd > 0:
+        row = db.add_ledger(conn, org_id, -cost_usd, "debit",
+                            reason=f"{provider}/{model or '-'} {task_type}",
+                            stripe_ref=eid, ts=ts, commit=False)
+        balance_after = float(row["balance_after"])
+    else:
+        balance_after = balance
+    if commit:
+        conn.commit()
+
+    alerts = _check_thresholds(conn, org_id, workspace_id, balance_after,
+                               cost_usd, ts, alert_cfg or {}, commit=commit)
+
+    over = limit is not None and (tracked_before + event_tokens) >= limit
+    return MeterResult(
+        event_id=eid, org_id=org_id, workspace_id=workspace_id,
+        provider=provider, model=model, task_type=task_type,
+        cost_usd=cost_usd, estimated=estimated,
+        balance_after=balance_after, alerts=alerts,
+        recorded=True, over_free_limit=over, unpriced=unpriced,
+        baseline_usd=baseline_cost_usd, savings_usd=savings_usd,
+        optimal_usd=optimal_cost_usd, leaked_usd=leaked_usd,
+        external_ref=external_ref,
+        user_id=user_id,
+        workspace_folded=workspace_folded,
+    )
+
+
+def _check_thresholds(conn, org_id, workspace_id, balance_after, cost_usd,
+                      ts, alert_cfg, commit: bool = True) -> list:
+    """Queue alerts when credit runs low or a workspace nears/exceeds its cap.
+
+    Alerts are *logged* here (so the dashboard can show them and a sender can
+    pick them up); actual email delivery is the alerts module's job. Returns the
+    list of alerts raised by this event.
+    """
+    raised = []
+    low = float(alert_cfg.get("low_balance_usd", 10.0))
+    warn_pct = float(alert_cfg.get("budget_warn_pct", 80.0))
+
+    # low balance — only meaningful once the org has ever had credit
+    had_credit = conn.execute(
+        "SELECT 1 FROM credit_ledger WHERE org_id=? AND kind IN ('topup','grant') LIMIT 1",
+        (org_id,),
+    ).fetchone()
+    if had_credit and 0 < balance_after <= low:
+        msg = f"Low credit balance: ${balance_after:,.2f} (threshold ${low:,.2f})"
+        if not _alerted_recently(conn, org_id, "low_balance", None, ts):
+            db.log_alert(conn, org_id, "low_balance", msg, commit=commit)
+            raised.append({"kind": "low_balance", "message": msg})
+    elif had_credit and balance_after <= 0:
+        msg = f"Credit exhausted: balance ${balance_after:,.2f}"
+        if not _alerted_recently(conn, org_id, "balance_exhausted", None, ts):
+            db.log_alert(conn, org_id, "balance_exhausted", msg, commit=commit)
+            raised.append({"kind": "balance_exhausted", "message": msg})
+
+    # workspace monthly budget
+    if workspace_id:
+        ws = db.get_workspace(conn, workspace_id)
+        cap = ws["monthly_budget_usd"] if ws else None
+        if cap and cap > 0:
+            spent = workspace_mtd_spend(conn, workspace_id, ts)
+            pct = spent / cap * 100.0
+            if spent >= cap:
+                msg = (f"Workspace '{ws['name']}' over budget: "
+                       f"${spent:,.2f} / ${cap:,.2f} ({pct:.0f}%)")
+                kind = "budget_cap"
+            elif pct >= warn_pct:
+                msg = (f"Workspace '{ws['name']}' at {pct:.0f}% of budget: "
+                       f"${spent:,.2f} / ${cap:,.2f}")
+                kind = "budget_warn"
+            else:
+                return raised
+            if not _alerted_recently(conn, org_id, kind, workspace_id, ts):
+                db.log_alert(conn, org_id, kind, msg, workspace_id=workspace_id, commit=commit)
+                raised.append({"kind": kind, "message": msg})
+    return raised
+
+
+def _alerted_recently(conn, org_id, kind, workspace_id, ts, within=DAY) -> bool:
+    """De-dupe: don't re-raise the same alert more than once per day."""
+    row = conn.execute(
+        "SELECT ts FROM alerts_log WHERE org_id=? AND kind=? AND "
+        "COALESCE(workspace_id,'')=COALESCE(?,'') ORDER BY ts DESC LIMIT 1",
+        (org_id, kind, workspace_id),
+    ).fetchone()
+    return bool(row and (ts - row["ts"]) < within)
+
+
+# ------------------------------------------------------------ aggregation ----
+def _month_floor(ts: float) -> float:
+    # Fix #63: events are stored as UTC epoch, so the month boundary must be
+    # computed in UTC too. Using the server's local tz (naive fromtimestamp +
+    # naive .timestamp()) shifted the free-tier quota reset and every MTD report
+    # by the UTC offset on any non-UTC server.
+    import datetime as _dt
+    d = _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc)
+    return _dt.datetime(d.year, d.month, 1, tzinfo=_dt.timezone.utc).timestamp()
+
+
+def workspace_mtd_spend(conn, workspace_id: str, now: Optional[float] = None) -> float:
+    now = now if now is not None else time.time()
+    floor = _month_floor(now)
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cost_micros),0) s FROM usage_events WHERE workspace_id=? AND ts>=?",
+        (workspace_id, floor),
+    ).fetchone()
+    return db.micros_to_usd(int(row["s"]))
+
+
+def org_spend_windows(conn, org_id: str, now: Optional[float] = None) -> dict:
+    now = now if now is not None else time.time()
+    windows = {"today": now - DAY, "7d": now - 7 * DAY, "30d": now - 30 * DAY,
+               "mtd": _month_floor(now), "all": 0}
+    out = {}
+    for name, floor in windows.items():
+        row = conn.execute(
+            "SELECT COALESCE(SUM(cost_micros),0) cost, COALESCE(SUM(input_tokens+output_tokens"
+            "+cache_read_tokens+reasoning_tokens),0) tok, COUNT(*) n "
+            "FROM usage_events WHERE org_id=? AND ts>=?",
+            (org_id, floor),
+        ).fetchone()
+        out[name] = {"cost": db.micros_to_usd(int(row["cost"])), "tokens": int(row["tok"]),
+                     "events": int(row["n"])}
+    return out
+
+
+def spend_by(conn, org_id: str, dimension: str, since: float = 0,
+             now: Optional[float] = None) -> list[dict]:
+    """Group spend by 'provider', 'workspace', 'task_type', or 'model'."""
+    now = now if now is not None else time.time()
+    col = {
+        "provider": "ue.provider",
+        "task_type": "ue.task_type",
+        "model": "COALESCE(ue.model,'-')",
+        "workspace": "COALESCE(w.name, '(none)')",
+        "user": "COALESCE(u.email, '(unattributed)')",
+    }[dimension]
+    join = "LEFT JOIN workspaces w ON w.id = ue.workspace_id " if dimension == "workspace" else ""
+    if dimension == "user":
+        join += "LEFT JOIN users u ON u.id = ue.user_id "
+    rows = conn.execute(
+        f"SELECT {col} AS k, COALESCE(SUM(ue.cost_micros),0) cost, "
+        f"COALESCE(SUM(ue.input_tokens+ue.output_tokens+ue.cache_read_tokens+ue.reasoning_tokens),0) tok, "
+        f"COUNT(*) n FROM usage_events ue {join} "
+        f"WHERE ue.org_id=? AND ue.ts>=? GROUP BY k ORDER BY cost DESC",
+        (org_id, since),
+    ).fetchall()
+    return [{"key": r["k"], "cost": db.micros_to_usd(int(r["cost"])), "tokens": int(r["tok"]),
+             "events": int(r["n"])} for r in rows]
+
+
+def provider_health(conn, org_id: str, now: Optional[float] = None) -> list[dict]:
+    """Per-provider recency + burn, a proxy for "health" on the dashboard.
+
+    healthy = activity in the last 24h; idle = older; the trailing 7-day burn is
+    the same $/day figure the monitor reports.
+    """
+    now = now if now is not None else time.time()
+    rows = conn.execute(
+        "SELECT provider, MAX(ts) last_ts, "
+        "COALESCE(SUM(CASE WHEN ts>=? THEN cost_micros ELSE 0 END),0) c7, "
+        "COALESCE(SUM(cost_micros),0) all_cost, COUNT(*) n "
+        "FROM usage_events WHERE org_id=? GROUP BY provider ORDER BY all_cost DESC",
+        (now - 7 * DAY, org_id),
+    ).fetchall()
+    out = []
+    for r in rows:
+        age = now - (r["last_ts"] or 0)
+        status = "healthy" if age < DAY else ("idle" if age < 7 * DAY else "stale")
+        out.append({
+            "provider": r["provider"],
+            "last_ts": r["last_ts"],
+            "burn_per_day": round(db.micros_to_usd(int(r["c7"])) / 7.0, 4),
+            "all_cost": db.micros_to_usd(int(r["all_cost"])),
+            "events": int(r["n"]),
+            "status": status,
+        })
+    return out
+
+
+def cost_per_task(conn, org_id: str, now: Optional[float] = None) -> list[dict]:
+    """Cost-per-task-type: total cost / event count, the ROI lens."""
+    rows = spend_by(conn, org_id, "task_type", since=0, now=now)
+    for r in rows:
+        r["cost_per_event"] = round(r["cost"] / r["events"], 6) if r["events"] else 0.0
+    return rows
+
+
+def tracked_tokens_mtd(conn, org_id: str, now: Optional[float] = None) -> int:
+    """Tokens tracked month-to-date — drives the free-tier 10K limit."""
+    now = now if now is not None else time.time()
+    floor = _month_floor(now)
+    row = conn.execute(
+        "SELECT COALESCE(SUM(input_tokens+output_tokens+cache_read_tokens+reasoning_tokens),0) t "
+        "FROM usage_events WHERE org_id=? AND ts>=?",
+        (org_id, floor),
+    ).fetchone()
+    return int(row["t"])
+
+
+def tier_status(conn, org_id: str, now: Optional[float] = None) -> dict:
+    """Plan limits vs. current usage — the single source of truth for the
+    free-tier meter and the in-app upgrade nudge.
+
+    ``near`` trips at 75% of the token quota; ``over`` once it's reached. Both
+    are False on unlimited tiers (Pro / Enterprise).
+    """
+    org = db.get_org(conn, org_id)
+    t = pricing.tier(org["tier"]) if org else pricing.tier("free")
+    tokens = tracked_tokens_mtd(conn, org_id, now)
+    limit = t.tracked_tokens_month
+    pct = (tokens / limit * 100.0) if limit else None
+    ws_used = len(db.list_workspaces(conn, org_id))
+    return {
+        "tier": t.key,
+        "tier_name": t.name,
+        "is_free": t.key == "free",
+        "tracked_tokens": tokens,
+        "tracked_limit": limit,
+        "tracked_pct": pct,
+        "near_limit": bool(limit and pct is not None and pct >= 75.0),
+        "over_limit": bool(limit and tokens >= limit),
+        "workspaces_used": ws_used,
+        "workspaces_limit": t.workspaces,
+        "workspaces_over": bool(t.workspaces is not None and ws_used >= t.workspaces),
+    }
+
+
+def recent_events(conn, org_id: str, limit: int = 25,
+                  before: Optional[int] = None) -> list[dict]:
+    """Most-recent usage events, newest first. Fix #66: pass ``before`` (the
+    ``_rowid`` of the last row from the previous page) for cursor pagination."""
+    sql = ("SELECT ue.rowid AS _rowid, ue.*, w.name AS workspace_name "
+           "FROM usage_events ue LEFT JOIN workspaces w ON w.id=ue.workspace_id "
+           "WHERE ue.org_id=?")
+    args: list = [org_id]
+    if before is not None:
+        sql += " AND ue.rowid < ?"
+        args.append(int(before))
+    sql += " ORDER BY ue.ts DESC, ue.rowid DESC LIMIT ?"
+    args.append(int(limit))
+    rows = conn.execute(sql, args).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["cost_usd"] = db.micros_to_usd(int(d.get("cost_micros", 0) or 0))
+        out.append(d)
+    return out
+
+
+def org_summary(conn, org_id: str, now: Optional[float] = None) -> dict:
+    """One call that assembles everything the dashboard needs for an org."""
+    org = db.get_org(conn, org_id)
+    t = pricing.tier(org["tier"]) if org else pricing.tier("free")
+    windows = org_spend_windows(conn, org_id, now)
+    tracked = tracked_tokens_mtd(conn, org_id, now)
+    limit = t.tracked_tokens_month
+    return {
+        "org": dict(org) if org else None,
+        "tier": {"key": t.key, "name": t.name, "price": t.price_usd_month},
+        "balance": db.get_balance(conn, org_id),
+        "windows": windows,
+        "tracked_tokens_mtd": tracked,
+        "tracked_limit": limit,
+        "tracked_pct": (tracked / limit * 100.0) if limit else None,
+        "tier_status": tier_status(conn, org_id, now),
+        "by_provider": spend_by(conn, org_id, "provider", now=now),
+        "by_workspace": spend_by(conn, org_id, "workspace", now=now),
+        "by_task_type": cost_per_task(conn, org_id, now=now),
+        "by_user": spend_by(conn, org_id, "user", now=now),
+        "seats": {"active": db.active_seat_count(conn, org_id),
+                  "users": [dict(u) for u in db.list_users(conn, org_id, True)]},
+        "provider_health": provider_health(conn, org_id, now=now),
+        "workspaces": [dict(w) for w in db.list_workspaces(conn, org_id)],
+        "recent_events": recent_events(conn, org_id, 12),
+        "alerts": [dict(a) for a in db.recent_alerts(conn, org_id, 6)],
+    }

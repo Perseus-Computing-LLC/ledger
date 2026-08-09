@@ -1,6 +1,6 @@
 """Meter-accuracy regression suite (#20-arc, shape C).
 
-Invarium testing *Plutus*: Plutus's cost attribution is deterministic given fixed
+Invarium testing *Ledger*: Ledger's cost attribution is deterministic given fixed
 token counts and a pinned price table, so a golden catalog can be blessed and any
 drift in pricing / baseline math caught with `compare`. These tests pin:
 

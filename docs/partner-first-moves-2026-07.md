@@ -4,20 +4,20 @@ Concrete first move for the top targets in `partner-targets-2026-07.csv`. Each i
 scoped to a spike or a single PR/listing. Surfaces verified against live docs
 (2026-07-11); see the CSV for source URLs.
 
-## 0. The enabler — Plutus MCP server (do this first)
+## 0. The enabler — Ledger MCP server (do this first)
 
 Six of the marketplace listings (official registry, awesome-mcp-servers,
 PulseMCP, Glama, Smithery, mcp.so) require a working MCP server. Build it once and
 all six unlock. It also *is* the deep integration for the whole MCP ecosystem:
 agents get spend/billing as callable tools.
 
-Proposed tools (thin wrappers over `plutus_agent.Meter` + `plutus.py --json`):
+Proposed tools (thin wrappers over `ledger_agent.Meter` + `ledger.py --json`):
 
 - `meter_usage(provider, model, task_type, input_tokens, output_tokens, cost_usd?)`
   → records a usage event, returns the new balance. (`Meter.track`)
 - `get_balance(org?)` → remaining prepaid credit. (`Meter.balance`)
 - `get_spend(window)` → per-provider/workspace spend for today/7d/30d/all.
-- `get_runway()` → per-provider days-left + burn (reads `plutus.py --json`).
+- `get_runway()` → per-provider days-left + burn (reads `ledger.py --json`).
 - `topup(amount)` → add prepaid credit (guarded; Stripe in prod). Mark
   `destructiveHint`/write in the tool annotations.
 
@@ -30,11 +30,11 @@ instant reject in the Anthropic portal).
 
 ```json
 {
-  "name": "io.github.perseus-computing-llc/plutus",
+  "name": "io.github.perseus-computing-llc/ledger",
   "description": "Self-hosted billing, prepaid credit, and runway for AI agents",
   "version": "1.0.0",
   "packages": [
-    { "registry": "pypi", "name": "plutus-agent" }
+    { "registry": "pypi", "name": "ledger-agent" }
   ]
 }
 ```
@@ -47,7 +47,7 @@ directories. Estimate: M.
 
 Once the server exists:
 
-1. Add the `mcp-name: io.github.perseus-computing-llc/plutus` string to the
+1. Add the `mcp-name: io.github.perseus-computing-llc/ledger` string to the
    README.
 2. `mcp-publisher init` → `mcp-publisher login github` → `mcp-publisher publish`.
 
@@ -58,14 +58,14 @@ directories ingest from it.
 ## 2. LiteLLM custom callback (deep)
 
 Ship a small package with a `CustomLogger` that forwards each call's cost to
-Plutus:
+Ledger:
 
 ```python
 from litellm.integrations.custom_logger import CustomLogger
 import litellm
 
-class PlutusLogger(CustomLogger):
-    def __init__(self, meter):           # a plutus_agent.Meter (local or remote)
+class LedgerLogger(CustomLogger):
+    def __init__(self, meter):           # a ledger_agent.Meter (local or remote)
         self.meter = meter
 
     async def async_log_success_event(self, kwargs, response_obj, start, end):
@@ -79,10 +79,10 @@ class PlutusLogger(CustomLogger):
             cost_usd=kwargs.get("response_cost"),   # LiteLLM already priced it
         )
 
-litellm.callbacks = [PlutusLogger(meter)]
+litellm.callbacks = [LedgerLogger(meter)]
 ```
 
-First move: publish `litellm-plutus` (or fold into `plutus_agent.integrations`),
+First move: publish `litellm-ledger` (or fold into `ledger_agent.integrations`),
 then a docs PR to `BerriAI/litellm` observability page. Positioning note below.
 Estimate: M.
 
@@ -92,7 +92,7 @@ Helicone posts per-request objects with `cost`, `promptTokens`, `completionToken
 A tiny receiver maps that onto `POST /v1/usage`:
 
 ```python
-# maps a Helicone webhook payload -> a Plutus usage event
+# maps a Helicone webhook payload -> a Ledger usage event
 def on_helicone_webhook(payload):
     body = payload["request_response_body"]  # or top-level fields per Helicone schema
     return {
@@ -113,7 +113,7 @@ needed (integration is webhook config). Estimate: S.
 ```python
 from langchain_core.callbacks import BaseCallbackHandler
 
-class PlutusCallback(BaseCallbackHandler):
+class LedgerCallback(BaseCallbackHandler):
     def __init__(self, meter): self.meter = meter
     def on_llm_end(self, response, **kw):
         for gen in response.generations:
@@ -125,19 +125,19 @@ class PlutusCallback(BaseCallbackHandler):
                              output_tokens=um.get("output_tokens", 0))
 ```
 
-First move: publish `langchain-plutus` to PyPI, then a docs-only PR to
+First move: publish `langchain-ledger` to PyPI, then a docs-only PR to
 `langchain-ai/docs` adding an integration page (bootstrap with
 `langchain-cli integration create-doc`). Code PRs into langchain core are not
 accepted. Estimate: M.
 
 ## 5. n8n community node (marketplace, unverified first)
 
-Publish `n8n-nodes-plutus` (npm) with keyword `n8n-community-node-package`,
+Publish `n8n-nodes-ledger` (npm) with keyword `n8n-community-node-package`,
 exposing nodes for "meter usage", "get balance", and a "low balance" trigger.
 
 Gotcha: chasing *verified* status after 2026-05-01 requires GitHub-Actions publish
 with npm provenance and **no runtime dependencies** — hard if the node calls the
-Plutus HTTP API via a client lib. Ship unverified first (stdlib `fetch` only, no
+Ledger HTTP API via a client lib. Ship unverified first (stdlib `fetch` only, no
 deps), pursue verification later. Estimate: M.
 
 ---
@@ -147,18 +147,18 @@ deps), pursue verification later. Estimate: M.
 The pitch against gateways (LiteLLM, OpenRouter, Portkey, Helicone) must be
 precise, because they already do parts of this.
 
-- **They route on latency/price/health per request.** Plutus's router ranks
+- **They route on latency/price/health per request.** Ledger's router ranks
   providers by **projected days-left of credit (runway)** and rebalances your
   flagship model onto the provider you can most afford to keep using. That is a
   budget-horizon decision, not a per-request one.
-- **They track cost; few enforce prepaid credit.** Plutus adds an append-only
+- **They track cost; few enforce prepaid credit.** Ledger adds an append-only
   prepaid-credit ledger with a hard-stop, plus Stripe top-ups. Gateways generally
   assume you pay the provider directly.
-- **Positioning line:** "Billing + credit runway they don't have." Plutus sits
-  *beside* the gateway: the gateway executes calls, Plutus meters them, holds the
+- **Positioning line:** "Billing + credit runway they don't have." Ledger sits
+  *beside* the gateway: the gateway executes calls, Ledger meters them, holds the
   prepaid balance, and tells the gateway (or your router) which provider has the
   most runway. LiteLLM/Helicone are the cleanest to co-sell with because they
-  already emit per-call cost — Plutus is the natural sink for it.
-- **Where NOT to overclaim:** Plutus does not proxy calls, do failover, or manage
+  already emit per-call cost — Ledger is the natural sink for it.
+- **Where NOT to overclaim:** Ledger does not proxy calls, do failover, or manage
   API keys. If a prospect wants request-level routing, that's the gateway's job;
-  Plutus makes the budget-level decision on top.
+  Ledger makes the budget-level decision on top.

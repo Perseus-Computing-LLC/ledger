@@ -1,7 +1,7 @@
 # Evidence-Gated Team Beta Plan (>10 seats)
 
 **Status:** Planning only — do **not** activate paid self-service checkout.
-**Tracking issue:** plutus#164 · **Sequence:** after plutus#163 (donation path) and the Cloud API activation instrumentation, before any self-serve subscription.
+**Tracking issue:** ledger#164 · **Sequence:** after ledger#163 (donation path) and the Cloud API activation instrumentation, before any self-serve subscription.
 
 ## Goal
 

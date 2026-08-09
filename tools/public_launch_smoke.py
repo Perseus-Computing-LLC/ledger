@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Public launch contract smoke test for Plutus."""
+"""Public launch contract smoke test for Ledger."""
 from __future__ import annotations
 
 import json
@@ -27,7 +27,7 @@ def _request(base: str, method: str, path: str, *, payload=None,
              token: str | None = None, idem: str | None = None) -> Response:
     url = base.rstrip("/") + path
     data = None
-    headers = {"Accept": "application/json, text/html", "User-Agent": "plutus-public-smoke/1"}
+    headers = {"Accept": "application/json, text/html", "User-Agent": "ledger-public-smoke/1"}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -137,18 +137,18 @@ def _authenticated_contract(base: str, admin_token: str) -> None:
 
 
 def main() -> int:
-    base = os.environ.get("PLUTUS_SMOKE_BASE_URL", "").strip()
+    base = os.environ.get("LEDGER_SMOKE_BASE_URL", "").strip()
     if not base:
-        print("SKIP | public smoke | set PLUTUS_SMOKE_BASE_URL to enable")
+        print("SKIP | public smoke | set LEDGER_SMOKE_BASE_URL to enable")
         return 0
     try:
         _health_contract(base)
         _pricing_contract(base)
-        admin_token = os.environ.get("PLUTUS_SMOKE_ADMIN_TOKEN", "").strip()
+        admin_token = os.environ.get("LEDGER_SMOKE_ADMIN_TOKEN", "").strip()
         if admin_token:
             _authenticated_contract(base, admin_token)
         else:
-            print("SKIP | authenticated contract | PLUTUS_SMOKE_ADMIN_TOKEN not set")
+            print("SKIP | authenticated contract | LEDGER_SMOKE_ADMIN_TOKEN not set")
         print("RESULT=PASS")
         return 0
     except SmokeFailure as exc:

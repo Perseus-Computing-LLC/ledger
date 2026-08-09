@@ -1,11 +1,11 @@
 # Perseus Cloud — Security Review Scope
 
-> Prepared for external security review of the Plutus public surface.
+> Prepared for external security review of the Ledger public surface.
 > Target: v1.0.1+ · Date: 2026-07-12
 
 ## Scope
 
-The review covers the **public-facing attack surface** of a hosted Plutus instance
+The review covers the **public-facing attack surface** of a hosted Ledger instance
 configured for open signup with live Stripe billing. Internal-only paths (Hermes
 monitor, local CLI usage) are out of scope.
 
@@ -58,16 +58,16 @@ monitor, local CLI usage) are out of scope.
 
 ### Out of Scope
 
-- Internal Hermes monitor (`plutus.py`, `plutus_route.py`) — not exposed publicly
+- Internal Hermes monitor (`ledger.py`, `ledger_route.py`) — not exposed publicly
 - Perseus Vault MCP server — separate binary, separate review
 - Physical/infrastructure security of the hosting environment
 - Stripe's own API security (their responsibility)
 
 ## Pre-Review Checklist (self-audit before handing off)
 
-- [ ] `billing.stripe_webhook_secret` is set and non-empty before `plutus serve` starts
+- [ ] `billing.stripe_webhook_secret` is set and non-empty before `ledger serve` starts
 - [ ] `auth.base_url` is set to the production domain (CSRF origin check)
-- [ ] `PLUTUS_ALLOW_SIGNUP=1` is set (otherwise signup is disabled, reducing attack surface)
+- [ ] `LEDGER_ALLOW_SIGNUP=1` is set (otherwise signup is disabled, reducing attack surface)
 - [ ] `MAX_CONTENT_LENGTH` (default 1MB) is appropriate for `/v1/usage`
 - [ ] Stripe is in **test mode** during the review (`sk_test_...`)
 - [ ] All secrets are injected via environment variables, not committed to config files
@@ -86,6 +86,6 @@ monitor, local CLI usage) are out of scope.
 After the review and remediation:
 1. Rotate all API keys and webhook secrets
 2. Switch Stripe from test mode to live mode
-3. Enable `PLUTUS_ALLOW_SIGNUP=1` if not already
+3. Enable `LEDGER_ALLOW_SIGNUP=1` if not already
 4. Deploy behind production HTTPS
 5. Schedule follow-up review in 6 months or after major feature release

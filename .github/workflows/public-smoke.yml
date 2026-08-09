@@ -19,6 +19,6 @@ jobs:
           python-version: "3.12"
       - name: Run public contract smoke test
         env:
-          PLUTUS_SMOKE_BASE_URL: ${{ secrets.PLUTUS_SMOKE_BASE_URL }}
-          PLUTUS_SMOKE_ADMIN_TOKEN: ${{ secrets.PLUTUS_SMOKE_ADMIN_TOKEN }}
+          LEDGER_SMOKE_BASE_URL: ${{ secrets.LEDGER_SMOKE_BASE_URL }}
+          LEDGER_SMOKE_ADMIN_TOKEN: ${{ secrets.LEDGER_SMOKE_ADMIN_TOKEN }}
         run: python tools/public_launch_smoke.py

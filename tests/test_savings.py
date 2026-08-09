@@ -1,6 +1,6 @@
 """Savings-share billing (#7): the value-based revenue path.
 
-Covers plutus_agent.savings + the metering/db/stripe pieces it plugs into:
+Covers ledger_agent.savings + the metering/db/stripe pieces it plugs into:
 the per-event baseline capture and clamp, period aggregation over only the
 events that carry a baseline, the 18% share math, hash-chain tamper-evidence of
 the baseline, idempotent billing, and the mocked Stripe invoice path.
@@ -9,11 +9,11 @@ import datetime as dt
 
 import pytest
 
-from plutus_agent import db, metering, savings
+from ledger_agent import db, metering, savings
 
 
 def _org(tmp_path, tier="pro"):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "Acme", tier=tier, owner_email="a@b.co")["id"]
     return conn, org_id
@@ -223,7 +223,7 @@ def test_negative_baseline_tokens_rejected(tmp_path):
 
 def test_meter_track_passes_baselines_through(tmp_path):
     # #134: the SDK exposes all three baseline forms on the embedded path.
-    from plutus_agent.client import Meter
+    from ledger_agent.client import Meter
     m = Meter(org="Acme SDK", db_path=str(tmp_path / "sdk.db"), create=True)
     r = m.track("anthropic", model="claude-opus-4-8",
                 input_tokens=100_000, output_tokens=10_000,
@@ -332,8 +332,8 @@ def test_http_ingest_records_and_rejects_baseline(tmp_path):
     import threading
     import urllib.error
     import urllib.request
-    from plutus_agent.config import DEFAULT_CONFIG
-    from plutus_agent.server import app
+    from ledger_agent.config import DEFAULT_CONFIG
+    from ledger_agent.server import app
 
     dbpath = str(tmp_path / "http.db")
     conn = db.connect(dbpath)

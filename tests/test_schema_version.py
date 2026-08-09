@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import db
+from ledger_agent import db
 
 
 _DOCUMENTED_MIGRATIONS = {
@@ -60,10 +60,10 @@ class TestSchemaVersion(unittest.TestCase):
         self.assertEqual(db.get_schema_version(conn), db.SCHEMA_VERSION)
         conn.close()
 
-    def test_refuses_db_from_newer_plutus(self):
+    def test_refuses_db_from_newer_ledger(self):
         conn = db.connect(self.dbpath)
         db.init_schema(conn)
-        # Simulate a database written by a future Plutus.
+        # Simulate a database written by a future Ledger.
         conn.execute("UPDATE meta SET value=? WHERE key='schema_version'",
                      (str(db.SCHEMA_VERSION + 1),))
         conn.commit()

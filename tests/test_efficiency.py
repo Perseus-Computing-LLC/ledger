@@ -1,15 +1,15 @@
 """Efficiency view (#8): flagship-equivalent value vs actual cost.
 
-Covers plutus_agent.efficiency — the token-derived value figures, the
+Covers ledger_agent.efficiency — the token-derived value figures, the
 family inference, the actual-paid basis and the multiple.
 """
 import datetime as dt
 
-from plutus_agent import db, metering, efficiency
+from ledger_agent import db, metering, efficiency
 
 
 def _org(tmp_path):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     return conn, db.create_org(conn, "Acme", tier="pro", owner_email="a@b.co")["id"]
 

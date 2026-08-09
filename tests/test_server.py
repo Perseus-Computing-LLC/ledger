@@ -13,10 +13,10 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import Meter, db, demo, metering
-from plutus_agent.client import PlutusAuthError, PlutusError
-from plutus_agent.config import DEFAULT_CONFIG
-from plutus_agent.server import app
+from ledger_agent import Meter, db, demo, metering
+from ledger_agent.client import LedgerAuthError, LedgerError
+from ledger_agent.config import DEFAULT_CONFIG
+from ledger_agent.server import app
 
 
 class TestServer(unittest.TestCase):
@@ -164,7 +164,7 @@ class TestServer(unittest.TestCase):
 
     def test_ingest_bad_key_rejected(self):
         status, _ = self._post("/v1/usage", {"provider": "anthropic"},
-                               token="plutus_sk_bogus")
+                               token="ledger_sk_bogus")
         self.assertEqual(status, 401)
 
     def test_ingest_records_event(self):
@@ -237,7 +237,7 @@ class TestServer(unittest.TestCase):
         orig = ur.urlopen
         ur.urlopen = lambda req, *a, **k: _FakeResp()
         try:
-            r = Meter(remote="http://x", api_key="plutus_sk_x").track(
+            r = Meter(remote="http://x", api_key="ledger_sk_x").track(
                 provider="anthropic", input_tokens=1, baseline_input_tokens=100)
         finally:
             ur.urlopen = orig
@@ -249,23 +249,23 @@ class TestServer(unittest.TestCase):
         self.assertFalse(r.unpriced)
 
     def test_remote_meter_bad_key_raises(self):
-        m = Meter(remote=f"http://127.0.0.1:{self.port}", api_key="plutus_sk_bogus")
-        with self.assertRaises(PlutusAuthError):
+        m = Meter(remote=f"http://127.0.0.1:{self.port}", api_key="ledger_sk_bogus")
+        with self.assertRaises(LedgerAuthError):
             m.track(provider="anthropic", input_tokens=10)
 
     def test_remote_meter_no_key_errors(self):
-        # PLUTUS_API_KEY may be set in the environment
-        old_key = os.environ.pop("PLUTUS_API_KEY", None)
+        # LEDGER_API_KEY may be set in the environment
+        old_key = os.environ.pop("LEDGER_API_KEY", None)
         try:
             with self.assertRaises(ValueError):
                 Meter(remote=f"http://127.0.0.1:{self.port}")
         finally:
             if old_key is not None:
-                os.environ["PLUTUS_API_KEY"] = old_key
+                os.environ["LEDGER_API_KEY"] = old_key
 
     def test_remote_balance_is_local_only(self):
         m = self._remote_meter()
-        with self.assertRaises(PlutusError):
+        with self.assertRaises(LedgerError):
             m.balance()
         m.close()
 
@@ -285,12 +285,12 @@ class TestServer(unittest.TestCase):
         ur.urlopen = lambda req, *a, **k: (
             captured.update(ua=req.get_header("User-agent")) or _FakeResp())
         try:
-            Meter(remote="http://x", api_key="plutus_sk_x").track(
+            Meter(remote="http://x", api_key="ledger_sk_x").track(
                 provider="anthropic", input_tokens=1)
         finally:
             ur.urlopen = orig
         self.assertTrue(captured["ua"])
-        self.assertTrue(captured["ua"].startswith("plutus-agent"))
+        self.assertTrue(captured["ua"].startswith("ledger-agent"))
         self.assertNotIn("urllib", captured["ua"].lower())
 
 
@@ -302,7 +302,7 @@ class TestIngestQuota(unittest.TestCase):
         os.close(fd)
         # Free ships unlimited now; pin a capped variant to exercise the 402 path.
         import dataclasses
-        from plutus_agent import pricing
+        from ledger_agent import pricing
         cls._orig_free = pricing.TIERS["free"]
         pricing.TIERS["free"] = dataclasses.replace(
             cls._orig_free, tracked_tokens_month=10_000, workspaces=1)
@@ -311,7 +311,7 @@ class TestIngestQuota(unittest.TestCase):
         cls.org_id = db.create_org(conn, "Free Co", tier="free")["id"]
         _, cls.key = db.create_api_key(conn, cls.org_id)
         # blow past the 10K free cap
-        from plutus_agent import metering
+        from ledger_agent import metering
         metering.record_usage(conn, cls.org_id, provider="anthropic",
                               input_tokens=11_000, cost_usd=0.0)
         conn.close()
@@ -326,7 +326,7 @@ class TestIngestQuota(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        from plutus_agent import pricing
+        from ledger_agent import pricing
         pricing.TIERS["free"] = cls._orig_free
         cls.httpd.shutdown()
         cls.httpd.server_close()
@@ -403,7 +403,7 @@ class TestBatchAtomicity(unittest.TestCase):
     def test_malformed_second_event_records_nothing(self):
         """Fix #27: if event 2 is invalid, event 1 must not commit."""
         conn = db.connect(self.dbpath)
-        from plutus_agent import metering
+        from ledger_agent import metering
         before = metering.tracked_tokens_mtd(conn, self.org_id)
         conn.close()
         
@@ -648,7 +648,7 @@ class TestSecurityHardening(unittest.TestCase):
     # Fix #34: HTML escaping in reports
     def test_report_escapes_xss_in_workspace_name(self):
         """Reports should escape workspace names containing HTML/script tags."""
-        from plutus_agent import reports, db as db_mod
+        from ledger_agent import reports, db as db_mod
         conn = db_mod.connect(self.dbpath)
         
         # Create workspace with XSS payload
@@ -656,7 +656,7 @@ class TestSecurityHardening(unittest.TestCase):
         ws_id = db_mod.create_workspace(conn, self.org_id, xss_name)["id"]
         
         # Record usage to that workspace
-        from plutus_agent import metering
+        from ledger_agent import metering
         metering.record_usage(conn, self.org_id, provider="test", workspace=xss_name,
                             input_tokens=100, cost_usd=0.01)
         
@@ -677,7 +677,7 @@ class TestSecurityHardening(unittest.TestCase):
 
 class TestCheckoutHandoffPage(unittest.TestCase):
     def test_renders_a_visible_new_tab_checkout_link(self):
-        from plutus_agent.server import views
+        from ledger_agent.server import views
 
         url = "https://checkout.stripe.com/c/pay/cs_test_example"
         page = views.checkout_handoff_page(url)
@@ -925,7 +925,7 @@ class TestWorkspaceFoldSignal(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import dataclasses
-        from plutus_agent import pricing
+        from ledger_agent import pricing
         fd, cls.dbpath = tempfile.mkstemp(suffix=".db")
         os.close(fd)
         # Pin a workspace-capped Free variant (cap = 1) to force the fold.
@@ -946,7 +946,7 @@ class TestWorkspaceFoldSignal(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        from plutus_agent import pricing
+        from ledger_agent import pricing
         pricing.TIERS["free"] = cls._orig_free
         cls.httpd.shutdown()
         cls.httpd.server_close()

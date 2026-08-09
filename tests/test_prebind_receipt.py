@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from plutus_agent.prebind import (
+from ledger_agent.prebind import (
     PREBIND_SCHEMA,
     build_prebind,
     prebind_digest,
@@ -23,7 +23,7 @@ def make_prebind(**overrides):
         attempted_action="action:deploy-42",
         actor_ref="agent:hermes-prod",
         authority_ref="authority:manifest-3",
-        trusted_scope="github:Perseus-Computing-LLC/plutus",
+        trusted_scope="github:Perseus-Computing-LLC/ledger",
         policy_version="policy/v3",
         evidence_hashes=[digest("source")],
         selected_context_digest=digest("context-selection"),
@@ -134,8 +134,8 @@ def test_replay_rejects_tampered_prior_block():
 
 
 def test_prebind_is_persisted_in_hash_chain_and_receipt(tmp_path):
-    from plutus_agent import db, metering
-    from plutus_agent.server.api import audit_json
+    from ledger_agent import db, metering
+    from ledger_agent.server.api import audit_json
 
     conn = db.connect(str(tmp_path / "prebind.db"))
     db.init_schema(conn)
@@ -154,7 +154,7 @@ def test_prebind_is_persisted_in_hash_chain_and_receipt(tmp_path):
 
 
 def test_executed_terminal_status_cannot_follow_non_allow_prebind(tmp_path):
-    from plutus_agent import db, metering
+    from ledger_agent import db, metering
 
     conn = db.connect(str(tmp_path / "contradictory-execution.db"))
     db.init_schema(conn)
@@ -173,7 +173,7 @@ def test_executed_terminal_status_cannot_follow_non_allow_prebind(tmp_path):
 
 
 def test_executed_terminal_status_cannot_follow_non_effective_prebind_result(tmp_path):
-    from plutus_agent import db, metering
+    from ledger_agent import db, metering
 
     conn = db.connect(str(tmp_path / "non-effective-execution.db"))
     db.init_schema(conn)
@@ -194,7 +194,7 @@ def test_executed_terminal_status_cannot_follow_non_effective_prebind_result(tmp
 
 
 def test_non_effective_prebind_cannot_claim_resource_usage(tmp_path):
-    from plutus_agent import db, metering
+    from ledger_agent import db, metering
 
     conn = db.connect(str(tmp_path / "resource-contradiction.db"))
     db.init_schema(conn)
@@ -209,8 +209,8 @@ def test_non_effective_prebind_cannot_claim_resource_usage(tmp_path):
 
 
 def test_legacy_usage_without_prebind_remains_unchanged_and_receipt_omits_it(tmp_path):
-    from plutus_agent import db, metering
-    from plutus_agent.server.api import audit_json
+    from ledger_agent import db, metering
+    from ledger_agent.server.api import audit_json
 
     conn = db.connect(str(tmp_path / "legacy.db"))
     db.init_schema(conn)

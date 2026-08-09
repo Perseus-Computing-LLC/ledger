@@ -16,8 +16,8 @@ from the embedding-quantization question (perseus-vault#629, closed: no).
 
 **`nvfp4_multiplier = 0.49`** (NVFP4 ≈ 2.05× throughput → ~half the per-token cost)
 · **tool-use retention = 1.0** (no quality loss observed). Adopted into
-`plutus_agent/pricing.py` (`PRECISION_MULTIPLIERS['nvfp4']=0.49`) and the router
-floor (`plutus_route.py`), since retention cleared the quality floor. Raw
+`ledger_agent/pricing.py` (`PRECISION_MULTIPLIERS['nvfp4']=0.49`) and the router
+floor (`ledger_route.py`), since retention cleared the quality floor. Raw
 artifacts in [`results/`](results/) (`results.json` + per-precision
 `bench_*.json` / `quality_*.json`).
 
@@ -61,12 +61,12 @@ Both precisions run on the same pod, so $/h cancels: the multiplier is purely
 
 ## Adopt criterion (matches the router's quality floor)
 Only write `nvfp4 = throughput_fp8 / throughput_nvfp4` into
-`plutus_agent/pricing.py` **if** tool-use retention ≥ the `quantization-aware`
-policy's quality floor (`plutus_route.py`). Otherwise leave `nvfp4 = 1.0`
+`ledger_agent/pricing.py` **if** tool-use retention ≥ the `quantization-aware`
+policy's quality floor (`ledger_route.py`). Otherwise leave `nvfp4 = 1.0`
 (identity no-op) and record the negative result here. **Never** fill the
 multiplier from a vendor-published ratio — measured only.
 
 ## Output artifact
 Commit the resulting `results.json` + `quality_*.json` alongside this README so
-the multiplier in `pricing.py` is traceable to a signed measurement (the Plutus
+the multiplier in `pricing.py` is traceable to a signed measurement (the Ledger
 verifiability contract).

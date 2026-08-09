@@ -1,6 +1,6 @@
 import pytest
 
-from plutus_agent import pricing
+from ledger_agent import pricing
 
 
 def test_free_contract_is_ten_seats_with_five_percent_recommendation():

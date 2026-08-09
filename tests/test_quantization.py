@@ -13,7 +13,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import pricing, config as cfgmod
+from ledger_agent import pricing, config as cfgmod
 
 
 class TestPrecisionMultiplier(unittest.TestCase):

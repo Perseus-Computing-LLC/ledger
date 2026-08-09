@@ -8,7 +8,7 @@ Every public asset must be verified against the release before use.
 Goal: a 45–60 second loop that shows the evidence lifecycle.
 
 1. Start a local Ledger demo with the stable compatibility command:
-   `plutus demo`, then open `http://localhost:8420`.
+   `ledger demo`, then open `http://localhost:8420`.
 2. Record an event through the SDK or `POST /v1/usage`.
 3. Show the event’s actor/boundary/configuration/allocation projection and its
    place in the chain.
@@ -24,7 +24,7 @@ Do not claim a field in demo copy unless the recording shows it.
 - Lead with **Perseus Ledger**, not legacy identifiers.
 - State the product question: what happened, under what authority and evidence,
   and can the history be verified?
-- Describe `plutus-agent`, `plutus`, `plutus_agent`, `PLUTUS_*`, and `/v1` as
+- Describe `ledger-agent`, `ledger`, `ledger_agent`, `LEDGER_*`, and `/v1` as
   compatibility identifiers during migration.
 - Keep runtime integrations optional. Do not make Hermes or another agent
   runtime part of Ledger’s product identity.
@@ -50,7 +50,7 @@ configuration, external evidence, authority-reference, and resource-allocation
 metadata. It works offline with SQLite and integrates through HTTP or Python,
 without requiring a particular agent framework.
 
-The stable package and CLI remain `plutus-agent` and `plutus` during the
+The stable package and CLI remain `ledger-agent` and `ledger` during the
 migration. Metering, reconciliation, prepaid credit, and Stripe are supported
 optional adapters, not the product boundary.
 
@@ -76,7 +76,7 @@ particular agent framework or hosted service.
 5/ Metering, reconciliation, prepaid credit, and Stripe are optional adapters.
 
 6/ Existing users retain the stable compatibility package and CLI:
-`pip install plutus-agent`; `plutus` remains supported during transition.
+`pip install ledger-agent`; `ledger` remains supported during transition.
 
 7/ https://github.com/Perseus-Computing-LLC/Ledger
    https://perseus.observer/ledger/
@@ -92,7 +92,7 @@ record for autonomous systems”**
 3. Evidence and authority references without retaining raw prompts or secrets.
 4. Runtime-neutral ingestion and local-first operation.
 5. Allocation, metering, and settlement as optional adapters.
-6. Compatibility transition from the `plutus*` install surface to Perseus Ledger.
+6. Compatibility transition from the `ledger*` install surface to Perseus Ledger.
 
 ## Submission-ready blurb
 
@@ -102,7 +102,7 @@ autonomous systems. It records hash-chained activity, evidence links, authority
 references, and optional resource allocation so teams can reconstruct what
 happened and independently verify the resulting history. SQLite local-first,
 HTTP and Python interfaces, MIT licensed. Existing installs use the compatible
-`plutus-agent` package and `plutus` CLI during transition.
+`ledger-agent` package and `ledger` CLI during transition.
 ```
 
 ## Release and public-launch gates

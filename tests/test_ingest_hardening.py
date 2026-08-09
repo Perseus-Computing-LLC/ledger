@@ -12,9 +12,9 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import bridge, db
-from plutus_agent.config import DEFAULT_CONFIG
-from plutus_agent.server import app
+from ledger_agent import bridge, db
+from ledger_agent.config import DEFAULT_CONFIG
+from ledger_agent.server import app
 
 
 def _server(cfg_mut=None):
@@ -146,7 +146,7 @@ class TestBridgeLockdown(unittest.TestCase):
 
     def test_absolute_but_other_binary_refused(self):
         cfg = {"enabled": True, "command": "/usr/bin/python3 foo.py",
-               "allowed_binaries": ["/opt/plutus/run"]}
+               "allowed_binaries": ["/opt/ledger/run"]}
         self.assertIsNone(bridge.runway(cfg))
 
 

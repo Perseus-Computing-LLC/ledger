@@ -2,7 +2,7 @@
 """#60: refunds, disputes, and failed payments reverse the ledger.
 
 Before the fix, `handle_webhook_event` only handled checkout + subscription
-events, so a refunded or charged-back top-up left the credit on Plutus's
+events, so a refunded or charged-back top-up left the credit on Ledger's
 append-only ledger forever — the org kept spending money already returned.
 
 Reversals converge to a target cumulative amount per Stripe reference, so a
@@ -15,8 +15,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import db
-from plutus_agent.billing import handle_webhook_event
+from ledger_agent import db
+from ledger_agent.billing import handle_webhook_event
 
 
 class TestReversals(unittest.TestCase):

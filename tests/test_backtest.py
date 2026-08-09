@@ -1,8 +1,8 @@
-from plutus_agent import backtest, db, metering
+from ledger_agent import backtest, db, metering
 
 
 def _conn(tmp_path):
-    conn = db.connect(str(tmp_path / 'plutus.db'))
+    conn = db.connect(str(tmp_path / 'ledger.db'))
     db.init_schema(conn)
     org = db.create_org(conn, 'backtest', tier='pro')['id']
     return conn, org

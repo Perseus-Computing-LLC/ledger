@@ -7,11 +7,11 @@ journaled, no silent rewrite), and the explicit operator flag for deletion.
 """
 import pytest
 
-from plutus_agent import db, metering, reconcile_union
+from ledger_agent import db, metering, reconcile_union
 
 
 def _conn(tmp_path):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     return conn
 

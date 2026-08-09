@@ -7,7 +7,7 @@ claim into a chart + table computed directly from a Hermes `state.db`:
 - **before** = the old aggregate (`sessions` row grouped by `billing_provider`),
   which puts every session's whole cost on the provider it *started* on;
 - **after** = the #97 per-model attribution
-  (`plutus_agent.hermes.read_spend_events`), which allocates each session's
+  (`ledger_agent.hermes.read_spend_events`), which allocates each session's
   authoritative cost across the providers that actually served each call.
 
 The total is identical before and after (attribution moves cost between

@@ -19,8 +19,8 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "tools"))
 
 import concurrency_soak as soak
-from plutus_agent import metering
-from plutus_agent.server import app
+from ledger_agent import metering
+from ledger_agent.server import app
 
 
 class TestConcurrency(unittest.TestCase):

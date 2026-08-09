@@ -16,11 +16,11 @@ and verify_checkpoints requires the live DB to reproduce it. These tests prove:
 """
 import pytest
 
-from plutus_agent import config, db, metering
+from ledger_agent import config, db, metering
 
 
 def _org(tmp_path, credit=10000.0):
-    conn = db.connect(str(tmp_path / "plutus.db"))
+    conn = db.connect(str(tmp_path / "ledger.db"))
     db.init_schema(conn)
     org_id = db.create_org(conn, "Acme", tier="pro")["id"]
     if credit:
@@ -216,7 +216,7 @@ def test_recheckpoint_same_rowid_idempotent(tmp_path):
 # ------------------------------------------------------ #121: operationalized ---
 def test_applied_close_records_a_checkpoint(tmp_path):
     """#121: every APPLIED period close ends with a fresh anchor."""
-    from plutus_agent import reconcile
+    from ledger_agent import reconcile
     conn, org = _org(tmp_path)
     _meter(conn, org, n=3)
     out = reconcile.close_period(conn, org, "2026-06", providers=[], apply=True)
@@ -227,7 +227,7 @@ def test_applied_close_records_a_checkpoint(tmp_path):
 
 def test_dry_run_close_does_not_checkpoint(tmp_path):
     """A dry-run close must not write anything — including anchors."""
-    from plutus_agent import reconcile
+    from ledger_agent import reconcile
     conn, org = _org(tmp_path)
     _meter(conn, org, n=2)
     out = reconcile.close_period(conn, org, "2026-06", providers=[], apply=False)
@@ -237,7 +237,7 @@ def test_dry_run_close_does_not_checkpoint(tmp_path):
 
 def test_close_checkpoint_opt_out(tmp_path):
     """checkpoint=False opts an applied close out of auto-capture."""
-    from plutus_agent import reconcile
+    from ledger_agent import reconcile
     conn, org = _org(tmp_path)
     _meter(conn, org, n=2)
     out = reconcile.close_period(conn, org, "2026-06", providers=[], apply=True,
@@ -248,7 +248,7 @@ def test_close_checkpoint_opt_out(tmp_path):
 
 def test_mail_checkpoint_dry_run_when_unconfigured(tmp_path):
     """#121 delivery sink degrades to an offline-safe dry run without SMTP."""
-    from plutus_agent import alerts
+    from ledger_agent import alerts
     conn, org = _org(tmp_path)
     _meter(conn, org, n=1)
     cp = db.checkpoint_chain(conn, org)

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from plutus_agent import config
+from ledger_agent import config
 
 
 class TestPublicBillingUrls(unittest.TestCase):
@@ -15,19 +15,19 @@ class TestPublicBillingUrls(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             os.environ,
             {
-                "PLUTUS_CONFIG": os.path.join(tmp, "config.yaml"),
-                "PLUTUS_BASE_URL": "https://plutus.example.test/",
+                "LEDGER_CONFIG": os.path.join(tmp, "config.yaml"),
+                "LEDGER_BASE_URL": "https://ledger.example.test/",
             },
         ):
             cfg = config.load()
 
         self.assertEqual(
             cfg["billing"]["success_url"],
-            "https://plutus.example.test/billing/success",
+            "https://ledger.example.test/billing/success",
         )
         self.assertEqual(
             cfg["billing"]["cancel_url"],
-            "https://plutus.example.test/billing/cancel",
+            "https://ledger.example.test/billing/cancel",
         )
 
 
