@@ -2,6 +2,14 @@
 
 > **Perseus resolves. Vault remembers. Ledger proves.**
 
+[![Test Suite](https://img.shields.io/github/actions/workflow/status/Perseus-Computing-LLC/ledger/test.yml)](https://github.com/Perseus-Computing-LLC/ledger/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/github/license/Perseus-Computing-LLC/ledger)](./LICENSE)
+[![Release](https://img.shields.io/github/v/release/Perseus-Computing-LLC/ledger)](https://github.com/Perseus-Computing-LLC/ledger/releases)
+[![PyPI version](https://img.shields.io/pypi/v/perseus-ledger)](https://pypi.org/project/perseus-ledger/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/perseus-ledger)](https://pypi.org/project/perseus-ledger/)
+
+**Run it:** `docker pull ghcr.io/perseus-computing-llc/ledger:latest` · [Docs](https://perseus.observer/ledger/)
+
 Perseus Ledger is the verifiable event and provenance layer for autonomous systems. It records **what happened, under what authority and evidence, and whether the history can be independently verified**.
 
 It is deliberately **not** an AI-spend dashboard. Ledger provides an append-only, hash-chained record that ties activity to its actor, boundary, evidence, configuration, action, result, and optional resource allocation. It works independently with any agent runtime, application, internal tool, or offline deployment.
@@ -53,7 +61,7 @@ For a copy-pasteable local setup, see [Local Perseus + Vault + Ledger integratio
 ## Quick start: record a verifiable event
 
 ```bash
-pip install ledger-agent  # compatibility package name during transition
+pip install perseus-ledger
 ledger demo
 # → opens the local Ledger console on http://localhost:8420
 ```
@@ -67,7 +75,7 @@ docker pull ghcr.io/perseus-computing-llc/ledger:latest
 docker run --rm -p 8420:8420 ghcr.io/perseus-computing-llc/ledger:latest
 ```
 
-The `ledger-agent` package, `ledger` CLI, and `LEDGER_*` environment variables
+The `perseus-ledger` package, `ledger` CLI, and `LEDGER_*` environment variables
 are the canonical interfaces.
 
 ```python
