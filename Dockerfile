@@ -6,6 +6,7 @@ LABEL org.opencontainers.image.title="Perseus Ledger"
 LABEL org.opencontainers.image.description="Runtime-neutral, self-hosted, hash-chained event provenance for autonomous systems."
 LABEL org.opencontainers.image.source="https://github.com/Perseus-Computing-LLC/ledger"
 LABEL org.opencontainers.image.licenses="MIT"
+LABEL io.modelcontextprotocol.server.name="io.github.Perseus-Computing-LLC/ledger"
 
 ENV PYTHONUNBUFFERED=1 \
     LEDGER_HOME=/data \
