@@ -70,6 +70,18 @@ is refused, exactly as the CLI and SDK refuse it. Valid `action_status`
 values: `intent`, `approval_requested`, `approved`, `denied`, `expired`,
 `executed`, `failed`, `cancelled`.
 
+### Hash-only evidence fields
+
+`ledger_record` also accepts the hash-only context bindings from the
+vault↔ledger contract (`docs/local-perseus-vault-ledger.md`): `evidence_hashes`
+(64-char SHA-256 hex list), `policy_version`, `result_hash`,
+`context_render_schema`/`context_render_hash`,
+`served_memory_provenance_hash`, and `action_receipt_hash`. Every supplied
+field is hash-covered into the chain; nothing raw (prompts, memory bodies,
+tool arguments) is ever accepted. This is how a host proves *which memory was
+served, under which render, with which receipt* — while the ledger stores only
+digests.
+
 ## Registry
 
 The server is published on the official Model Context Protocol registry as

@@ -89,6 +89,13 @@ def test_record_query_verify_receipt_roundtrip(tmp_path, monkeypatch):
         "task_type": "research", "workspace": "analysis",
         "input_tokens": 1200, "output_tokens": 400,
         "cost_usd": 0.012, "external_ref": "task-42",
+        "evidence_hashes": ["b" * 64, "a" * 64],
+        "policy_version": "policy_4f18c0e2",
+        "result_hash": "c" * 64,
+        "context_render_schema": "perseus-context-render-trace/v1",
+        "context_render_hash": "cc" * 32,
+        "served_memory_provenance_hash": "d" * 64,
+        "action_receipt_hash": "e" * 64,
         "agent_id": "agent-1",
         "authority_manifest_ref": "manifest:auth-aeb2cecc",
         "scope_anchor": "workspace:analysis",
@@ -109,6 +116,12 @@ def test_record_query_verify_receipt_roundtrip(tmp_path, monkeypatch):
     assert ev["cost_usd"] == 0.012
     assert ev.get("external_ref") == "task-42"
     assert ev.get("row_hash")  # hash-chained
+    # hash-only evidence fields are stored, sorted + deduped, chain-covered
+    assert json.loads(ev["evidence_hashes"]) == ["a" * 64, "b" * 64]
+    assert ev["policy_version"] == "policy_4f18c0e2"
+    assert ev["result_hash"] == "c" * 64
+    assert ev["served_memory_provenance_hash"] == "d" * 64
+    assert ev["action_receipt_hash"] == "e" * 64
 
     # verify: chain intact
     text, _ = _call("ledger_verify", {}, meter)

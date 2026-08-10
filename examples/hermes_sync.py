@@ -63,7 +63,7 @@ import urllib.error
 import urllib.request
 
 DEFAULT_STATE_DB = "/opt/data/webui/minions-hermes-config/state.db"
-BATCH = 500
+BATCH = int(os.environ.get("LEDGER_BATCH", "100"))
 
 
 def default_state_db(env) -> str:
@@ -383,6 +383,32 @@ def _batches(pairs, size):
         yield chunk
 
 
+def _batches_by_bytes(pairs, max_bytes, max_count):
+    """Yield chunks bounded by serialized size, still cutting only at a session
+    (rowid) boundary.
+
+    Evidence-heavy sessions (many messages -> many evidence_hashes) can make a
+    single event hundreds of KB, so count-based batches routinely exceed the
+    ledger's ingest body limit (413 + connection close, surfacing as a broken
+    pipe on the client). Estimate each event's serialized size and cut a batch
+    when the running budget (or count cap) is hit AND we are at a session
+    boundary — a session that alone exceeds the budget is still sent whole
+    rather than split, preserving the watermark guarantee."""
+    chunk = []
+    size = 0
+    for i, pair in enumerate(pairs):
+        est = len(json.dumps(pair[1], separators=(",", ":"))) + 2
+        new_session = (not chunk) or (pair[0] != chunk[-1][0])
+        if chunk and new_session and (size + est > max_bytes
+                                      or len(chunk) >= max_count):
+            yield chunk
+            chunk, size = [], 0
+        chunk.append(pair)
+        size += est
+    if chunk:
+        yield chunk
+
+
 def _load_watermark(path: str) -> int:
     try:
         return int(json.load(open(path)).get("last_rowid", 0))
@@ -435,7 +461,9 @@ def main(argv=None) -> int:
 
     sent = 0
     fold_warned = False
-    for chunk in _batches(pairs, BATCH):
+    for chunk in _batches_by_bytes(
+            pairs, int(os.environ.get("LEDGER_MAX_BATCH_BYTES", "262144")),
+            BATCH):
         try:
             resp = post_events(remote, api_key, [e for _, e in chunk])
         except urllib.error.HTTPError as e:

@@ -251,5 +251,43 @@ class TestFoldedWarning(unittest.TestCase):
             {"recorded": 1, "results": [{"recorded": True}]}))
 
 
+class TestBatchesByBytes(unittest.TestCase):
+    """#413 fix: byte-budgeted batching that still never splits a session."""
+
+    def test_never_splits_a_session(self):
+        pairs = [(1, {"m": "x" * 1000}), (1, {"m": "y" * 1000}),
+                 (2, {"m": "z" * 1000})]
+        chunks = list(hermes_sync._batches_by_bytes(pairs, 100, 2))
+        self.assertEqual([c[0] for c in chunks[0]], [1, 1])
+        self.assertEqual([c[0] for c in chunks[1]], [2])
+
+    def test_respects_byte_budget(self):
+        pairs = [(i, {"payload": "x" * 100}) for i in range(10)]
+        chunks = list(hermes_sync._batches_by_bytes(pairs, 250, 100))
+        for chunk in chunks:
+            total = sum(
+                len(json.dumps(p[1], separators=(",", ":"))) + 2
+                for p in chunk)
+            self.assertLessEqual(total, 250)
+
+    def test_respects_count_cap(self):
+        pairs = [(i, {"m": "x"}) for i in range(10)]
+        chunks = list(hermes_sync._batches_by_bytes(pairs, 10 ** 6, 4))
+        self.assertTrue(all(len(c) <= 4 for c in chunks))
+        self.assertEqual(sum(len(c) for c in chunks), 10)
+
+    def test_oversize_session_sent_whole(self):
+        pairs = [(1, {"m": "x" * 5000}), (2, {"m": "y"})]
+        chunks = list(hermes_sync._batches_by_bytes(pairs, 100, 2))
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual([c[0] for c in chunks[0]], [1])
+
+    def test_single_pair_at_or_over_budget_still_sent(self):
+        pairs = [(1, {"m": "x" * 5000})]
+        chunks = list(hermes_sync._batches_by_bytes(pairs, 100, 2))
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0][0][0], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -91,6 +91,24 @@ def _tools() -> list[dict[str, Any]]:
                              "description": "Exact cost in USD if known; "
                                             "estimated from pricing otherwise."},
                 "external_ref": {"type": "string"},
+                "evidence_hashes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Hash-only evidence references (sha256 "
+                                   "hex); hash-covered into the event."},
+                "policy_version": {"type": "string"},
+                "result_hash": {"type": "string",
+                                "description": "Hash of the action result — "
+                                               "never the result itself."},
+                "context_render_schema": {"type": "string",
+                                          "description": "Required with "
+                                                         "context_render_hash."},
+                "context_render_hash": {"type": "string"},
+                "served_memory_provenance_hash": {"type": "string",
+                                                  "description": "Served-claim "
+                                                                 "digest from a "
+                                                                 "memory recall."},
+                "action_receipt_hash": {"type": "string"},
                 "user_id": {"type": "string"},
                 "agent_id": {"type": "string",
                              "description": "Agent identity; required with "
@@ -195,6 +213,13 @@ def _handle_record(meter: client.Meter, args: dict) -> dict:
         reasoning_tokens=int(args.get("reasoning_tokens", 0) or 0),
         cost_usd=args.get("cost_usd"),
         external_ref=args.get("external_ref"),
+        evidence_hashes=args.get("evidence_hashes"),
+        policy_version=args.get("policy_version"),
+        result_hash=args.get("result_hash"),
+        context_render_schema=args.get("context_render_schema"),
+        context_render_hash=args.get("context_render_hash"),
+        served_memory_provenance_hash=args.get("served_memory_provenance_hash"),
+        action_receipt_hash=args.get("action_receipt_hash"),
         user_id=args.get("user_id"),
         agent_id=args.get("agent_id"),
         authority_manifest_ref=args.get("authority_manifest_ref"),
