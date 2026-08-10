@@ -82,6 +82,12 @@ tool arguments) is ever accepted. This is how a host proves *which memory was
 served, under which render, with which receipt* — while the ledger stores only
 digests.
 
+Note: `context_render_schema` is **required** whenever any context-render
+evidence field (`context_render_hash`, `served_memory_provenance_hash`,
+`action_receipt_hash`) is supplied — the ledger rejects render evidence
+without a schema (the schema names the trace format the digest was computed
+over; it is metadata, not content).
+
 ## Registry
 
 The server is published on the official Model Context Protocol registry as

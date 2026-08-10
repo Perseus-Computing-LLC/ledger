@@ -101,8 +101,13 @@ def _tools() -> list[dict[str, Any]]:
                                 "description": "Hash of the action result — "
                                                "never the result itself."},
                 "context_render_schema": {"type": "string",
-                                          "description": "Required with "
-                                                         "context_render_hash."},
+                                          "description": "Required with any "
+                                                         "context-render "
+                                                         "evidence: "
+                                                         "context_render_hash, "
+                                                         "served_memory_"
+                                                         "provenance_hash, "
+                                                         "action_receipt_hash."},
                 "context_render_hash": {"type": "string"},
                 "served_memory_provenance_hash": {"type": "string",
                                                   "description": "Served-claim "

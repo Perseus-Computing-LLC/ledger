@@ -3,12 +3,12 @@
  "name": "io.github.Perseus-Computing-LLC/ledger",
  "title": "Perseus Ledger — verifiable, hash-chained event provenance",
  "description": "Verifiable, hash-chained event provenance for autonomous systems. Local-first, MIT. 5 MCP tools.",
- "version": "1.2.3",
+ "version": "1.2.4",
  "packages": [
   {
    "registryType": "pypi",
    "identifier": "perseus-ledger",
-   "version": "1.2.3",
+   "version": "1.2.4",
    "packageArguments": [
     {
      "type": "positional",
@@ -21,7 +21,7 @@
   },
   {
    "registryType": "oci",
-   "identifier": "ghcr.io/perseus-computing-llc/ledger:1.2.3",
+   "identifier": "ghcr.io/perseus-computing-llc/ledger:1.2.4",
    "transport": {
     "type": "stdio"
    },
@@ -114,7 +114,7 @@
      },
      "context_render_schema": {
       "type": "string",
-      "description": "Required with context_render_hash."
+      "description": "Required with any context-render evidence: context_render_hash, served_memory_provenance_hash, action_receipt_hash."
      },
      "context_render_hash": {
       "type": "string"
