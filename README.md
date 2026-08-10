@@ -1,5 +1,7 @@
 # Perseus Ledger
 
+<!-- mcp-name: io.github.Perseus-Computing-LLC/ledger -->
+
 > **Perseus resolves. Vault remembers. Ledger proves.**
 
 [![Test Suite](https://img.shields.io/github/actions/workflow/status/Perseus-Computing-LLC/ledger/test.yml)](https://github.com/Perseus-Computing-LLC/ledger/actions/workflows/test.yml)
