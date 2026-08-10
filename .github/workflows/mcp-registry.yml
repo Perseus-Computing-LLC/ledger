@@ -59,10 +59,12 @@ jobs:
         id: version
         run: |
           python - <<'PY'
-          import sys
+          import os, sys
           sys.path.insert(0, ".")
           from ledger_agent import __version__
-          print(f"VERSION={__version__}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"VERSION={__version__}\n")
+          print(f"resolved VERSION={__version__}")
           PY
         shell: bash
 
