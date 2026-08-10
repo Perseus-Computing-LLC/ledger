@@ -907,6 +907,13 @@ def cmd_version(args):
     print(f"ledger v{__version__} — {__tagline__}")
 
 
+def cmd_mcp(args):
+    """Run the MCP stdio server (agents meter/query/verify themselves)."""
+    from . import mcp_server
+    mcp_server.serve(demo_mode=bool(getattr(args, "demo", False)))
+    return 0
+
+
 def cmd_backtest(args):
     """Replay historical estimated events without mutating the ledger (#145)."""
     from . import backtest
@@ -983,6 +990,13 @@ def build_parser():
     pd.add_argument("--allow-insecure", action="store_true",
                     help="permit binding a non-loopback host with auth disabled")
     pd.set_defaults(func=lambda a: cmd_serve(a, demo=True), demo=True)
+
+    pm = sub.add_parser(
+        "mcp", help="run the MCP stdio server (agents meter/query/verify "
+                    "ledger events themselves)")
+    pm.add_argument("--demo", action="store_true",
+                    help="seed sample data into a throwaway database first")
+    pm.set_defaults(func=cmd_mcp)
 
     sub.add_parser("status", help="show orgs, balances, Stripe mode").set_defaults(func=cmd_status)
 

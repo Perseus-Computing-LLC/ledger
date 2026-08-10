@@ -1,0 +1,215 @@
+{
+ "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+ "name": "io.github.Perseus-Computing-LLC/ledger",
+ "title": "Perseus Ledger — verifiable, hash-chained event provenance",
+ "description": "Verifiable, hash-chained event provenance for autonomous systems. Local-first, MIT. 5 MCP tools.",
+ "version": "1.2.0",
+ "packages": [
+  {
+   "registryType": "pypi",
+   "identifier": "perseus-ledger",
+   "version": "1.2.0",
+   "packageArguments": [
+    {
+     "type": "positional",
+     "value": "mcp"
+    }
+   ],
+   "transport": {
+    "type": "stdio"
+   }
+  },
+  {
+   "registryType": "oci",
+   "identifier": "ghcr.io/perseus-computing-llc/ledger:1.2.0",
+   "transport": {
+    "type": "stdio"
+   },
+   "runtimeHint": "docker",
+   "runtimeArguments": [
+    {
+     "type": "named",
+     "name": "-i"
+    },
+    {
+     "type": "named",
+     "name": "--rm"
+    }
+   ],
+   "packageArguments": [
+    {
+     "type": "positional",
+     "value": "mcp"
+    }
+   ]
+  }
+ ],
+ "tools": [
+  {
+   "name": "ledger_health",
+   "description": "Report the Ledger org, balance, workspace month-to-date spend, and provider health. Read-only.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+   }
+  },
+  {
+   "name": "ledger_record",
+   "description": "Meter one AI call: record provider/model/tokens/cost plus optional task, workspace, external ref, and action provenance into the hash-chained evidence ledger. Scoped write. Action-provenance fields (agent_id, authority_manifest_ref, scope_anchor, action_intent_hash, action_status, approval_ref) are all-or-nothing: supply all of them or none.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "provider": {
+      "type": "string",
+      "description": "Provider name (required), e.g. anthropic, openai, bedrock."
+     },
+     "model": {
+      "type": "string"
+     },
+     "task_type": {
+      "type": "string",
+      "default": "general"
+     },
+     "workspace": {
+      "type": "string"
+     },
+     "input_tokens": {
+      "type": "integer",
+      "default": 0
+     },
+     "output_tokens": {
+      "type": "integer",
+      "default": 0
+     },
+     "cache_read_tokens": {
+      "type": "integer",
+      "default": 0
+     },
+     "reasoning_tokens": {
+      "type": "integer",
+      "default": 0
+     },
+     "cost_usd": {
+      "type": "number",
+      "description": "Exact cost in USD if known; estimated from pricing otherwise."
+     },
+     "external_ref": {
+      "type": "string"
+     },
+     "user_id": {
+      "type": "string"
+     },
+     "agent_id": {
+      "type": "string",
+      "description": "Agent identity; required with the action-provenance set."
+     },
+     "authority_manifest_ref": {
+      "type": "string"
+     },
+     "scope_anchor": {
+      "type": "string"
+     },
+     "action_intent_hash": {
+      "type": "string"
+     },
+     "action_status": {
+      "type": "string",
+      "enum": [
+       "intent",
+       "approval_requested",
+       "approved",
+       "denied",
+       "expired",
+       "executed",
+       "failed",
+       "cancelled"
+      ]
+     },
+     "approval_ref": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "provider"
+    ],
+    "additionalProperties": false
+   }
+  },
+  {
+   "name": "ledger_query",
+   "description": "List recent usage events for the org, newest first. Pass `before` (the `_rowid` of the last event from the previous page) to paginate. Read-only.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "limit": {
+      "type": "integer",
+      "default": 25,
+      "description": "Max events (1-500)."
+     },
+     "before": {
+      "type": "integer",
+      "description": "Cursor: rowid of the last event seen, for pagination."
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   }
+  },
+  {
+   "name": "ledger_verify",
+   "description": "Walk the usage_events tamper-evidence hash chain and report divergences per org. Read-only.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "org": {
+      "type": "string",
+      "description": "Org id or slug; all orgs if omitted."
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   }
+  },
+  {
+   "name": "ledger_receipt",
+   "description": "Build a hash-only served-claim evidence receipt binding a source reference to a ledger event, with optional authority/provenance/scope/state context. Contains no prompts, memory bodies, or secrets. Read-only.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "source_ref": {
+      "type": "string",
+      "description": "Reference to the source being served (e.g. vault entity id)."
+     },
+     "event_ref": {
+      "type": "string",
+      "description": "Ledger event hash or external reference."
+     },
+     "authority_ref": {
+      "type": "string"
+     },
+     "provenance_class": {
+      "type": "string"
+     },
+     "scope_anchor": {
+      "type": "string"
+     },
+     "state": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "source_ref",
+     "event_ref"
+    ],
+    "additionalProperties": false
+   }
+  }
+ ],
+ "websiteUrl": "https://github.com/Perseus-Computing-LLC/ledger",
+ "repository": {
+  "source": "github",
+  "url": "https://github.com/Perseus-Computing-LLC/ledger"
+ }
+}

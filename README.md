@@ -78,6 +78,19 @@ docker run --rm -p 8420:8420 ghcr.io/perseus-computing-llc/ledger:latest
 The `perseus-ledger` package, `ledger` CLI, and `LEDGER_*` environment variables
 are the canonical interfaces.
 
+### MCP server
+
+`ledger mcp` serves a curated 5-tool MCP surface (record / query / verify /
+receipt / health) over stdio so agents can meter themselves:
+
+```bash
+pip install perseus-ledger
+claude mcp add ledger -- ledger mcp
+```
+
+See [docs/mcp.md](docs/mcp.md) for the tool table, action-provenance
+contract, remote mode, and the official-registry listing.
+
 ```python
 from ledger_agent import Meter
 
