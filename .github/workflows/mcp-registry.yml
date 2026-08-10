@@ -72,7 +72,10 @@ jobs:
           REPO: perseus-computing-llc/ledger
         run: |
           for i in $(seq 1 30); do
-            if curl -fsS -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" \
+            TOKEN="$(curl -fsS "https://ghcr.io/token?scope=repository:${REPO}:pull" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+            if curl -fsS -H "Authorization: Bearer ${TOKEN}" \
+              -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" \
               "https://ghcr.io/v2/${REPO}/manifests/${VERSION}"; then
               echo "Image ${REPO}:${VERSION} is available."
               exit 0
