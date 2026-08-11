@@ -46,7 +46,7 @@ class Workload(NamedTuple):
 # The golden catalog: routed model + baseline, one per provider, plus a no-baseline
 # cost-only pin. Costs were captured from Ledger and frozen (see the module test).
 CATALOG = [
-    Workload("anthropic", "claude-haiku-4-5", 1_000_000, 500_000, "claude-opus-4-8", 3.50, 49.00),
+    Workload("anthropic", "claude-haiku-4-5", 1_000_000, 500_000, "claude-opus-4-8", 3.50, 14.00),
     Workload("openai", "gpt-5-mini", 1_000_000, 1_000_000, "gpt-5", 2.25, 9.00),
     Workload("google", "gemini-2.5-flash", 2_000_000, 1_000_000, "gemini-2.5-pro", 3.10, 9.40),
     Workload("anthropic", "claude-sonnet-4-6", 500_000, 200_000, None, 4.50, 0.00),

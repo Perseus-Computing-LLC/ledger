@@ -53,8 +53,8 @@ def test_baseline_model_priced_server_side(tmp_path):
         input_tokens=1_000_000, output_tokens=500_000, cost_usd=None,
         baseline_model="claude-opus-4-8", ts=_ts())
     assert round(r.cost_usd, 2) == 3.50       # haiku: 1*1.0 + 0.5*5.0
-    assert round(r.baseline_usd, 2) == 52.50  # opus:  1*15 + 0.5*75
-    assert round(r.savings_usd, 2) == 49.00
+    assert round(r.baseline_usd, 2) == 17.50  # opus:  1*5 + 0.5*25
+    assert round(r.savings_usd, 2) == 14.00
 
 
 def test_underrecorded_cost_floored_at_actual_model_price(tmp_path):
@@ -66,9 +66,9 @@ def test_underrecorded_cost_floored_at_actual_model_price(tmp_path):
         conn, org, provider="anthropic", model="claude-sonnet-5",
         input_tokens=1_000_000, output_tokens=500_000, cost_usd=0.10,
         baseline_model="claude-opus-4-8", ts=_ts())
-    # opus est = 15 + 37.5 = 52.50 ; sonnet floor = 3 + 7.5 = 10.50
-    # saving = 52.50 - max(0.10, 10.50) = 42.00  (NOT 52.40 from the $0.10)
-    assert round(r.savings_usd, 2) == 42.00
+    # opus est = 5 + 12.5 = 17.50 ; sonnet floor = 3 + 7.5 = 10.50
+    # saving = 17.50 - max(0.10, 10.50) = 7.00  (NOT 17.40 from the $0.10)
+    assert round(r.savings_usd, 2) == 7.00
 
 
 def test_explicit_baseline_cost_beats_model(tmp_path):
@@ -162,17 +162,17 @@ def test_no_baseline_rows_verify_like_pre_v7(tmp_path):
 # ------------------------------------------- token-reduction baseline (#134) -
 def test_baseline_tokens_priced_at_own_model(tmp_path):
     # The reduced call sent 100K input tokens; the counterfactual would have
-    # sent 1M at the same model. opus input is $15/1M, output $75/1M.
+    # sent 1M at the same model. opus input is $5/1M, output $25/1M.
     conn, org = _org(tmp_path)
     r = metering.record_usage(
         conn, org, provider="anthropic", model="claude-opus-4-8",
         input_tokens=100_000, output_tokens=10_000, cost_usd=None,
         baseline_input_tokens=1_000_000, baseline_output_tokens=10_000,
         ts=_ts())
-    # actual: 0.1*15 + 0.01*75 = 2.25; baseline: 1*15 + 0.01*75 = 15.75
-    assert round(r.cost_usd, 2) == 2.25
-    assert round(r.savings_usd, 2) == 13.50
-    assert round(r.baseline_usd, 2) == 15.75
+    # actual: 0.1*5 + 0.01*25 = 0.75; baseline: 1*5 + 0.01*25 = 5.25
+    assert round(r.cost_usd, 2) == 0.75
+    assert round(r.savings_usd, 2) == 4.50
+    assert round(r.baseline_usd, 2) == 5.25
     assert db.verify_chain(conn)["ok"] is True
 
 
@@ -185,9 +185,9 @@ def test_baseline_tokens_with_baseline_model(tmp_path):
         input_tokens=100_000, output_tokens=0, cost_usd=None,
         baseline_input_tokens=1_000_000, baseline_output_tokens=0,
         baseline_model="claude-opus-4-8", ts=_ts())
-    # actual: 0.1*1.0 = 0.10; baseline: 1*15 = 15.00
+    # actual: 0.1*1.0 = 0.10; baseline: 1*5 = 5.00
     assert round(r.cost_usd, 2) == 0.10
-    assert round(r.savings_usd, 2) == 14.90
+    assert round(r.savings_usd, 2) == 4.90
 
 
 def test_baseline_tokens_underrecorded_cost_floored(tmp_path):
@@ -199,8 +199,8 @@ def test_baseline_tokens_underrecorded_cost_floored(tmp_path):
         input_tokens=100_000, output_tokens=10_000, cost_usd=0.01,
         baseline_input_tokens=1_000_000, baseline_output_tokens=10_000,
         ts=_ts())
-    # floor 2.25 beats the asserted 0.01: saving is 15.75 - 2.25, not - 0.01
-    assert round(r.savings_usd, 2) == 13.50
+    # floor 0.75 beats the asserted 0.01: saving is 5.25 - 0.75, not - 0.01
+    assert round(r.savings_usd, 2) == 4.50
 
 
 def test_baseline_tokens_below_actual_clamp_to_zero(tmp_path):
@@ -229,11 +229,11 @@ def test_meter_track_passes_baselines_through(tmp_path):
                 input_tokens=100_000, output_tokens=10_000,
                 baseline_input_tokens=1_000_000,
                 baseline_output_tokens=10_000)
-    assert round(r.savings_usd, 2) == 13.50
+    assert round(r.savings_usd, 2) == 4.50
     r2 = m.track("anthropic", model="claude-haiku-4-5",
                  input_tokens=1_000_000, output_tokens=500_000,
                  baseline_model="claude-opus-4-8")
-    assert round(r2.savings_usd, 2) == 49.00
+    assert round(r2.savings_usd, 2) == 14.00
     r3 = m.track("openai", model="gpt-5", cost_usd=1.0, baseline_cost_usd=4.0)
     assert r3.savings_usd == 3.0
     assert db.verify_chain(m.conn)["ok"] is True

@@ -198,7 +198,24 @@ def seat_charge_usd(tier_key: str, seats: int) -> float:
 # time.
 # Estimates below are public list prices as of this date. They drift; calibrate
 # or pass exact cost_usd. Surfaced on the pricing page so users see the vintage.
-PRICE_TABLE_AS_OF = "2026-06-26"
+PRICE_TABLE_AS_OF = "2026-08-11"
+
+# Verification provenance (2026-08-11 refresh, prompted by the 45-day
+# freshness gate; values below are USD per 1M tokens):
+#   - anthropic: verified vs docs.anthropic.com/en/docs/about-claude/pricing
+#     (Opus 4.8/5 dropped 15/75 -> 5/25; Fable 5 is 10/50; cache rates
+#     updated to match; Sonnet/Haiku 4.5/4.6 lines unchanged)
+#   - openai: verified vs developers.openai.com/api/docs/pricing — the
+#     current flagship line is gpt-5.6-sol/terra/luna (added below); the
+#     gpt-5/o4 rows are carried forward as LEGACY fallbacks (no longer on
+#     the pricing page, not re-verified this cycle)
+#   - deepseek: verified vs api-docs.deepseek.com/quick_start/pricing
+#     (v4-pro dropped 0.55/2.19 -> 0.435/0.87; cache-hit rates corrected;
+#     vendor notes a planned price increase pending official notice)
+#   - google: verified vs ai.google.dev/gemini-api/docs/pricing (3.1 Pro
+#     Preview now 2.00/12.00 <=200k tier; cache rates corrected)
+#   - xai/mistral/cohere/meta: carried forward UNVERIFIED this cycle
+#     (values unchanged since 2026-06-26; re-verify on the next refresh)
 
 
 @dataclass(frozen=True)
@@ -243,8 +260,8 @@ class ModelPrice:
 PRICE_TABLE: dict[str, dict[str, ModelPrice]] = {
     "anthropic": {
         "_default": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
-        "claude-fable-5": ModelPrice(15.0, 75.0, 1.50, None, 18.75),
-        "claude-opus-4-8": ModelPrice(15.0, 75.0, 1.50, None, 18.75),
+        "claude-fable-5": ModelPrice(10.0, 50.0, 1.00, None, 12.50),
+        "claude-opus-4-8": ModelPrice(5.0, 25.0, 0.50, None, 6.25),
         "claude-sonnet-4-6": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
         "claude-sonnet-4-5-20250929": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
         "claude-sonnet-4-5": ModelPrice(3.0, 15.0, 0.30, None, 3.75),
@@ -253,6 +270,12 @@ PRICE_TABLE: dict[str, dict[str, ModelPrice]] = {
     },
     "openai": {
         "_default": ModelPrice(2.50, 10.0, 1.25),
+        # Current flagship line (standard, short-context; verified 2026-08-11).
+        "gpt-5.6-sol": ModelPrice(5.00, 30.0, 0.50, None, 6.25),
+        "gpt-5.6-terra": ModelPrice(2.00, 12.0, 0.20, None, 2.50),
+        "gpt-5.6-luna": ModelPrice(0.20, 1.20, 0.02, None, 0.25),
+        # LEGACY fallbacks — not on the current pricing page, carried forward
+        # unverified this cycle.
         "gpt-5": ModelPrice(1.25, 10.0, 0.125),
         "gpt-5-mini": ModelPrice(0.25, 2.0, 0.025),
         "gpt-5-nano": ModelPrice(0.05, 0.40, 0.005),
@@ -261,15 +284,18 @@ PRICE_TABLE: dict[str, dict[str, ModelPrice]] = {
     },
     "google": {
         "_default": ModelPrice(1.25, 5.0, 0.31),
-        "gemini-3.1-pro-preview": ModelPrice(1.25, 10.0, 0.31),
-        "gemini-3.1-pro": ModelPrice(1.25, 10.0, 0.31),
-        "gemini-2.5-pro": ModelPrice(1.25, 10.0, 0.31),
-        "gemini-2.5-flash": ModelPrice(0.30, 2.50, 0.075),
+        "gemini-3.1-pro-preview": ModelPrice(2.00, 12.0, 0.20),
+        "gemini-3.1-pro": ModelPrice(2.00, 12.0, 0.20),
+        "gemini-2.5-pro": ModelPrice(1.25, 10.0, 0.125),
+        "gemini-2.5-flash": ModelPrice(0.30, 2.50, 0.03),
     },
     "deepseek": {
         "_default": ModelPrice(0.27, 1.10, 0.027),
-        "deepseek-v4-pro": ModelPrice(0.55, 2.19, 0.055),
-        "deepseek-v4-flash": ModelPrice(0.14, 0.28, 0.014),
+        # 2026-08-11: v4-pro dropped 0.55/2.19 -> 0.435/0.87; cache-hit rates
+        # corrected (vendor lists 0.0028 flash / 0.003625 pro). DeepSeek has
+        # announced a planned price increase — re-verify next refresh.
+        "deepseek-v4-pro": ModelPrice(0.435, 0.87, 0.003625),
+        "deepseek-v4-flash": ModelPrice(0.14, 0.28, 0.0028),
     },
     "xai": {
         "_default": ModelPrice(3.0, 15.0, 0.75),

@@ -33,7 +33,7 @@ def test_flagship_value_exceeds_list_when_routed(tmp_path):
                           cost_usd=3.50, ts=_ts())
     rep = efficiency.org_efficiency(conn, org, period_label="2026-07").as_dict()
     assert round(rep["list_value_usd"], 2) == 3.50       # haiku list
-    assert round(rep["flagship_value_usd"], 2) == 52.50  # opus on same tokens
+    assert round(rep["flagship_value_usd"], 2) == 17.50  # opus on same tokens (5/25)
     assert rep["events"] == 1
 
 
@@ -47,11 +47,11 @@ def test_local_model_value_at_near_zero_cost(tmp_path):
     rep = efficiency.org_efficiency(conn, org, period_label="2026-07",
                                     actual_paid_usd=0.02)
     d = rep.as_dict()
-    # flagship (deepseek-v4-pro): 10*0.55 + 2*2.19 = 5.5 + 4.38 = 9.88
-    assert round(d["flagship_value_usd"], 2) == 9.88
+    # flagship (deepseek-v4-pro): 10*0.435 + 2*0.87 = 4.35 + 1.74 = 6.09
+    assert round(d["flagship_value_usd"], 2) == 6.09
     assert d["basis_usd"] == 0.02
-    assert d["efficiency_usd"] == round(9.88 - 0.02, 6)
-    assert d["multiple"] == round(9.88 / 0.02, 2)  # 494x
+    assert d["efficiency_usd"] == round(6.09 - 0.02, 6)
+    assert d["multiple"] == round(6.09 / 0.02, 2)  # 304.5x
 
 
 def test_actual_paid_overrides_metered_basis(tmp_path):
@@ -100,16 +100,16 @@ def test_leakage_and_adherence(tmp_path):
 
 def test_optimal_model_priced_server_side(tmp_path):
     # Name the policy-optimal model; the server prices the same tokens. Ran opus
-    # (cost 52.50 est) when policy-optimal was haiku (3.50) -> leak 49.
+    # (cost 17.50 est) when policy-optimal was haiku (3.50) -> leak 14.
     conn, org = _org(tmp_path)
     metering.record_usage(conn, org, provider="anthropic", model="claude-opus-4-8",
                           input_tokens=1_000_000, output_tokens=500_000,
                           cost_usd=None, optimal_model="claude-haiku-4-5", ts=_ts())
     d = efficiency.org_efficiency(conn, org, period_label="2026-07").as_dict()
-    # opus est = 15 + 37.5 = 52.50 ; haiku optimal = 1 + 2.5 = 3.50
+    # opus est = 5 + 12.5 = 17.50 ; haiku optimal = 1 + 2.5 = 3.50
     assert d["policy_events"] == 1
     assert d["on_policy_events"] == 0
-    assert round(d["leaked_usd"], 2) == 49.00
+    assert round(d["leaked_usd"], 2) == 14.00
 
 
 def test_optimal_chained_and_negative_rejected(tmp_path):
