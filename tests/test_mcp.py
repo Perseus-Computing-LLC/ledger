@@ -10,6 +10,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+from pathlib import Path
 
 import pytest
 
@@ -182,6 +184,12 @@ def _spawn_server(tmp_path):
     env.pop("LEDGER_REMOTE_URL", None)
     env.pop("LEDGER_API_KEY", None)
     env["PYTHONUNBUFFERED"] = "1"
+    # #227: the child runs from a tmp cwd outside the checkout, so the
+    # source package is not importable there unless the repo root is
+    # injected (or the package happens to be pip-installed). Prepend the
+    # repository root so the harness works from a bare venv too.
+    repo_root = str(Path(__file__).resolve().parents[1])
+    env["PYTHONPATH"] = repo_root + os.pathsep + env.get("PYTHONPATH", "")
     return subprocess.Popen(
         [sys.executable, "-m", "ledger_agent.mcp_server",
          "--db", str(tmp_path / "stdio.db")],
@@ -197,12 +205,25 @@ def _exchange(proc, msgs):
     proc.stdin.flush()
     expected = sum(1 for m in msgs if "id" in m)
     out = {}
-    import time
     deadline = time.time() + 15
     while len(out) < expected and time.time() < deadline:
         line = proc.stdout.readline()
         if not line:
-            break
+            # #227: blank stdout means the child died before responding.
+            # Surface return code + stderr instead of a bare KeyError: N.
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                raise AssertionError(
+                    f"subprocess produced no response and is still running; "
+                    f"expected {expected} responses, got {len(out)}"
+                ) from None
+            stderr = proc.stderr.read() if proc.stderr else ""
+            raise AssertionError(
+                f"subprocess exited with code {proc.returncode} before "
+                f"responding; expected {expected} responses, got {len(out)}; "
+                f"stderr:\n{stderr}"
+            )
         resp = json.loads(line)
         if "id" in resp:
             out[resp["id"]] = resp
