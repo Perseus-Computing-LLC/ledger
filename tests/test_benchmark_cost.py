@@ -87,13 +87,14 @@ def test_attribution_is_deterministic():
 
 
 def test_exact_cost_math():
-    """Cost matches the frozen price table exactly (opus: $15/M in, $75/M out)."""
+    """Cost matches the frozen price table exactly (opus: $5/M in, $25/M out —
+tracked table: 2026-08-11 refresh; bump together with PRICE_TABLE)."""
     run = ApproachRun(RESOLVE_BEFORE_CONTEXT).record(
         CallRecord("anthropic", "claude-opus-4-8",
                    input_tokens=1_000_000, output_tokens=1_000_000)
     )
-    # 1M input * $15/M + 1M output * $75/M = 90.0
-    assert run.total_cost_usd() == 90.0
+    # 1M input * $5/M + 1M output * $25/M = 30.0
+    assert run.total_cost_usd() == 30.0
 
 
 def test_exhibit_is_reproducible_when_timestamp_pinned():

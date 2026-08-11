@@ -40,9 +40,9 @@ def drop_conn(conn):
 
 class TestPricing(unittest.TestCase):
     def test_estimate_known_model(self):
-        # opus: 15/M in, 75/M out
+        # opus: 5/M in, 25/M out (2026-08-11 table refresh)
         cost = pricing.estimate_cost("anthropic", "claude-opus-4-8", 1_000_000, 1_000_000)
-        self.assertAlmostEqual(cost, 90.0, places=4)
+        self.assertAlmostEqual(cost, 30.0, places=4)
 
     def test_reasoning_billed_as_output(self):
         c1 = pricing.estimate_cost("anthropic", "claude-opus-4-8", 0, 1000, 0, 0)
