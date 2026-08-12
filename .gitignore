@@ -30,3 +30,7 @@ quickstart.db
 .playwright-mcp/
 ledger-*.pdf
 ledger-*.html
+
+# Coverage
+.coverage
+htmlcov/

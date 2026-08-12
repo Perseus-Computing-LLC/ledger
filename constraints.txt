@@ -1,0 +1,18 @@
+# CI dependency constraints — exact pins for direct dependencies.
+#
+# Transitive dependencies float; direct pins keep CI reproducible against the
+# library surface this project controls. Upper bounds mirror pyproject.toml
+# (stripe<14, reportlab<5, PyYAML<7, pytest<10).
+#
+# To bump: raise a version here, verify the full suite + coverage gate green,
+# and keep this file in sync with pyproject.toml bounds.
+PyYAML==6.0.3
+pytest==9.1.1
+pytest-cov==7.1.0
+coverage==7.15.4
+stripe==13.2.0
+reportlab==4.5.1
+boto3==1.43.69
+invarium==0.3.1
+build==1.5.0
+twine==7.0.0
