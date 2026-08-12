@@ -137,18 +137,26 @@ def _authenticated_contract(base: str, admin_token: str) -> None:
 
 
 def main() -> int:
+    # Fail closed: a scheduled smoke run that "passes" without exercising
+    # anything is worse than no run at all (it hides a dead deployment or a
+    # misconfigured workflow). Both the public URL and the admin token are
+    # required.
     base = os.environ.get("LEDGER_SMOKE_BASE_URL", "").strip()
     if not base:
-        print("SKIP | public smoke | set LEDGER_SMOKE_BASE_URL to enable")
-        return 0
+        print("FAIL | public smoke | LEDGER_SMOKE_BASE_URL is not set; "
+              "the scheduled smoke must target a live deployment")
+        print("RESULT=FAIL")
+        return 1
+    admin_token = os.environ.get("LEDGER_SMOKE_ADMIN_TOKEN", "").strip()
+    if not admin_token:
+        print("FAIL | public smoke | LEDGER_SMOKE_ADMIN_TOKEN is not set; "
+              "the scheduled smoke must exercise the authenticated contracts")
+        print("RESULT=FAIL")
+        return 1
     try:
         _health_contract(base)
         _pricing_contract(base)
-        admin_token = os.environ.get("LEDGER_SMOKE_ADMIN_TOKEN", "").strip()
-        if admin_token:
-            _authenticated_contract(base, admin_token)
-        else:
-            print("SKIP | authenticated contract | LEDGER_SMOKE_ADMIN_TOKEN not set")
+        _authenticated_contract(base, admin_token)
         print("RESULT=PASS")
         return 0
     except SmokeFailure as exc:
