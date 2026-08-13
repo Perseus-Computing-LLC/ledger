@@ -5,6 +5,16 @@ All notable changes to Ledger are documented here.
 ## [Unreleased]
 
 ### Added
+- **Evidence levels for receipts** (#235). Receipts now state what they prove:
+  a four-level ladder (`structural` → `attested` → `replay` → `inclusion`)
+  under `verification.evidence`, with stable per-level reason codes. A signed
+  receipt is never conflated with a durably committed one: Commit receipts
+  (executed actions) require an inclusion anchor — a retained checkpoint
+  covering the receipt's events — and sign-then-abort receipts verify at
+  `attested` but NOT `inclusion`. Optional HMAC-SHA256 receipt signatures and
+  trusted-key terminal-stage attestations; watermark reclamation downgrades
+  Replay while Inclusion stays verifiable across restarts. See
+  `docs/evidence-receipts.md` → "Evidence levels".
 - **`ledger reconcile-webhooks`** (#177). Diffs the Stripe event log (source
   of truth) against the local `stripe_events` table to surface webhook
   events dropped by deploy windows or restarts. Dry-run by default;

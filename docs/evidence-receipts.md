@@ -63,6 +63,78 @@ The endpoint uses the same organization authorization gate as `/api/audit`. The 
 
 Events are returned in ledger insertion order so each event's `prev_hash` can be compared directly to the prior event's `row_hash` when both belong to the receipt.
 
+## Evidence levels — receipts state what they prove
+
+A receipt must not let "someone signed this" be read as "this durably committed".
+Every task receipt's `verification` block carries an `evidence` object reporting
+the highest evidence level the retained verification objects actually prove
+([#235](https://github.com/Perseus-Computing-LLC/ledger/issues/235), taxonomy
+borrowed from arXiv:2608.11632 §3.3 / Table 4):
+
+| Level | What it proves | Verification objects |
+|---|---|---|
+| `structural` | Canonical syntax, typed bindings, valid receipt signature under the declared key | The receipt itself + declared key |
+| `attested` | A trusted key attests the first terminal stage + reason | Attestation block + trusted key |
+| `replay` | Retained inputs + pinned versions reproduce the stated decision/transition | Prebind blocks + recorded decision context |
+| `inclusion` | A certified snapshot/log proof places the receipt and outcome in durable state | Hash chain + retained checkpoint anchor |
+
+```json
+"verification": {
+  "chain_ok": true,
+  "evidence": {
+    "levels": {"structural": true, "attested": true, "replay": true, "inclusion": true},
+    "level": "inclusion",
+    "claimed": null,
+    "reasons": {
+      "structural": "structural:ok", "attested": "attested:ok",
+      "replay": "replay:ok", "inclusion": "inclusion:ok"
+    },
+    "downgrades": [],
+    "inclusion_anchor": {"checkpoint_id": "ckpt_…", "through_rowid": 42, "head_hash": "…", "status": "ok"},
+    "commit_receipt": true,
+    "inclusion_required": true
+  }
+}
+```
+
+Semantics:
+
+- `level` is the highest level that verifies with the objects currently
+  retained — never a level whose objects are missing (paper assumption A9).
+  `reasons` carries a stable code per level (e.g. `replay:inputs_reclaimed`,
+  `inclusion:anchor_missing`).
+- **Commit receipts require inclusion.** A receipt recording an executed action
+  (`action_authorization.status == "executed"`) reports `commit_receipt: true`
+  and `inclusion_required: true`. Sign-then-abort — a signer producing a receipt
+  before its backing transaction commits — verifies at `attested` (the
+  signature and attestation are authentic) but NOT `inclusion`, because no
+  durable anchor places the events in state.
+- **Watermark reclamation downgrades Replay, never Inclusion.** A retention
+  policy may strip replay inputs (`prebind`) from stored receipts to bound
+  size; the re-issued receipt then verifies at `attested` while a checkpoint
+  anchor keeps `inclusion` verifiable across restarts.
+- `claimed` (optional) is a producer-claimed level; verification computes the
+  level independently and lists any downgrade in `downgrades`.
+- A malformed receipt fails at `structural` with a stable reason code
+  (`structural:row_hash[0]`, `structural:signature_invalid`, …).
+
+### Signing and attestation
+
+`GET /api/audit` renders unsigned receipts by default. When a signing key is
+configured, the receipt carries:
+
+```json
+"attestation": {"key_id": "ledger-ops", "algo": "hmac-sha256", "stage": "executed", "reason": "…", "sig": "…"},
+"signature":   {"key_id": "ledger-ops", "algo": "hmac-sha256", "sig": "…"}
+```
+
+The attestation covers the canonical receipt content (attestation excluded)
+plus the attested stage and reason; the signature covers the content including
+the attestation. Both exclude the `verification` block. Verification uses a
+declared-key registry (`key_registry`); the chain `hmac_key` stands in for the
+reserved `"default"` key id. An attestation claims a terminal stage — it does
+not independently establish correct evaluation or inclusion.
+
 ## Decision context fields
 
 New events may carry the following optional, hash-covered fields through `POST /v1/usage`:
