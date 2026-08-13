@@ -5,7 +5,7 @@ import csv
 import io
 import json
 
-from .. import db, metering, pricing, savings
+from .. import db, evidence_levels, metering, pricing, savings
 from ..prebind import validate_prebind
 
 
@@ -99,13 +99,22 @@ def _csv_safe(value):
 
 
 def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
-               external_ref: str | None = None) -> dict:
+               external_ref: str | None = None,
+               key_registry: dict[str, bytes] | None = None,
+               sign_key_id: str | None = None) -> dict:
     """Return either an organization audit summary or one task evidence receipt.
 
     ``external_ref`` selects the additive, task-scoped receipt path.  The ref is
     already an optional hash-covered field on usage events, so this turns the
     existing immutable chain into a portable evidence view without altering the
     stable ingest contract.
+
+    ``key_registry`` maps declared signing key ids to key bytes. When
+    ``sign_key_id`` names one of them (or ``"default"`` with ``hmac_key``), the
+    receipt is signed and — when it records a terminal action stage — carries a
+    trusted-key attestation. Receipts always include a
+    ``verification.evidence`` block reporting the highest evidence level the
+    retained objects actually verify (#235).
     """
     if external_ref is not None:
         org = db.get_org(conn, org_id)
@@ -169,7 +178,7 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                 "prev_hash": row["prev_hash"],
                 "row_hash": row["row_hash"],
             })
-        return {
+        receipt = {
             "receipt_version": "perseus-evidence-receipt/v1",
             "organization": {"id": org_id, "name": org["name"] if org else None},
             "external_ref": external_ref,
@@ -184,6 +193,30 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                 "hash_method": integrity.get("hash_method", integrity.get("method", "sha256")),
             },
         }
+        # Optional receipt signature + trusted-key attestation (#235): the
+        # attestation binds the first terminal stage + reason, the signature
+        # binds the content (attestation included). Both exclude the
+        # verification block from the signed bytes — it is re-attached below.
+        verification = receipt.pop("verification")
+        if sign_key_id is not None:
+            key = evidence_levels.resolve_key(key_registry, sign_key_id, hmac_key)
+            if key is not None:
+                terminal = evidence_levels.first_terminal_status(events)
+                if terminal is not None:
+                    receipt = evidence_levels.attest_receipt(
+                        receipt, key_id=sign_key_id, key=key,
+                        stage=terminal, reason="ledger-audit-render",
+                    )
+                receipt = evidence_levels.sign_receipt(
+                    receipt, key_id=sign_key_id, key=key,
+                )
+        receipt["verification"] = verification
+        receipt["verification"]["evidence"] = evidence_levels.verify_receipt_evidence(
+            conn, org_id, receipt, hmac_key=hmac_key,
+            key_registry=key_registry,
+            checkpoints=db.list_checkpoints(conn, org_id),
+        )
+        return receipt
 
     import time
     period = time.strftime("%Y-%m", time.gmtime())
