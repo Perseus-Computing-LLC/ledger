@@ -38,6 +38,7 @@ from .prebind import (
     replay_prebind_v2,
     validate_prebind,
 )
+from .receipts import validate_belief_context
 
 # ── level ladder ────────────────────────────────────────────────────────────
 
@@ -281,6 +282,10 @@ def verify_structural(receipt: Mapping[str, Any], *,
             valid, _ = validate_prebind(event["prebind"])
             if not valid:
                 return False, f"structural:prebind[{i}]"
+        if event.get("belief_context") is not None:
+            valid, _ = validate_belief_context(event["belief_context"])
+            if not valid:
+                return False, f"structural:belief_context[{i}]"
     claimed = receipt.get("claimed_evidence_level")
     if claimed is not None and claimed not in EVIDENCE_LEVELS:
         return False, "structural:claimed_level"
@@ -480,6 +485,59 @@ def verify_inclusion(conn, org_id: str, receipt: Mapping[str, Any], *,
     return True, "inclusion:ok", anchor
 
 
+# ── #237: belief-context evidence ───────────────────────────────────────────
+
+
+def _belief_context_evidence(receipt: Mapping[str, Any],
+                             key_registry: Optional[Mapping[str, bytes]],
+                             hmac_key: Optional[bytes]) -> dict[str, Any]:
+    """Attested-tier reporting for the optional belief-context block (#237).
+
+    The block is inside the signed bytes, so a receipt whose HMAC signature
+    verifies has its belief context bound to the signer — that is attested-tier
+    evidence. Absent blocks leave the section with ``present: false`` and
+    existing receipts byte-unchanged.
+    """
+    blocks = []
+    for event in receipt.get("events") or []:
+        bc = event.get("belief_context") if isinstance(event, Mapping) else None
+        if isinstance(bc, Mapping):
+            blocks.append(bc)
+    if not blocks:
+        return {
+            "present": False, "covered": None, "level": None,
+            "reason": "belief:absent", "entries": None, "digest": None,
+        }
+    entries = {
+        kind: sum(1 for b in blocks for e in (b.get(kind) or []) if isinstance(e, Mapping))
+        for kind in ("believed", "assumed", "ignored")
+    }
+    if any(not validate_belief_context(b)[0] for b in blocks):
+        return {
+            "present": True, "covered": False, "level": None,
+            "reason": "belief:malformed_block", "entries": entries,
+            "digest": None,
+        }
+    sig_ok = False
+    if isinstance(receipt.get("signature"), Mapping):
+        sig_ok, _ = verify_receipt_signature(receipt, key_registry, hmac_key)
+    if not sig_ok:
+        return {
+            "present": True, "covered": False, "level": None,
+            "reason": ("belief:signature_missing" if not isinstance(receipt.get("signature"), Mapping)
+                       else "belief:signature_invalid"),
+            "entries": entries, "digest": None,
+        }
+    digest = hashlib.sha256(
+        json.dumps([b.get("belief_digest") for b in blocks],
+                   sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return {
+        "present": True, "covered": True, "level": "attested",
+        "reason": "belief:ok_attested", "entries": entries, "digest": digest,
+    }
+
+
 # ── composite verifier ──────────────────────────────────────────────────────
 
 
@@ -544,6 +602,7 @@ def verify_receipt_evidence(conn, org_id: str, receipt: Mapping[str, Any], *,
         "inclusion_anchor": anchor,
         "commit_receipt": commit_receipt(events),
         "inclusion_required": commit_receipt(events),
+        "belief_context": _belief_context_evidence(receipt, key_registry, hmac_key),
     }
 
 

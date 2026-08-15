@@ -410,6 +410,108 @@ def check_artifact_idempotent(binding: dict[str, Any],
     return {"allowed": True, "reason": "first_action", "detail": "no prior action on this artifact"}
 
 
+
+# ── #237: belief-context evidence block ─────────────────────────────────────
+
+BELIEF_CONTEXT_SCHEMA = "perseus-ledger-belief-context/v1"
+BELIEF_KINDS = ("believed", "assumed", "ignored")
+BELIEF_ENTRY_MAX_STATEMENT = 512
+
+
+def _belief_entries(entries: Any, kind: str) -> list[dict[str, Any]]:
+    if entries is None:
+        return []
+    if not isinstance(entries, list):
+        raise ValueError(f"{kind} must be a list of entries")
+    out: list[dict[str, Any]] = []
+    for e in entries:
+        if not isinstance(e, dict):
+            raise ValueError(f"{kind} entries must be objects")
+        statement = e.get("statement")
+        if not isinstance(statement, str) or not statement.strip():
+            raise ValueError(f"{kind} entries require a non-empty statement")
+        if len(statement) > BELIEF_ENTRY_MAX_STATEMENT:
+            raise ValueError(f"{kind} statement exceeds {BELIEF_ENTRY_MAX_STATEMENT} characters")
+        weight = e.get("weight")
+        if weight is not None and (not isinstance(weight, (int, float)) or not (0 <= weight <= 1)):
+            raise ValueError(f"{kind} weight must be a number between 0 and 1")
+        refs = e.get("evidence_refs")
+        if refs is None:
+            refs = []
+        if not isinstance(refs, list) or any(not _is_sha256(r) for r in refs):
+            raise ValueError(f"{kind} evidence_refs must be a list of 64-char SHA-256 hex digests")
+        out.append({
+            "statement": statement,
+            "weight": weight,
+            "evidence_refs": sorted(set(r.lower() for r in refs)),
+        })
+    return out
+
+
+def build_belief_context(*, believed: Any = None, assumed: Any = None,
+                         ignored: Any = None, confidence: Optional[float] = None,
+                         source: str = "agent", summary: Optional[str] = None) -> dict[str, Any]:
+    """Build a hash-bound belief-context evidence block (#237).
+
+    Records the decision-time beliefs an action was predicated on:
+    ``believed`` / ``assumed`` / ``ignored`` entry lists with optional weights
+    and evidence refs. Hash-only — statements are belief claims, never raw
+    prompts, tool output, or memory bodies.
+    """
+    if confidence is not None and (not isinstance(confidence, (int, float)) or not (0 <= confidence <= 1)):
+        raise ValueError("confidence must be a number between 0 and 1")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("source must be a non-empty string")
+    if summary is not None and (not isinstance(summary, str) or not summary.strip() or len(summary) > 512):
+        raise ValueError("summary must be a non-empty string of at most 512 characters")
+    block: dict[str, Any] = {
+        "schema": BELIEF_CONTEXT_SCHEMA,
+        "believed": _belief_entries(believed, "believed"),
+        "assumed": _belief_entries(assumed, "assumed"),
+        "ignored": _belief_entries(ignored, "ignored"),
+        "confidence": confidence,
+        "source": source,
+        "summary": summary,
+    }
+    block["belief_digest"] = _sha({k: v for k, v in block.items() if k != "belief_digest"})
+    return block
+
+
+def validate_belief_context(block: dict[str, Any]) -> tuple[bool, list[str]]:
+    errors: list[str] = []
+    if not isinstance(block, dict):
+        return False, ["belief_schema"]
+    if block.get("schema") != BELIEF_CONTEXT_SCHEMA:
+        errors.append("belief_schema")
+    for kind in BELIEF_KINDS:
+        entries = block.get(kind)
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            errors.append(f"belief_{kind}_list")
+            continue
+        for i, e in enumerate(entries):
+            if not isinstance(e, dict) or not isinstance(e.get("statement"), str) \
+                    or not e["statement"].strip():
+                errors.append(f"belief_{kind}[{i}].statement")
+            w = e.get("weight") if isinstance(e, dict) else None
+            if w is not None and (not isinstance(w, (int, float)) or not (0 <= w <= 1)):
+                errors.append(f"belief_{kind}[{i}].weight")
+            refs = e.get("evidence_refs", []) if isinstance(e, dict) else []
+            if not isinstance(refs, list) or any(not _is_sha256(r) for r in refs):
+                errors.append(f"belief_{kind}[{i}].evidence_refs")
+    conf = block.get("confidence")
+    if conf is not None and (not isinstance(conf, (int, float)) or not (0 <= conf <= 1)):
+        errors.append("belief_confidence")
+    if not isinstance(block.get("source"), str) or not block["source"].strip():
+        errors.append("belief_source")
+    digest = block.get("belief_digest")
+    if not _is_sha256(digest):
+        errors.append("belief_digest")
+    elif digest != _sha({k: v for k, v in block.items() if k != "belief_digest"}):
+        errors.append("belief_digest_mismatch")
+    return not errors, sorted(set(errors))
+
 __all__ = [
     # #219/#220
     "PREBIND_V2_SCHEMA", "build_prebind_v2", "build_stage_trace",
@@ -426,4 +528,7 @@ __all__ = [
     "EXTERNAL_ARTIFACT_SCHEMA", "build_external_artifact_binding",
     "validate_external_artifact_binding", "check_artifact_idempotent",
     "PRIOR_ACTION_STATUS_VALUES",
+    # #237
+    "BELIEF_CONTEXT_SCHEMA", "BELIEF_KINDS", "build_belief_context",
+    "validate_belief_context",
 ]
