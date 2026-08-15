@@ -171,6 +171,9 @@ _CHAIN_FIELDS_OPTIONAL = (
     # telemetry, hash-covered exactly like the other v1x-v2x evidence fields.
     "governance_cost_json",
     "governance_cost_hash",
+    # v22 (#241): custody disclosure for the authority manifest. Trailing and
+    # optional to preserve the canonical bytes of historical rows.
+    "authority_manifest_custody",
 )
 
 
@@ -603,6 +606,11 @@ CREATE TABLE IF NOT EXISTS usage_events (
     -- opaque references/hashes only; Vault owns policy enforcement and raw data.
     agent_id          TEXT,
     authority_manifest_ref TEXT,
+    -- v22 (#241): custody disclosure label for the referenced authority
+    -- manifest (1f916 custody taxonomy). Ledger stores the disclosure, not
+    -- the manifest itself; missing/unknown custody renders as labeled
+    -- uncertainty at verification.
+    authority_manifest_custody TEXT,
     scope_anchor      TEXT,
     action_intent_hash TEXT,
     action_status     TEXT,
@@ -945,6 +953,8 @@ def _migrate_add_columns(conn) -> None:
         # extend the chain. Vault validates the authority lifecycle itself.
         ("usage_events", "agent_id", "TEXT"),
         ("usage_events", "authority_manifest_ref", "TEXT"),
+        # v22 (#241): custody disclosure for the authority manifest.
+        ("usage_events", "authority_manifest_custody", "TEXT"),
         ("usage_events", "scope_anchor", "TEXT"),
         ("usage_events", "action_intent_hash", "TEXT"),
         ("usage_events", "action_status", "TEXT"),
