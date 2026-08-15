@@ -546,6 +546,61 @@ def _belief_context_evidence(receipt: Mapping[str, Any],
     }
 
 
+# ── #238: behavior-snapshot receipt pin ─────────────────────────────────────
+
+
+def _behavior_snapshot_evidence(receipt: Mapping[str, Any],
+                                levels: Mapping[str, bool]) -> dict[str, Any]:
+    """Report receipt-pinned behavior-snapshot digests (#238).
+
+    A pin is inclusion-tier evidence when the digest is valid, the receipt
+    verifies structurally, and the carrying row is hash-chained (durable
+    state holds the digest). Re-verification against the retained snapshot
+    is one command: ``ledger diff --require-target-digest sha256:<d> <snap>``
+    — a digest mismatch there exits 1.
+    """
+    pins = []
+    for event in receipt.get("events") or []:
+        if not isinstance(event, Mapping):
+            continue
+        pin = event.get("behavior_snapshot")
+        if not isinstance(pin, Mapping):
+            continue
+        digest = pin.get("digest")
+        if isinstance(digest, str) and len(digest) == 64 \
+                and set(digest.lower()) <= set("0123456789abcdef"):
+            pins.append({"event_id": event.get("event_id"), "digest": digest.lower(),
+                         "row_hash": event.get("row_hash")})
+        else:
+            pins.append({"event_id": event.get("event_id"), "digest": None,
+                         "row_hash": event.get("row_hash")})
+    if not pins:
+        return {
+            "present": False, "level": None, "reason": "snapshot:absent",
+            "digests": [], "reverify": [],
+        }
+    digests = sorted({p["digest"] for p in pins if p["digest"]})
+    malformed = any(p["digest"] is None for p in pins)
+    unanchored = any(not isinstance(p["row_hash"], str) or len(p["row_hash"]) != 64
+                     for p in pins)
+    if malformed:
+        level, reason = None, "snapshot:malformed_digest"
+    elif not levels.get("structural"):
+        level, reason = None, "snapshot:structural_failed"
+    elif unanchored:
+        level, reason = None, "snapshot:row_not_chain_anchored"
+    else:
+        level, reason = "inclusion", "snapshot:digest_pinned"
+    return {
+        "present": True, "level": level, "reason": reason,
+        "digests": digests,
+        "reverify": [
+            f"ledger diff --require-target-digest sha256:{d} <snapshot-file>"
+            for d in digests
+        ],
+    }
+
+
 # ── composite verifier ──────────────────────────────────────────────────────
 
 
@@ -634,6 +689,7 @@ def verify_receipt_evidence(conn, org_id: str, receipt: Mapping[str, Any], *,
             "value": manifest_custody,
             "known": is_known_custody(manifest_custody),
         },
+        "behavior_snapshot": _behavior_snapshot_evidence(receipt, levels),
     }
 
 

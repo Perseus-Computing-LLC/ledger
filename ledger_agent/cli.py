@@ -620,6 +620,67 @@ def cmd_governance_cost(args):
               f"{t['mem_bytes']:>10.0f} {t['storage_bytes']:>9.0f} {t['tokens']:>8.0f} "
               f"{t['model_calls']:>7.0f} {t['approval_waits_ms']:>9.0f}")
     sys.exit(0)
+def cmd_diff(args):
+    """#238: deterministic agent-run behavior diff gate.
+
+    Exit codes: 2 = regression (with --fail-on-regression), 1 = integrity
+    mismatch (pinned digest mismatch / oversized input / parse failure —
+    no partial --out write), 0 = clean.
+    """
+    from . import behavior_diff
+
+    try:
+        report = behavior_diff.diff_sources(
+            args.baseline, args.target,
+            require_baseline_digest=args.require_baseline_digest,
+            require_target_digest=args.require_target_digest,
+            baseline_ref=args.baseline, target_ref=args.target,
+        )
+    except behavior_diff.IntegrityError as exc:
+        print(f"ledger diff: integrity failure: {exc}", file=sys.stderr)
+        sys.exit(behavior_diff.EXIT_INTEGRITY)
+
+    if args.out:
+        # Atomic write: temp file + rename in the destination directory, so a
+        # crash never leaves a partial report (integrity failures exit above
+        # before ever reaching this path).
+        import tempfile
+        out_dir = os.path.dirname(os.path.abspath(args.out)) or "."
+        fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=".ledger-diff-", suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, sort_keys=True)
+            os.replace(tmp, args.out)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        verdict = report["verdict"]
+        print("\n  behavior diff — " + {
+            "clean": "clean (no regressions)",
+            "regression": "REGRESSION detected",
+            "improvement_only": "improvement only (baseline error -> output)",
+        }[verdict] + "\n")
+        print(f"    baseline digest: {report['baseline_digest']}")
+        print(f"    target digest:   {report['target_digest']}")
+        if report["regressions"]:
+            for r in report["regressions"]:
+                case = r.get("case", r.get("line", r.get("scope", "?")))
+                print(f"    ✗ {r['change']}: {case}")
+        for a in report["additions"]:
+            print(f"    + added: {a}")
+        for i in report["improvements"]:
+            print(f"    ↑ improvement: {i}")
+
+    if args.fail_on_regression and report["verdict"] == "regression":
+        sys.exit(behavior_diff.EXIT_REGRESSION)
+    sys.exit(behavior_diff.EXIT_CLEAN)
 
 
 def cmd_checkpoint(args):
@@ -1101,6 +1162,22 @@ def build_parser():
     pr.add_argument("--org"); pr.add_argument("--month", help="YYYY-MM (default: current)")
     pr.add_argument("--out", help="output path (.pdf or .html)")
     pr.set_defaults(func=cmd_report)
+
+    pdiff = sub.add_parser(
+        "diff",
+        help="deterministic agent-run behavior diff gate (#238)")
+    pdiff.add_argument("baseline", help="baseline transcript (path or inline JSON)")
+    pdiff.add_argument("target", help="target transcript (path or inline JSON)")
+    pdiff.add_argument("--fail-on-regression", action="store_true",
+                       help="exit 2 when removed/changed behavior is detected")
+    pdiff.add_argument("--require-baseline-digest", metavar="sha256:HEX",
+                       help="fail (exit 1) unless the baseline snapshot matches this digest")
+    pdiff.add_argument("--require-target-digest", metavar="sha256:HEX",
+                       help="fail (exit 1) unless the target snapshot matches this digest")
+    pdiff.add_argument("--out", help="write the diff report JSON here (atomic; "
+                                     "skipped on integrity failure)")
+    pdiff.add_argument("--json", action="store_true")
+    pdiff.set_defaults(func=cmd_diff)
 
     prc = sub.add_parser(
         "reconcile",

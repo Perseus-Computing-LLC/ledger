@@ -842,6 +842,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "belief_context must be an object"})
             if ev.get("governance_cost") is not None and not isinstance(ev["governance_cost"], dict):
                 return self._json(400, {"error": "governance_cost must be an object"})
+            if ev.get("behavior_snapshot") is not None and not isinstance(ev["behavior_snapshot"], dict):
+                return self._json(400, {"error": "behavior_snapshot must be an object"})
 
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
@@ -909,6 +911,7 @@ class Handler(BaseHTTPRequestHandler):
                             prebind=ev.get("prebind"),
                             belief_context=ev.get("belief_context"),
                             governance_cost=ev.get("governance_cost"),
+                            behavior_snapshot=ev.get("behavior_snapshot"),
                             user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),

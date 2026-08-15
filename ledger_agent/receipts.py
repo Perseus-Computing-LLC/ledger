@@ -569,6 +569,56 @@ def validate_governance_cost(block: dict[str, Any]) -> tuple[bool, list[str]]:
         errors.append("governance_digest_mismatch")
     return not errors, sorted(set(errors))
 
+
+# ── #238: behavior-snapshot receipt pin ─────────────────────────────────────
+
+BEHAVIOR_SNAPSHOT_PIN_SCHEMA = "perseus-ledger-behavior-snapshot-pin/v1"
+
+
+def build_behavior_snapshot_pin(*, digest: str, cases: Optional[int] = None,
+                                source_ref: Optional[str] = None) -> dict[str, Any]:
+    """Pin a canonical behavior-snapshot digest into an event (#238).
+
+    ``digest`` is the sha256 of the canonical snapshot bytes (from
+    ``behavior_diff.compile_snapshot``). The pin is chain-covered at ingest
+    and re-verifiable later with ``ledger diff --require-target-digest``.
+    """
+    if not _is_sha256(digest):
+        raise ValueError("digest must be a 64-char SHA-256 hex digest")
+    if cases is not None and (not isinstance(cases, int) or cases < 0):
+        raise ValueError("cases must be a non-negative integer when supplied")
+    if source_ref is not None and (not isinstance(source_ref, str)
+                                   or not source_ref.strip() or len(source_ref) > 512):
+        raise ValueError("source_ref must be a non-empty string of at most 512 characters")
+    block: dict[str, Any] = {
+        "schema": BEHAVIOR_SNAPSHOT_PIN_SCHEMA,
+        "digest": digest.lower(),
+        "cases": cases,
+        "source_ref": source_ref,
+    }
+    block["pin_digest"] = _sha({k: v for k, v in block.items() if k != "pin_digest"})
+    return block
+
+
+def validate_behavior_snapshot_pin(block: dict[str, Any]) -> tuple[bool, list[str]]:
+    errors: list[str] = []
+    if not isinstance(block, dict):
+        return False, ["snapshot_pin_schema"]
+    if block.get("schema") != BEHAVIOR_SNAPSHOT_PIN_SCHEMA:
+        errors.append("snapshot_pin_schema")
+    digest = block.get("digest")
+    if not _is_sha256(digest):
+        errors.append("snapshot_pin_digest")
+    cases = block.get("cases")
+    if cases is not None and (not isinstance(cases, int) or cases < 0):
+        errors.append("snapshot_pin_cases")
+    pin_digest = block.get("pin_digest")
+    if not _is_sha256(pin_digest):
+        errors.append("snapshot_pin_digest_missing")
+    elif pin_digest != _sha({k: v for k, v in block.items() if k != "pin_digest"}):
+        errors.append("snapshot_pin_digest_mismatch")
+    return not errors, sorted(set(errors))
+
 __all__ = [
     # #219/#220
     "PREBIND_V2_SCHEMA", "build_prebind_v2", "build_stage_trace",
@@ -591,4 +641,7 @@ __all__ = [
     # #239
     "GOVERNANCE_COST_SCHEMA", "GOVERNANCE_COST_FIELDS",
     "build_governance_cost", "validate_governance_cost",
+    # #238
+    "BEHAVIOR_SNAPSHOT_PIN_SCHEMA", "build_behavior_snapshot_pin",
+    "validate_behavior_snapshot_pin",
 ]

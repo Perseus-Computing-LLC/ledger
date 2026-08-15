@@ -127,6 +127,7 @@ class Meter:
               prebind: Optional[dict] = None,
               belief_context: Optional[dict] = None,
               governance_cost: Optional[dict] = None,
+              behavior_snapshot: Optional[dict] = None,
               user_id: Optional[str] = None,
               source: str = "sdk"):
         """Meter one call. Returns a :class:`metering.MeterResult`.
@@ -199,6 +200,7 @@ class Meter:
                 "prebind": prebind,
                 "belief_context": belief_context,
                 "governance_cost": governance_cost,
+                "behavior_snapshot": behavior_snapshot,
             }
             event.update({key: value for key, value in optional_fields.items()
                           if value is not None})
@@ -238,6 +240,7 @@ class Meter:
             belief_context=belief_context,
             prebind=prebind,
             governance_cost=governance_cost,
+            behavior_snapshot=behavior_snapshot,
             user_id=user_id,
             source=source,
             pricing_overrides=self.cfg.get("pricing", {}).get("overrides"),
