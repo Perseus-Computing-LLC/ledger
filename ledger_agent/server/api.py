@@ -157,6 +157,8 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                 if row["external_artifact_json"] is not None else None,
                 "belief_context": json.loads(row["belief_context_json"])
                 if row["belief_context_json"] is not None else None,
+                "governance_cost": json.loads(row["governance_cost_json"])
+                if row["governance_cost_json"] is not None else None,
                 "action_authorization": {
                     "agent_id": row["agent_id"],
                     "authority_manifest_ref": row["authority_manifest_ref"],

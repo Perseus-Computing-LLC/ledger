@@ -583,6 +583,45 @@ def cmd_verify(args):
         sys.exit(2)
 
 
+def cmd_governance_cost(args):
+    """#239: cumulative governance self-cost per workspace (internal telemetry)."""
+    conn = _conn()
+    since = getattr(args, "since", None)
+    until = getattr(args, "until", None)
+    rows = []
+    if args.org:
+        org = _resolve_org(conn, args.org)
+        rows = [{"org_id": org["id"], "org_name": org["name"], **ws}
+                for ws in metering.governance_cost_by_workspace(
+                    conn, org["id"], since=since, until=until)]
+    else:
+        for o in db.list_orgs(conn):
+            rows.extend(
+                {"org_id": o["id"], "org_name": o["name"], **ws}
+                for ws in metering.governance_cost_by_workspace(
+                    conn, o["id"], since=since, until=until))
+    conn.close()
+
+    if args.json:
+        print(json.dumps({"workspaces": rows}, indent=2))
+        sys.exit(0)
+
+    print("\n  governance self-cost (internal telemetry — excluded from customer-facing usage)\n")
+    if not rows:
+        print("    no governance-cost blocks recorded")
+        sys.exit(0)
+    print(f"    {'WORKSPACE':<34} {'EVENTS':>7} {'WALL_MS':>10} {'CPU_MS':>9} "
+          f"{'MEM_B':>10} {'STOR_B':>9} {'TOKENS':>8} {'CALLS':>7} {'APPR_MS':>9}")
+    print("    " + "-" * 108)
+    for r in rows:
+        t = r["totals"]
+        label = r["workspace_name"] or r["workspace_id"] or "(unattributed)"
+        print(f"    {label[:33]:<34} {r['events']:>7} {t['wall_ms']:>10.0f} {t['cpu_ms']:>9.0f} "
+              f"{t['mem_bytes']:>10.0f} {t['storage_bytes']:>9.0f} {t['tokens']:>8.0f} "
+              f"{t['model_calls']:>7.0f} {t['approval_waits_ms']:>9.0f}")
+    sys.exit(0)
+
+
 def cmd_checkpoint(args):
     """#120: escrow a signed tamper-evidence checkpoint the customer retains.
 
@@ -1190,6 +1229,17 @@ def build_parser():
                           "or a tip (Free)")
     pbs.add_argument("--json", action="store_true")
     pbs.set_defaults(func=cmd_bill_savings)
+
+    pgc = sub.add_parser(
+        "governance-cost",
+        help="cumulative governance self-cost per workspace (#239)")
+    pgc.add_argument("--org")
+    pgc.add_argument("--since", type=float,
+                     help="window start (epoch seconds)")
+    pgc.add_argument("--until", type=float,
+                     help="window end (epoch seconds, exclusive)")
+    pgc.add_argument("--json", action="store_true")
+    pgc.set_defaults(func=cmd_governance_cost)
 
     pa = sub.add_parser("alerts", help="deliver pending alerts")
     pa.add_argument("--org")

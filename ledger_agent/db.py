@@ -167,6 +167,10 @@ _CHAIN_FIELDS_OPTIONAL = (
     # the canonical bytes of historical rows.
     "belief_context_json",
     "belief_context_hash",
+    # v20 (#239): governance self-cost. Trailing and optional; internal
+    # telemetry, hash-covered exactly like the other v1x-v2x evidence fields.
+    "governance_cost_json",
+    "governance_cost_hash",
 )
 
 
@@ -618,6 +622,11 @@ CREATE TABLE IF NOT EXISTS usage_events (
     -- pre-v19 chain canonical form are preserved.
     belief_context_json TEXT,
     belief_context_hash TEXT,
+    -- v20 (#239): governance self-cost. Internal telemetry only — excluded
+    -- from customer-facing usage/totals. Nullable so existing rows and their
+    -- pre-v20 chain canonical form are preserved.
+    governance_cost_json TEXT,
+    governance_cost_hash TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -970,6 +979,10 @@ def _migrate_add_columns(conn) -> None:
         # extend the chain.
         ("usage_events", "belief_context_json", "TEXT"),
         ("usage_events", "belief_context_hash", "TEXT"),
+        # v20 (#239): governance self-cost. Nullable preserves existing rows
+        # and their historical hash canonical form.
+        ("usage_events", "governance_cost_json", "TEXT"),
+        ("usage_events", "governance_cost_hash", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)

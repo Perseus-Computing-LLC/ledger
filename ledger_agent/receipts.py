@@ -512,6 +512,63 @@ def validate_belief_context(block: dict[str, Any]) -> tuple[bool, list[str]]:
         errors.append("belief_digest_mismatch")
     return not errors, sorted(set(errors))
 
+
+# ── #239: governance self-cost ──────────────────────────────────────────────
+
+GOVERNANCE_COST_SCHEMA = "perseus-ledger-governance-cost/v1"
+GOVERNANCE_COST_FIELDS = (
+    "wall_ms", "cpu_ms", "mem_bytes", "storage_bytes",
+    "tokens", "model_calls", "approval_waits_ms",
+)
+
+
+def build_governance_cost(**fields: Any) -> dict[str, Any]:
+    """Build a governance self-cost block (#239).
+
+    Only supplied (non-None) fields are recorded; every value is a
+    non-negative number. Internal telemetry — excluded from customer-facing
+    usage/totals. The research question from #239 (inside vs outside the
+    signed bytes) resolves to INSIDE: the block is chain-covered at ingest
+    and covered by the receipt HMAC, so governance overhead is as
+    tamper-evident as the action it governs.
+    """
+    block: dict[str, Any] = {"schema": GOVERNANCE_COST_SCHEMA}
+    for field in GOVERNANCE_COST_FIELDS:
+        value = fields.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, (int, float)) or value < 0:
+            raise ValueError(f"governance_cost.{field} must be a non-negative number")
+        block[field] = value
+    unknown = set(fields) - set(GOVERNANCE_COST_FIELDS)
+    if unknown:
+        raise ValueError("unknown governance_cost fields: " + ", ".join(sorted(unknown)))
+    block["governance_digest"] = _sha({k: v for k, v in block.items() if k != "governance_digest"})
+    return block
+
+
+def validate_governance_cost(block: dict[str, Any]) -> tuple[bool, list[str]]:
+    errors: list[str] = []
+    if not isinstance(block, dict):
+        return False, ["governance_schema"]
+    if block.get("schema") != GOVERNANCE_COST_SCHEMA:
+        errors.append("governance_schema")
+    unknown = set(block) - set(GOVERNANCE_COST_FIELDS) - {"schema", "governance_digest"}
+    for field in sorted(unknown):
+        errors.append(f"governance_{field}_unknown")
+    for field in GOVERNANCE_COST_FIELDS:
+        value = block.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, (int, float)) or value < 0:
+            errors.append(f"governance_{field}")
+    digest = block.get("governance_digest")
+    if not _is_sha256(digest):
+        errors.append("governance_digest")
+    elif digest != _sha({k: v for k, v in block.items() if k != "governance_digest"}):
+        errors.append("governance_digest_mismatch")
+    return not errors, sorted(set(errors))
+
 __all__ = [
     # #219/#220
     "PREBIND_V2_SCHEMA", "build_prebind_v2", "build_stage_trace",
@@ -531,4 +588,7 @@ __all__ = [
     # #237
     "BELIEF_CONTEXT_SCHEMA", "BELIEF_KINDS", "build_belief_context",
     "validate_belief_context",
+    # #239
+    "GOVERNANCE_COST_SCHEMA", "GOVERNANCE_COST_FIELDS",
+    "build_governance_cost", "validate_governance_cost",
 ]

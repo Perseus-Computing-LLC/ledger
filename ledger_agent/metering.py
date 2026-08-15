@@ -30,6 +30,8 @@ from .receipts import (
     build_served_claim, validate_served_claim,
     validate_external_artifact_binding, validate_runtime_manifest,
     validate_belief_context,
+    build_governance_cost, validate_governance_cost,
+    GOVERNANCE_COST_FIELDS,
     EVIDENCE_STATUS_VALUES,
 )
 
@@ -179,6 +181,7 @@ def record_usage(conn, org_id: str, provider: str,
                  runtime_manifest: Optional[dict] = None,
                  external_artifact: Optional[dict] = None,
                  belief_context: Optional[dict] = None,
+                 governance_cost: Optional[dict] = None,
                  commit: bool = True) -> MeterResult:
     """Meter one LLM/agent call. Returns a :class:`MeterResult`.
 
@@ -234,6 +237,11 @@ def record_usage(conn, org_id: str, provider: str,
         raise ValueError("human_review must be approved, rejected, or corrected")
     if human_review == "corrected" and correction_ref is None:
         raise ValueError("correction_ref is required when human_review is corrected")
+    # v20 (#239): measure the governance work this call performs — intent
+    # hashing validation, manifest checks, evidence-binding validation. The
+    # measured span is this section through the external-artifact validation.
+    gov_t0 = time.monotonic()
+    gov_c0 = time.process_time()
     agent_id = _optional_text(agent_id, "agent_id")
     authority_manifest_ref = _optional_text(authority_manifest_ref, "authority_manifest_ref")
     scope_anchor = _optional_text(scope_anchor, "scope_anchor")
@@ -330,6 +338,26 @@ def record_usage(conn, org_id: str, provider: str,
             raise ValueError("invalid belief_context: " + ", ".join(errors))
         belief_context_json = json.dumps(belief_context, sort_keys=True, separators=(",", ":"))
         belief_context_hash = belief_context.get("belief_digest")
+    gov_wall_ms = int(round((time.monotonic() - gov_t0) * 1000))
+    gov_cpu_ms = int(round((time.process_time() - gov_c0) * 1000))
+    if governance_cost is not None:
+        if not isinstance(governance_cost, dict):
+            raise ValueError("governance_cost must be a dict")
+        valid, errors = validate_governance_cost(governance_cost)
+        if not valid:
+            raise ValueError("invalid governance_cost: " + ", ".join(errors))
+    elif any((agent_id, authority_manifest_ref, scope_anchor, action_intent_hash,
+              action_status, approval_ref)):
+        # No caller block + action provenance present => auto-capture the
+        # measured governance overhead so the per-action cost is never
+        # silently invisible. mem/storage/tokens/model_calls/approval waits
+        # stay caller-supplied (not reliably measurable here).
+        governance_cost = build_governance_cost(wall_ms=gov_wall_ms, cpu_ms=gov_cpu_ms)
+    governance_cost_json: Optional[str] = None
+    governance_cost_hash: Optional[str] = None
+    if governance_cost is not None:
+        governance_cost_json = json.dumps(governance_cost, sort_keys=True, separators=(",", ":"))
+        governance_cost_hash = governance_cost.get("governance_digest")
 
     # Fix #80: never let a negative token count through...
     # month-to-date tracked total (bypassing the free-tier quota) and corrupt
@@ -571,6 +599,9 @@ def record_usage(conn, org_id: str, provider: str,
         # v19 (#237)
         "belief_context_json": belief_context_json,
         "belief_context_hash": belief_context_hash,
+        # v20 (#239)
+        "governance_cost_json": governance_cost_json,
+        "governance_cost_hash": governance_cost_hash,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
@@ -582,8 +613,9 @@ def record_usage(conn, org_id: str, provider: str,
         "served_memory_provenance_hash,action_receipt_hash,resource_constraints_version,resource_constraints_hash,prebind_json,prebind_hash,"
         "served_claim_json,served_claim_hash,evidence_status,runtime_manifest_json,runtime_manifest_hash,external_artifact_json,external_artifact_hash,"
         "belief_context_json,belief_context_hash,"
+        "governance_cost_json,governance_cost_hash,"
         "estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
@@ -599,6 +631,7 @@ def record_usage(conn, org_id: str, provider: str,
          runtime_manifest_json, runtime_manifest_hash,
          external_artifact_json, external_artifact_hash,
          belief_context_json, belief_context_hash,
+         governance_cost_json, governance_cost_hash,
          int(estimated), source, ts, prev_hash, row_hash),
     )
 
@@ -882,3 +915,77 @@ def org_summary(conn, org_id: str, now: Optional[float] = None) -> dict:
         "recent_events": recent_events(conn, org_id, 12),
         "alerts": [dict(a) for a in db.recent_alerts(conn, org_id, 6)],
     }
+
+
+# ── #239: cumulative governance self-cost ───────────────────────────────────
+
+
+def _governance_rows(conn, org_id: str, since=None, until=None):
+    sql = ("SELECT workspace_id, governance_cost_json FROM usage_events "
+           "WHERE org_id=? AND governance_cost_json IS NOT NULL")
+    params = [org_id]
+    if since is not None:
+        sql += " AND ts>=?"
+        params.append(since)
+    if until is not None:
+        sql += " AND ts<?"
+        params.append(until)
+    return conn.execute(sql, params).fetchall()
+
+
+def _sum_blocks(rows) -> tuple[int, dict]:
+    totals = {field: 0 for field in GOVERNANCE_COST_FIELDS}
+    events = 0
+    for _ws_id, json_text in rows:
+        try:
+            block = json.loads(json_text)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(block, dict):
+            continue
+        events += 1
+        for field in GOVERNANCE_COST_FIELDS:
+            value = block.get(field)
+            if isinstance(value, (int, float)):
+                totals[field] += value
+    return events, totals
+
+
+def governance_cost_totals(conn, org_id: str, since=None, until=None) -> dict:
+    """Cumulative governance self-cost for an org's window (#239).
+
+    Internal telemetry only — never merged into customer-facing usage or
+    billing totals. Returns per-field sums plus the number of events that
+    carried a block.
+    """
+    events, totals = _sum_blocks(_governance_rows(conn, org_id, since, until))
+    return {"org_id": org_id, "events": events, "totals": totals}
+
+
+def governance_cost_by_workspace(conn, org_id: str, since=None, until=None) -> list[dict]:
+    """Per-workspace governance self-cost breakdown (#239).
+
+    Rows without a workspace attribute to ``workspace_id: null`` so the
+    breakdown is complete — governance cost is queryable per workspace.
+    """
+    rows = _governance_rows(conn, org_id, since, until)
+    buckets: dict = {}
+    for ws_id, json_text in rows:
+        key = ws_id if ws_id else "__none__"
+        buckets.setdefault(key, [])
+        buckets[key].append(json_text)
+    out = []
+    for key, texts in sorted(buckets.items()):
+        ws_id = None if key == "__none__" else key
+        name = None
+        if ws_id:
+            ws = db.get_workspace(conn, ws_id)
+            name = ws["name"] if ws else None
+        events, totals = _sum_blocks((ws_id, t) for t in texts)
+        out.append({
+            "workspace_id": ws_id,
+            "workspace_name": name,
+            "events": events,
+            "totals": totals,
+        })
+    return out
