@@ -681,6 +681,138 @@ def cmd_diff(args):
     if args.fail_on_regression and report["verdict"] == "regression":
         sys.exit(behavior_diff.EXIT_REGRESSION)
     sys.exit(behavior_diff.EXIT_CLEAN)
+def cmd_witness_sign(args):
+    """#240: countersign the current ledger head as an independent witness."""
+    from . import witness
+    conn = _conn()
+    org = _resolve_org(conn, args.org)
+    org_id = org["id"]
+    head_hash = db.chain_head(conn, org_id)
+    if not head_hash:
+        conn.close()
+        sys.exit("ledger witness: no chained events to countersign")
+    row = conn.execute(
+        "SELECT COALESCE(MAX(rowid),0) AS m FROM usage_events WHERE org_id=?",
+        (org_id,)).fetchone()
+    through = int(row["m"])
+    conn.close()
+
+    # Witness identity: pinned key material held by the witness, never the
+    # operator. --key-file supplies it; otherwise a state dir holds it.
+    if args.key_file:
+        with open(args.key_file, "rb") as f:
+            key = f.read()
+        if len(key) < 16:
+            sys.exit("ledger witness: witness key must be at least 16 bytes")
+    else:
+        state = args.state or os.path.join(os.path.expanduser("~"), ".ledger-witness")
+        os.makedirs(state, exist_ok=True)
+        key_path = os.path.join(state, "witness-key")
+        if os.path.exists(key_path):
+            with open(key_path, "rb") as f:
+                key = f.read()
+        else:
+            key = os.urandom(32)
+            fd = os.open(key_path, os.O_WRONLY | os.O_CREAT, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(key)
+    witness_id = args.witness_id or "witness-1"
+
+    # Continuity: bind the previous head this witness saw.
+    state = args.state or os.path.join(os.path.expanduser("~"), ".ledger-witness")
+    os.makedirs(state, exist_ok=True)
+    last_path = os.path.join(state, "last-head.json")
+    last = {}
+    if os.path.exists(last_path):
+        try:
+            with open(last_path) as f:
+                last = json.load(f)
+        except ValueError:
+            last = {}
+    prev_entry = last.get(org_id)
+    prev_hash = None
+    if prev_entry and isinstance(prev_entry, dict) \
+            and isinstance(prev_entry.get("through_rowid"), int) \
+            and prev_entry.get("through_rowid") < through:
+        prev_hash = prev_entry.get("head_hash")
+
+    head = witness.build_head(org_id=org_id, head_hash=head_hash,
+                              through_rowid=through)
+    copy = witness.countersign_head(head, witness_id=witness_id, key=key,
+                                    prev_head_hash=prev_hash)
+
+    log_path = os.path.join(state, "countersignatures.jsonl")
+    with open(log_path, "a") as f:
+        f.write(json.dumps(copy, sort_keys=True) + "\n")
+    with open(last_path, "w") as f:
+        json.dump({org_id: {"head_hash": head_hash, "through_rowid": through}},
+                  f, sort_keys=True)
+
+    # Publish a pointer where the operator cannot write — the publish channel
+    # is the witness's independence guarantee (#240). Here it is a separate
+    # directory/copy the verifier reads out-of-band.
+    if args.publish:
+        os.makedirs(args.publish, exist_ok=True)
+        pub_path = os.path.join(args.publish,
+                                f"countersignature-{witness_id}-{org_id[:8]}.json")
+        with open(pub_path, "w") as f:
+            json.dump(copy, f, indent=2, sort_keys=True)
+
+    print(json.dumps({"witness_id": witness_id, "org_id": org_id,
+                      "head_hash": head_hash, "through_rowid": through,
+                      "prev_head_hash": prev_hash,
+                      "countersignature": copy}, indent=2, sort_keys=True))
+    sys.exit(0)
+
+
+def cmd_witness_verify(args):
+    """#240: grade witness evidence for a ledger head, fail-closed."""
+    from . import witness
+    if args.head_file:
+        with open(args.head_file) as f:
+            head = json.load(f)
+        chain_ok = bool(getattr(args, "assume_chain_ok", False))
+    else:
+        conn = _conn()
+        org = _resolve_org(conn, args.org)
+        org_id = org["id"]
+        head_hash = db.chain_head(conn, org_id)
+        row = conn.execute(
+            "SELECT COALESCE(MAX(rowid),0) AS m FROM usage_events WHERE org_id=?",
+            (org_id,)).fetchone()
+        chain = db.verify_chain(conn, org_id=org_id,
+                                hmac_key=cfgmod.chain_hmac_key(cfgmod.load()))
+        chain_ok = any(o.get("org_id") == org_id and o.get("status") == "ok"
+                       for o in chain.get("orgs", []))
+        conn.close()
+        head = witness.build_head(
+            org_id=org_id,
+            head_hash=head_hash or "0" * 64,
+            through_rowid=int(row["m"]),
+        )
+        if head_hash is None:
+            chain_ok = False
+
+    pinned = {}
+    if args.keys:
+        with open(args.keys) as f:
+            pinned = json.load(f)
+        pinned = {k: bytes.fromhex(v) for k, v in pinned.items()}
+    copies = []
+    if args.copies:
+        with open(args.copies) as f:
+            text = f.read().strip()
+        if text.startswith("["):
+            copies = json.loads(text)
+        else:
+            copies = [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    result = witness.verify_witnesses(
+        head=head, copies=copies, pinned_keys=pinned,
+        asked=bool(args.asked), prior_copies=copies, chain_ok=chain_ok,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    sys.exit(result["exit_code"])
 
 
 def cmd_checkpoint(args):
@@ -1222,6 +1354,41 @@ def build_parser():
                      help="allowed absolute per-event delta in micro-dollars")
     pbt.add_argument("--json", action="store_true")
     pbt.set_defaults(func=cmd_backtest)
+
+    pw = sub.add_parser(
+        "witness",
+        help="external witness countersignatures over ledger heads (#240)")
+    pw_sub = pw.add_subparsers(dest="witness_action")
+    pw_sign = pw_sub.add_parser(
+        "sign",
+        help="fetch the head, verify consistency vs the last head seen, "
+             "countersign, and publish a pointer")
+    pw_sign.add_argument("--org")
+    pw_sign.add_argument("--witness-id", help="witness identity (default: witness-1)")
+    pw_sign.add_argument("--key-file", help="witness HMAC key file (>=16 bytes; "
+                                            "else generated in --state)")
+    pw_sign.add_argument("--state", help="witness state dir (last head + "
+                                         "countersignature log)")
+    pw_sign.add_argument("--publish", help="publish directory (outside operator "
+                                           "control — the independence guarantee)")
+    pw_sign.set_defaults(func=cmd_witness_sign)
+    pw_verify = pw_sub.add_parser(
+        "verify",
+        help="grade witness evidence for a head (fail-closed verdicts)")
+    pw_verify.add_argument("--org")
+    pw_verify.add_argument("--head-file", help="verify an offline head JSON "
+                                               "(chain_ok defaults false)")
+    pw_verify.add_argument("--assume-chain-ok", action="store_true",
+                           help="with --head-file: trust the file's chain claim "
+                                "(offline verification of a real head)")
+    pw_verify.add_argument("--copies", help="countersignature file (JSONL or array)")
+    pw_verify.add_argument("--keys", help="pinned witness keys JSON "
+                                          "{witness_id: hex-key}")
+    pw_verify.add_argument("--asked", action="store_true",
+                           help="witnesses were asked (asked-and-empty is distinct "
+                                "from never-asked)")
+    pw_verify.add_argument("--json", action="store_true")
+    pw_verify.set_defaults(func=cmd_witness_verify)
 
     pck = sub.add_parser(
         "checkpoint",
