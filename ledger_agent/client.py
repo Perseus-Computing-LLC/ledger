@@ -125,6 +125,7 @@ class Meter:
               resource_constraints_hash: Optional[str] = None,
               prebind: Optional[dict] = None,
               belief_context: Optional[dict] = None,
+              governance_cost: Optional[dict] = None,
               user_id: Optional[str] = None,
               source: str = "sdk"):
         """Meter one call. Returns a :class:`metering.MeterResult`.
@@ -195,6 +196,7 @@ class Meter:
                 "resource_constraints_hash": resource_constraints_hash,
                 "prebind": prebind,
                 "belief_context": belief_context,
+                "governance_cost": governance_cost,
             }
             event.update({key: value for key, value in optional_fields.items()
                           if value is not None})
@@ -232,6 +234,7 @@ class Meter:
             resource_constraints_hash=resource_constraints_hash,
             belief_context=belief_context,
             prebind=prebind,
+            governance_cost=governance_cost,
             user_id=user_id,
             source=source,
             pricing_overrides=self.cfg.get("pricing", {}).get("overrides"),
