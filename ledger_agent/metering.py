@@ -158,6 +158,7 @@ def record_usage(conn, org_id: str, provider: str,
                  correction_ref: Optional[str] = None,
                  agent_id: Optional[str] = None,
                  authority_manifest_ref: Optional[str] = None,
+                 authority_manifest_custody: Optional[str] = None,
                  scope_anchor: Optional[str] = None,
                  action_intent_hash: Optional[str] = None,
                  action_status: Optional[str] = None,
@@ -244,6 +245,17 @@ def record_usage(conn, org_id: str, provider: str,
     gov_c0 = time.process_time()
     agent_id = _optional_text(agent_id, "agent_id")
     authority_manifest_ref = _optional_text(authority_manifest_ref, "authority_manifest_ref")
+    if authority_manifest_custody is not None and (
+            not isinstance(authority_manifest_custody, str)
+            or not authority_manifest_custody.strip()
+            or len(authority_manifest_custody) > 128):
+        raise ValueError(
+            "authority_manifest_custody must be a non-empty string of at most "
+            "128 characters (1f916 custody taxonomy; unknown tiers are recorded "
+            "and rendered as labeled uncertainty)"
+        )
+    authority_manifest_custody = (
+        authority_manifest_custody.strip() if authority_manifest_custody else None)
     scope_anchor = _optional_text(scope_anchor, "scope_anchor")
     approval_ref = _optional_text(approval_ref, "approval_ref")
     if action_intent_hash is not None and (
@@ -576,6 +588,7 @@ def record_usage(conn, org_id: str, provider: str,
         "correction_ref": correction_ref,
         "agent_id": agent_id,
         "authority_manifest_ref": authority_manifest_ref,
+        "authority_manifest_custody": authority_manifest_custody,
         "scope_anchor": scope_anchor,
         "action_intent_hash": action_intent_hash,
         "action_status": action_status,
@@ -608,20 +621,21 @@ def record_usage(conn, org_id: str, provider: str,
         "INSERT INTO usage_events(id,org_id,workspace_id,provider,model,task_type,"
         "input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,cost_micros,"
         "baseline_micros,optimal_micros,external_ref,user_id,evidence_hashes,policy_version,"
-        "result_hash,human_review,correction_ref,agent_id,authority_manifest_ref,scope_anchor,"
+        "result_hash,human_review,correction_ref,agent_id,authority_manifest_ref,authority_manifest_custody,scope_anchor,"
         "action_intent_hash,action_status,approval_ref,context_render_schema,context_render_hash,"
         "served_memory_provenance_hash,action_receipt_hash,resource_constraints_version,resource_constraints_hash,prebind_json,prebind_hash,"
         "served_claim_json,served_claim_hash,evidence_status,runtime_manifest_json,runtime_manifest_hash,external_artifact_json,external_artifact_hash,"
         "belief_context_json,belief_context_hash,"
         "governance_cost_json,governance_cost_hash,"
         "estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
          int(reasoning_tokens), cost_micros, baseline_micros, optimal_micros,
          external_ref, user_id, evidence_hashes_json, policy_version, result_hash,
-         human_review, correction_ref, agent_id, authority_manifest_ref, scope_anchor,
+         human_review, correction_ref, agent_id, authority_manifest_ref,
+         authority_manifest_custody, scope_anchor,
          action_intent_hash, action_status, approval_ref, context_render_schema,
          context_render_hash, served_memory_provenance_hash, action_receipt_hash,
          resource_constraints_version, resource_constraints_hash,

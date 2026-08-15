@@ -32,6 +32,7 @@ import json
 from typing import Any, Mapping, Optional
 
 from . import db
+from .keys import CUSTODY_UNKNOWN, custody_for_key, is_known_custody
 from .prebind import (
     PREBIND_V2_SCHEMA,
     replay_prebind,
@@ -85,15 +86,22 @@ def _hmac_hex(key: bytes, payload: bytes) -> str:
     return _hmac.new(key, payload, hashlib.sha256).hexdigest()
 
 
-def resolve_key(key_registry: Optional[Mapping[str, bytes]],
+def resolve_key(key_registry: Optional[Mapping[str, Any]],
                 key_id: str, hmac_key: Optional[bytes]) -> Optional[bytes]:
     """Resolve declared signing key material, never the key value itself.
 
-    A ``key_registry`` maps declared ``key_id`` strings to key bytes; the
-    chain ``hmac_key`` stands in for the reserved ``"default"`` key id.
+    A ``key_registry`` maps declared ``key_id`` strings to key bytes (legacy
+    shape) or to labeled entries ``{key_material, custody, ...}`` (#241);
+    the chain ``hmac_key`` stands in for the reserved ``"default"`` key id.
     """
     if key_registry and key_id in key_registry:
-        return key_registry[key_id]
+        entry = key_registry[key_id]
+        if isinstance(entry, (bytes, bytearray)):
+            return bytes(entry)
+        if isinstance(entry, Mapping) and isinstance(
+                entry.get("key_material"), (bytes, bytearray)):
+            return bytes(entry["key_material"])
+        return None
     if key_id == DEFAULT_KEY_ID and hmac_key:
         return hmac_key
     return None
@@ -593,6 +601,23 @@ def verify_receipt_evidence(conn, org_id: str, receipt: Mapping[str, Any], *,
                         "reason": reasons.get(name, "skipped"),
                     })
     events = receipt.get("events") or []
+    # #241: custody disclosure — surface custody next to every signature
+    # result; missing/unknown custody is labeled uncertainty, never the
+    # strongest case.
+    signature = receipt.get("signature")
+    attestation = receipt.get("attestation")
+    sig_custody = custody_for_key(
+        key_registry, signature.get("key_id")) if isinstance(signature, Mapping) else None
+    att_custody = custody_for_key(
+        key_registry, attestation.get("key_id")) if isinstance(attestation, Mapping) else None
+    manifest_custody = None
+    for event in events:
+        auth = event.get("action_authorization") if isinstance(event, Mapping) else None
+        if isinstance(auth, Mapping) and auth.get("authority_manifest_custody") is not None:
+            manifest_custody = auth["authority_manifest_custody"]
+            break
+    if manifest_custody is None:
+        manifest_custody = CUSTODY_UNKNOWN
     return {
         "levels": levels,
         "level": level,
@@ -603,6 +628,12 @@ def verify_receipt_evidence(conn, org_id: str, receipt: Mapping[str, Any], *,
         "commit_receipt": commit_receipt(events),
         "inclusion_required": commit_receipt(events),
         "belief_context": _belief_context_evidence(receipt, key_registry, hmac_key),
+        "signature_custody": sig_custody,
+        "attestation_custody": att_custody,
+        "authority_manifest_custody": {
+            "value": manifest_custody,
+            "known": is_known_custody(manifest_custody),
+        },
     }
 
 

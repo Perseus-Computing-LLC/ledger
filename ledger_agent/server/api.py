@@ -169,6 +169,8 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                     **({"resource_constraints_version": row["resource_constraints_version"],
                         "resource_constraints_hash": row["resource_constraints_hash"]}
                        if row["resource_constraints_version"] is not None or row["resource_constraints_hash"] is not None else {}),
+                    **({"authority_manifest_custody": row["authority_manifest_custody"]}
+                       if row["authority_manifest_custody"] is not None else {}),
                 },
                 "resource_allocation": {
                     "input_tokens": row["input_tokens"],
