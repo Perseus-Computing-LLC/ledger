@@ -32,6 +32,7 @@ from .receipts import (
     validate_belief_context,
     build_governance_cost, validate_governance_cost,
     GOVERNANCE_COST_FIELDS,
+    validate_behavior_snapshot_pin,
     EVIDENCE_STATUS_VALUES,
 )
 
@@ -183,6 +184,7 @@ def record_usage(conn, org_id: str, provider: str,
                  external_artifact: Optional[dict] = None,
                  belief_context: Optional[dict] = None,
                  governance_cost: Optional[dict] = None,
+                 behavior_snapshot: Optional[dict] = None,
                  commit: bool = True) -> MeterResult:
     """Meter one LLM/agent call. Returns a :class:`MeterResult`.
 
@@ -370,6 +372,18 @@ def record_usage(conn, org_id: str, provider: str,
     if governance_cost is not None:
         governance_cost_json = json.dumps(governance_cost, sort_keys=True, separators=(",", ":"))
         governance_cost_hash = governance_cost.get("governance_digest")
+    # v21 (#238): behavior-snapshot receipt pin. Digest-only — the snapshot
+    # itself stays out-of-band and re-verifies via `ledger diff`.
+    behavior_snapshot_json: Optional[str] = None
+    behavior_snapshot_hash: Optional[str] = None
+    if behavior_snapshot is not None:
+        if not isinstance(behavior_snapshot, dict):
+            raise ValueError("behavior_snapshot must be a dict")
+        valid, errors = validate_behavior_snapshot_pin(behavior_snapshot)
+        if not valid:
+            raise ValueError("invalid behavior_snapshot: " + ", ".join(errors))
+        behavior_snapshot_json = json.dumps(behavior_snapshot, sort_keys=True, separators=(",", ":"))
+        behavior_snapshot_hash = behavior_snapshot.get("digest")
 
     # Fix #80: never let a negative token count through...
     # month-to-date tracked total (bypassing the free-tier quota) and corrupt
@@ -615,6 +629,9 @@ def record_usage(conn, org_id: str, provider: str,
         # v20 (#239)
         "governance_cost_json": governance_cost_json,
         "governance_cost_hash": governance_cost_hash,
+        # v21 (#238)
+        "behavior_snapshot_json": behavior_snapshot_json,
+        "behavior_snapshot_hash": behavior_snapshot_hash,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
@@ -627,8 +644,9 @@ def record_usage(conn, org_id: str, provider: str,
         "served_claim_json,served_claim_hash,evidence_status,runtime_manifest_json,runtime_manifest_hash,external_artifact_json,external_artifact_hash,"
         "belief_context_json,belief_context_hash,"
         "governance_cost_json,governance_cost_hash,"
+        "behavior_snapshot_json,behavior_snapshot_hash,"
         "estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
@@ -646,6 +664,7 @@ def record_usage(conn, org_id: str, provider: str,
          external_artifact_json, external_artifact_hash,
          belief_context_json, belief_context_hash,
          governance_cost_json, governance_cost_hash,
+         behavior_snapshot_json, behavior_snapshot_hash,
          int(estimated), source, ts, prev_hash, row_hash),
     )
 

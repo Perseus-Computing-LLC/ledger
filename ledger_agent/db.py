@@ -174,6 +174,9 @@ _CHAIN_FIELDS_OPTIONAL = (
     # v22 (#241): custody disclosure for the authority manifest. Trailing and
     # optional to preserve the canonical bytes of historical rows.
     "authority_manifest_custody",
+    # v21 (#238): behavior-snapshot receipt pin. Trailing and optional.
+    "behavior_snapshot_json",
+    "behavior_snapshot_hash",
 )
 
 
@@ -635,6 +638,11 @@ CREATE TABLE IF NOT EXISTS usage_events (
     -- pre-v20 chain canonical form are preserved.
     governance_cost_json TEXT,
     governance_cost_hash TEXT,
+    -- v21 (#238): behavior-snapshot receipt pin — the sha256 of a canonical
+    -- agent-run snapshot, chain-covered at ingest and re-verifiable with
+    -- `ledger diff --require-target-digest`.
+    behavior_snapshot_json TEXT,
+    behavior_snapshot_hash TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -993,6 +1001,10 @@ def _migrate_add_columns(conn) -> None:
         # and their historical hash canonical form.
         ("usage_events", "governance_cost_json", "TEXT"),
         ("usage_events", "governance_cost_hash", "TEXT"),
+        # v21 (#238): behavior-snapshot receipt pin. Nullable preserves
+        # existing rows and their historical hash canonical form.
+        ("usage_events", "behavior_snapshot_json", "TEXT"),
+        ("usage_events", "behavior_snapshot_hash", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
