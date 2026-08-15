@@ -124,6 +124,7 @@ class Meter:
               resource_constraints_version: Optional[str] = None,
               resource_constraints_hash: Optional[str] = None,
               prebind: Optional[dict] = None,
+              belief_context: Optional[dict] = None,
               user_id: Optional[str] = None,
               source: str = "sdk"):
         """Meter one call. Returns a :class:`metering.MeterResult`.
@@ -193,6 +194,7 @@ class Meter:
                 "resource_constraints_version": resource_constraints_version,
                 "resource_constraints_hash": resource_constraints_hash,
                 "prebind": prebind,
+                "belief_context": belief_context,
             }
             event.update({key: value for key, value in optional_fields.items()
                           if value is not None})
@@ -228,6 +230,7 @@ class Meter:
             action_receipt_hash=action_receipt_hash,
             resource_constraints_version=resource_constraints_version,
             resource_constraints_hash=resource_constraints_hash,
+            belief_context=belief_context,
             prebind=prebind,
             user_id=user_id,
             source=source,

@@ -29,6 +29,7 @@ from .prebind import validate_prebind
 from .receipts import (
     build_served_claim, validate_served_claim,
     validate_external_artifact_binding, validate_runtime_manifest,
+    validate_belief_context,
     EVIDENCE_STATUS_VALUES,
 )
 
@@ -177,6 +178,7 @@ def record_usage(conn, org_id: str, provider: str,
                  evidence_status: Optional[str] = None,
                  runtime_manifest: Optional[dict] = None,
                  external_artifact: Optional[dict] = None,
+                 belief_context: Optional[dict] = None,
                  commit: bool = True) -> MeterResult:
     """Meter one LLM/agent call. Returns a :class:`MeterResult`.
 
@@ -315,6 +317,19 @@ def record_usage(conn, org_id: str, provider: str,
             raise ValueError("invalid external_artifact: " + ", ".join(errors))
         external_artifact_json = json.dumps(external_artifact, sort_keys=True, separators=(",", ":"))
         external_artifact_hash = external_artifact.get("binding_digest")
+
+    # v19 (#237): belief-context evidence block — hash-only decision-time
+    # belief claims. Optional and additive; existing events stay byte-identical.
+    belief_context_json: Optional[str] = None
+    belief_context_hash: Optional[str] = None
+    if belief_context is not None:
+        if not isinstance(belief_context, dict):
+            raise ValueError("belief_context must be a dict")
+        valid, errors = validate_belief_context(belief_context)
+        if not valid:
+            raise ValueError("invalid belief_context: " + ", ".join(errors))
+        belief_context_json = json.dumps(belief_context, sort_keys=True, separators=(",", ":"))
+        belief_context_hash = belief_context.get("belief_digest")
 
     # Fix #80: never let a negative token count through...
     # month-to-date tracked total (bypassing the free-tier quota) and corrupt
@@ -553,6 +568,9 @@ def record_usage(conn, org_id: str, provider: str,
         "runtime_manifest_hash": runtime_manifest_hash,
         "external_artifact_json": external_artifact_json,
         "external_artifact_hash": external_artifact_hash,
+        # v19 (#237)
+        "belief_context_json": belief_context_json,
+        "belief_context_hash": belief_context_hash,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
@@ -563,8 +581,9 @@ def record_usage(conn, org_id: str, provider: str,
         "action_intent_hash,action_status,approval_ref,context_render_schema,context_render_hash,"
         "served_memory_provenance_hash,action_receipt_hash,resource_constraints_version,resource_constraints_hash,prebind_json,prebind_hash,"
         "served_claim_json,served_claim_hash,evidence_status,runtime_manifest_json,runtime_manifest_hash,external_artifact_json,external_artifact_hash,"
+        "belief_context_json,belief_context_hash,"
         "estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
@@ -579,6 +598,7 @@ def record_usage(conn, org_id: str, provider: str,
          served_claim_json, served_claim_hash, evidence_status,
          runtime_manifest_json, runtime_manifest_hash,
          external_artifact_json, external_artifact_hash,
+         belief_context_json, belief_context_hash,
          int(estimated), source, ts, prev_hash, row_hash),
     )
 

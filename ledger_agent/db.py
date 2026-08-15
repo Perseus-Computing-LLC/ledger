@@ -163,6 +163,10 @@ _CHAIN_FIELDS_OPTIONAL = (
     "runtime_manifest_hash",
     "external_artifact_json",
     "external_artifact_hash",
+    # v19 (#237): belief-context evidence. Trailing and optional to preserve
+    # the canonical bytes of historical rows.
+    "belief_context_json",
+    "belief_context_hash",
 )
 
 
@@ -609,6 +613,11 @@ CREATE TABLE IF NOT EXISTS usage_events (
     resource_constraints_hash TEXT,
     prebind_json TEXT,
     prebind_hash TEXT,
+    -- v19 (#237): optional belief-context evidence block per event. Hash-only
+    -- decision-time belief claims; nullable so existing rows and their
+    -- pre-v19 chain canonical form are preserved.
+    belief_context_json TEXT,
+    belief_context_hash TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -956,6 +965,11 @@ def _migrate_add_columns(conn) -> None:
         ("usage_events", "runtime_manifest_hash", "TEXT"),
         ("usage_events", "external_artifact_json", "TEXT"),
         ("usage_events", "external_artifact_hash", "TEXT"),
+        # v19 (#237): belief-context evidence. Nullable preserves existing rows
+        # and their historical hash canonical form; only supplied values
+        # extend the chain.
+        ("usage_events", "belief_context_json", "TEXT"),
+        ("usage_events", "belief_context_hash", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)

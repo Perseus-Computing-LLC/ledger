@@ -837,6 +837,8 @@ class Handler(BaseHTTPRequestHandler):
                 valid, errors = validate_prebind(ev["prebind"])
                 if not valid:
                     return self._json(400, {"error": "invalid prebind", "fields": errors})
+            if ev.get("belief_context") is not None and not isinstance(ev["belief_context"], dict):
+                return self._json(400, {"error": "belief_context must be an object"})
 
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
@@ -901,6 +903,7 @@ class Handler(BaseHTTPRequestHandler):
                             resource_constraints_version=ev.get("resource_constraints_version"),
                             resource_constraints_hash=ev.get("resource_constraints_hash"),
                             prebind=ev.get("prebind"),
+                            belief_context=ev.get("belief_context"),
                             user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
