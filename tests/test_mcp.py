@@ -147,6 +147,62 @@ def test_record_query_verify_receipt_roundtrip(tmp_path, monkeypatch):
     assert claim.get("claim_digest")
 
 
+
+
+def test_record_new_evidence_fields_and_schema_parity(tmp_path, monkeypatch):
+    """v19-v22 fields flow through ledger_record and stay chain-covered."""
+    from ledger_agent import db
+    from ledger_agent.receipts import (
+        build_belief_context, build_governance_cost, build_behavior_snapshot_pin,
+    )
+    meter = _meter(tmp_path, monkeypatch)
+    belief = build_belief_context(
+        believed=[{"statement": "fixture is reachable", "weight": 0.9}],
+        confidence=0.8, source="agent")
+    gov = build_governance_cost(wall_ms=12, cpu_ms=4, storage_bytes=2048)
+    snap = build_behavior_snapshot_pin(digest="a" * 64, cases=2, source_ref="ci/1")
+    text, _ = _call("ledger_record", {
+        "provider": "openai", "model": "gpt-fixture",
+        "task_type": "deploy", "external_ref": "task-new-fields",
+        "input_tokens": 10, "output_tokens": 5, "cost_usd": 0.1,
+        "agent_id": "agent-1", "authority_manifest_ref": "manifest:auth-x",
+        "authority_manifest_custody": "self_held",
+        "scope_anchor": "workspace:analysis",
+        "action_intent_hash": "c" * 64, "action_status": "executed",
+        "belief_context": belief,
+        "governance_cost": gov,
+        "behavior_snapshot": snap,
+    }, meter)
+    assert text["recorded"] is True
+
+    conn = db.connect(str(tmp_path / "ledger.db"))
+    row = conn.execute(
+        "SELECT belief_context_json, belief_context_hash, governance_cost_json, "
+        "governance_cost_hash, behavior_snapshot_json, behavior_snapshot_hash, "
+        "authority_manifest_custody, row_hash FROM usage_events "
+        "WHERE external_ref=?", ("task-new-fields",)).fetchone()
+    conn.close()
+    assert row is not None
+    assert json.loads(row["belief_context_json"])["belief_digest"] == row["belief_context_hash"]
+    assert json.loads(row["governance_cost_json"])["governance_digest"] == row["governance_cost_hash"]
+    assert json.loads(row["behavior_snapshot_json"])["digest"] == row["behavior_snapshot_hash"]
+    assert row["authority_manifest_custody"] == "self_held"
+    assert row["row_hash"]  # all four are chain-covered
+
+    # ledger_record schema advertises the new optional fields
+    record = next(t for t in mcp_server.TOOLS if t["name"] == "ledger_record")
+    props = record["inputSchema"]["properties"]
+    assert set(props) >= {"belief_context", "governance_cost",
+                          "behavior_snapshot", "authority_manifest_custody"}
+    # server.json stays in exact parity with the runtime surface (registry gate)
+    import json as _json
+    from pathlib import Path
+    server = _json.loads((Path(__file__).resolve().parents[1] / "server.json")
+                         .read_text(encoding="utf-8"))
+    published = {t["name"]: t.get("inputSchema") for t in server["tools"]}
+    runtime = {t["name"]: t["inputSchema"] for t in mcp_server.TOOLS}
+    assert published["ledger_record"] == runtime["ledger_record"]
+
 def test_record_requires_provider(tmp_path, monkeypatch):
     meter = _meter(tmp_path, monkeypatch)
     text, result = _call("ledger_record", {"model": "x"}, meter)

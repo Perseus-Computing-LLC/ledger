@@ -61,7 +61,7 @@ from typing import Optional
 # 18 = adds stage-aware action receipts and evidence bindings (#219–#224):
 #     served_claim_json/hash (#221), evidence_status (#222),
 #     runtime_manifest_json/hash (#223), external_artifact_json/hash (#224).
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 22
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).

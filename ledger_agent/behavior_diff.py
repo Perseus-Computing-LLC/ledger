@@ -246,7 +246,7 @@ def diff_snapshots(baseline: dict[str, Any],
     # Structured-but-opaque transcripts: any change is a regression unless
     # the baseline is an error shape and the target carries an output.
     if baseline["canonical"] == target["canonical"]:
-        return _report([], [], 0, 0, [], False)
+        return _report([], [], 0, [], False)
     return _diff_whole_object(
         json.loads(baseline["canonical"]) if baseline["kind"] != "text" else baseline["canonical"],
         json.loads(target["canonical"]) if target["kind"] != "text" else target["canonical"],
@@ -275,7 +275,7 @@ def _diff_case_maps(base: dict[str, Any], target: dict[str, Any]) -> dict[str, A
         if json.dumps(base[cid], sort_keys=True, separators=(",", ":"))
         == json.dumps(target[cid], sort_keys=True, separators=(",", ":"))
     )
-    return _report(regressions, additions, unchanged, len(improvements),
+    return _report(regressions, additions, unchanged,
                    improvements, bool(improvements) and not regressions)
 
 
@@ -301,7 +301,7 @@ def _diff_text(base_lines: list[str], target_lines: list[str]) -> dict[str, Any]
                                 "count": bcount - tcount})
     unchanged = sum(min(base_counts.get(line, 0), target_counts.get(line, 0))
                     for line in set(base_counts) | set(target_counts))
-    return _report(regressions, additions, unchanged, 0, [], False)
+    return _report(regressions, additions, unchanged, [], False)
 
 
 def _diff_whole_object(base: Any, target: Any) -> dict[str, Any]:
@@ -310,12 +310,12 @@ def _diff_whole_object(base: Any, target: Any) -> dict[str, Any]:
     )
     improved = base_err and _has_final_output(target)
     if improved:
-        return _report([], [], 0, 1, ["(whole transcript)"], True)
+        return _report([], [], 0, ["(whole transcript)"], True)
     return _report([{"change": "changed", "scope": "(whole transcript)"}],
                    [], 0, 0, [], False)
 
 
-def _report(regressions, additions, unchanged, improved_count, improved_ids,
+def _report(regressions, additions, unchanged, improved_ids,
             improvement_only: bool) -> dict[str, Any]:
     verdict = "regression" if regressions else (
         "improvement_only" if improvement_only else "clean"
@@ -327,7 +327,6 @@ def _report(regressions, additions, unchanged, improved_count, improved_ids,
         "additions": additions,
         "improvements": improved_ids,
         "unchanged_cases": unchanged,
-        "improved_count": improved_count,
     }
 
 

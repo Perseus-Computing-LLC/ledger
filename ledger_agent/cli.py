@@ -811,7 +811,24 @@ def cmd_witness_verify(args):
         head=head, copies=copies, pinned_keys=pinned,
         asked=bool(args.asked), prior_copies=copies, chain_ok=chain_ok,
     )
-    print(json.dumps(result, indent=2, sort_keys=True))
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        sys.exit(result["exit_code"])
+    marks = {"witnessed": "✓", "consistent-unwitnessed": "·",
+             "witness-unusable": "?", "diverged": "✗", "asked-and-empty": "∅"}
+    print(f"\n  witness verdict: {marks.get(result['verdict'], '?')} {result['verdict']}")
+    print(f"    reason: {result['reason']}")
+    head = result.get("head") or {}
+    print(f"    head: {head.get('org_id')} {head.get('head_hash', '')[:16]}... "
+          f"(through_rowid {head.get('through_rowid')})")
+    if result.get("refusals"):
+        for r in result["refusals"]:
+            print(f"    ✗ refusal from {r.get('witness_id')}: {r.get('reason')}")
+    for w in result.get("witnesses") or []:
+        print(f"    - {w.get('witness_id')}: {w.get('status')} ({w.get('detail')})")
+    print("    what this does NOT prove:")
+    for line in result.get("does_not_prove") or []:
+        print(f"      - {line}")
     sys.exit(result["exit_code"])
 
 

@@ -9,7 +9,7 @@ schema — the database half of the frozen contract whose API half is
 
 `ledger_agent.db.SCHEMA_VERSION` is an integer bumped on every schema change and
 stamped into the `meta` table key `schema_version` on `init_schema()`. The
-runtime currently declares **`SCHEMA_VERSION=18`**. Read the stored value with
+runtime currently declares **`SCHEMA_VERSION=22`**. Read the stored value with
 `db.get_schema_version(conn)`; a fresh database is stamped with the runtime
 value after all additive migrations have run.
 
@@ -29,6 +29,11 @@ value after all additive migrations have run.
 | 15 | Adds nullable hash-covered decision evidence: `evidence_hashes`, `policy_version`, `result_hash`, `human_review`, and `correction_ref`. |
 | 16 | Adds nullable hash-covered Authorized Action Receipt provenance: `agent_id`, `authority_manifest_ref`, `scope_anchor`, `action_intent_hash`, `action_status`, and `approval_ref`. |
 | 17 | Adds nullable hash-covered context/render/resource/prebind commitments: `context_render_schema`, `context_render_hash`, `served_memory_provenance_hash`, `action_receipt_hash`, `resource_constraints_version`, `resource_constraints_hash`, `prebind_json`, and `prebind_hash`; also adds `reconciliation_note` for union-recovered usage records. |
+| 18 | Adds nullable stage-aware receipt and evidence-binding fields (#219–#224): `served_claim_json`/`served_claim_hash`, `evidence_status`, `runtime_manifest_json`/`runtime_manifest_hash`, and `external_artifact_json`/`external_artifact_hash`. |
+| 19 | Adds nullable hash-covered belief-context evidence (#237): `belief_context_json`/`belief_context_hash` — decision-time `believed`/`assumed`/`ignored` claims, HMAC-covered in receipts, reported at the attested evidence level when present. |
+| 20 | Adds nullable hash-covered governance self-cost (#239): `governance_cost_json`/`governance_cost_hash` — internal telemetry (wall/cpu/mem/storage/tokens/model_calls/approval waits), excluded from customer-facing usage and billing totals. |
+| 21 | Adds nullable hash-covered behavior-snapshot receipt pin (#238): `behavior_snapshot_json`/`behavior_snapshot_hash` — the sha256 of a canonical agent-run snapshot, re-verifiable with `ledger diff --require-target-digest`. |
+| 22 | Adds nullable hash-covered custody disclosure for the referenced authority manifest (#241): `authority_manifest_custody` — 1f916 taxonomy label; missing/unknown custody renders as labeled uncertainty in verification output. |
 
 ## The contract (within the 1.0 major line)
 

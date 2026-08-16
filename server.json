@@ -157,6 +157,22 @@
      },
      "approval_ref": {
       "type": "string"
+     },
+     "belief_context": {
+      "type": "object",
+      "description": "Decision-time belief-context evidence block (believed/assumed/ignored) — hash-only claims, HMAC-covered in the receipt (#237)."
+     },
+     "governance_cost": {
+      "type": "object",
+      "description": "Governance self-cost block (wall_ms/cpu_ms/mem_bytes/storage_bytes/tokens/model_calls/approval_waits_ms); internal telemetry excluded from customer-facing totals (#239)."
+     },
+     "behavior_snapshot": {
+      "type": "object",
+      "description": "Behavior-snapshot receipt pin carrying the sha256 of a canonical agent-run snapshot (#238)."
+     },
+     "authority_manifest_custody": {
+      "type": "string",
+      "description": "Custody disclosure label for the referenced authority manifest (1f916 taxonomy); unknown custody renders as labeled uncertainty (#241)."
      }
     },
     "required": [

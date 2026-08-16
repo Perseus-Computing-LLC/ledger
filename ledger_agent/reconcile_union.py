@@ -46,6 +46,18 @@ _RECOVER_COLUMNS = [
     "context_render_hash", "served_memory_provenance_hash",
     "action_receipt_hash", "resource_constraints_version",
     "resource_constraints_hash", "prebind_json", "prebind_hash",
+    # v18 (#219–#224): stage-aware receipts and evidence bindings.
+    "served_claim_json", "served_claim_hash", "evidence_status",
+    "runtime_manifest_json", "runtime_manifest_hash",
+    "external_artifact_json", "external_artifact_hash",
+    # v19 (#237): belief-context evidence.
+    "belief_context_json", "belief_context_hash",
+    # v20 (#239): governance self-cost.
+    "governance_cost_json", "governance_cost_hash",
+    # v21 (#238): behavior-snapshot receipt pin.
+    "behavior_snapshot_json", "behavior_snapshot_hash",
+    # v22 (#241): custody disclosure for the authority manifest.
+    "authority_manifest_custody",
     "estimated", "source", "ts",
 ]
 

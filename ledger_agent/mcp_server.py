@@ -126,6 +126,34 @@ def _tools() -> list[dict[str, Any]]:
                                            "approved", "denied", "expired",
                                            "executed", "failed", "cancelled"]},
                 "approval_ref": {"type": "string"},
+                "belief_context": {
+                    "type": "object",
+                    "description": "Decision-time belief-context evidence "
+                                   "block (believed/assumed/ignored) — "
+                                   "hash-only claims, HMAC-covered in the "
+                                   "receipt (#237).",
+                },
+                "governance_cost": {
+                    "type": "object",
+                    "description": "Governance self-cost block (wall_ms/"
+                                   "cpu_ms/mem_bytes/storage_bytes/tokens/"
+                                   "model_calls/approval_waits_ms); internal "
+                                   "telemetry excluded from customer-facing "
+                                   "totals (#239).",
+                },
+                "behavior_snapshot": {
+                    "type": "object",
+                    "description": "Behavior-snapshot receipt pin carrying "
+                                   "the sha256 of a canonical agent-run "
+                                   "snapshot (#238).",
+                },
+                "authority_manifest_custody": {
+                    "type": "string",
+                    "description": "Custody disclosure label for the "
+                                   "referenced authority manifest (1f916 "
+                                   "taxonomy); unknown custody renders as "
+                                   "labeled uncertainty (#241).",
+                },
             },
             required=["provider"],
         ),
@@ -232,6 +260,10 @@ def _handle_record(meter: client.Meter, args: dict) -> dict:
         action_intent_hash=args.get("action_intent_hash"),
         action_status=args.get("action_status"),
         approval_ref=args.get("approval_ref"),
+        belief_context=args.get("belief_context"),
+        governance_cost=args.get("governance_cost"),
+        behavior_snapshot=args.get("behavior_snapshot"),
+        authority_manifest_custody=args.get("authority_manifest_custody"),
         source="mcp",
     )
     return asdict(res)
