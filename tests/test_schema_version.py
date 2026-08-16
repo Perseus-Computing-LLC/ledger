@@ -26,6 +26,11 @@ _DOCUMENTED_MIGRATIONS = {
     "15": {"evidence_hashes", "policy_version", "result_hash", "human_review", "correction_ref"},
     "16": {"agent_id", "authority_manifest_ref", "scope_anchor", "action_intent_hash", "action_status", "approval_ref"},
     "17": {"context_render_schema", "context_render_hash", "served_memory_provenance_hash", "action_receipt_hash", "resource_constraints_version", "resource_constraints_hash", "prebind_json", "prebind_hash", "reconciliation_note"},
+    "18": {"served_claim_json", "served_claim_hash", "evidence_status", "runtime_manifest_json", "runtime_manifest_hash", "external_artifact_json", "external_artifact_hash"},
+    "19": {"belief_context_json", "belief_context_hash"},
+    "20": {"governance_cost_json", "governance_cost_hash"},
+    "21": {"behavior_snapshot_json", "behavior_snapshot_hash"},
+    "22": {"authority_manifest_custody"},
 }
 
 
@@ -71,12 +76,12 @@ class TestSchemaVersion(unittest.TestCase):
             db.init_schema(conn)
         conn.close()
 
-    def test_schema_docs_match_runtime_v17_migration_contract(self):
+    def test_schema_docs_match_runtime_migration_contract(self):
         docs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs", "schema.md")
         with open(docs_path, encoding="utf-8") as handle:
             docs = handle.read()
-        self.assertEqual(db.SCHEMA_VERSION, 18)
-        self.assertIn("SCHEMA_VERSION=18", docs)
+        self.assertEqual(db.SCHEMA_VERSION, 22)
+        self.assertIn("SCHEMA_VERSION=22", docs)
 
         table_rows = {}
         for line in docs.splitlines():

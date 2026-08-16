@@ -88,6 +88,24 @@ evidence field (`context_render_hash`, `served_memory_provenance_hash`,
 without a schema (the schema names the trace format the digest was computed
 over; it is metadata, not content).
 
+`ledger_record` also accepts the receipt-side evidence blocks (#237–#241):
+
+- `belief_context` — decision-time `believed`/`assumed`/`ignored` claims with
+  optional weights and sha256 evidence refs; hash-bound and HMAC-covered in
+  receipts, reported at the attested evidence level when present.
+- `governance_cost` — the governance overhead this action imposed
+  (`wall_ms`, `cpu_ms`, `mem_bytes`, `storage_bytes`, `tokens`,
+  `model_calls`, `approval_waits_ms`); internal telemetry, never merged into
+  customer-facing usage or billing totals.
+- `behavior_snapshot` — a pin carrying the sha256 of a canonical agent-run
+  snapshot; re-verify against the retained snapshot with
+  `ledger diff --require-target-digest sha256:<digest> <snapshot>`.
+- `authority_manifest_custody` — the custody disclosure label (1f916
+  taxonomy: `self_held`, `platform_held`, `household_held`,
+  `threshold(k,n)`, `kms`, `hsm`, `session_delegated`) for the referenced
+  authority manifest; missing or unknown custody is rendered as labeled
+  uncertainty in verification output, never as the strongest case.
+
 ## Registry
 
 The server is published on the official Model Context Protocol registry as

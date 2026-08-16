@@ -361,6 +361,14 @@ components:
         resource_constraints_hash: { type: string, nullable: true, pattern: '^[0-9a-fA-F]{64}$', description: "SHA-256 digest of the resource-constraints projection; raw constraints are never stored." }
         prebind:
           $ref: '#/components/schemas/Prebind'
+        served_claim: { type: object, nullable: true, description: "Hash-only served-claim evidence object binding a source reference to this event (#221)." }
+        evidence_status: { type: string, nullable: true, enum: [fresh, partial, timeout, unavailable, empty, stale, abstain, review], description: "Degraded-evidence state recorded with the event (#222)." }
+        runtime_manifest: { type: object, nullable: true, description: "Hash-bound runtime manifest for the adapter that produced this event (#223)." }
+        external_artifact_binding: { type: object, nullable: true, description: "Hash-bound external-artifact prior-action/idempotency binding (#224)." }
+        belief_context: { type: object, nullable: true, description: "Decision-time belief-context evidence block (believed/assumed/ignored); hash-bound and HMAC-covered in receipts (#237)." }
+        governance_cost: { type: object, nullable: true, description: "Governance self-cost block (wall_ms/cpu_ms/mem_bytes/storage_bytes/tokens/model_calls/approval_waits_ms); internal telemetry excluded from customer-facing totals (#239)." }
+        behavior_snapshot: { type: object, nullable: true, description: "Behavior-snapshot receipt pin carrying the sha256 of a canonical agent-run snapshot (#238)." }
+        authority_manifest_custody: { type: string, nullable: true, description: "Custody disclosure label for the referenced authority manifest (1f916 taxonomy); unknown custody renders as labeled uncertainty (#241)." }
         source: { type: string, default: api }
     Prebind:
       type: object

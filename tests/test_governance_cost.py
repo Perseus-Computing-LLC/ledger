@@ -8,6 +8,8 @@ Success criteria:
 """
 import time
 
+import pytest
+
 from ledger_agent import db, metering
 from ledger_agent.receipts import (
     GOVERNANCE_COST_FIELDS,
@@ -71,7 +73,6 @@ def test_validate_rejects_negative_and_unknown_fields():
     assert not ok
     assert "governance_mystery_field_unknown" in errors
 
-    import pytest
     with pytest.raises(ValueError):
         build_governance_cost(wall_ms=-1)
     with pytest.raises(ValueError):
