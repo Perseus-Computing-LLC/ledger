@@ -52,3 +52,20 @@ ledger serve --host 0.0.0.0            # -> exits with a "refusing to serve" err
 LEDGER_AUTH_ENABLED=1 LEDGER_GOOGLE_CLIENT_ID=... LEDGER_GOOGLE_CLIENT_SECRET=... \
 LEDGER_BASE_URL=https://ledger.internal ledger serve --host 127.0.0.1
 ```
+
+## Optional server exception capture
+
+The HTTP server (`ledger_agent/server/app.py`) can feed unhandled request
+exceptions to an external backend without adding any dependency by default:
+
+| Env var | Behavior |
+|---|---|
+| `LEDGER_SENTRY_DSN` | Lazily initialises Sentry on first capture (`pip install ledger-agent[sentry]` required). |
+| `LEDGER_ERROR_WEBHOOK` | POSTs a compact JSON record per capture. The payload is ntfy-compatible (`title`/`message`/`priority`), so a self-hosted ntfy topic works with no extra service. |
+
+Captures are throttled per-signature (120 s cooldown) and capped at 10 per
+minute process-wide, so an error storm cannot become an alert storm. Both
+backends can be active at once; with neither set the hook is a complete no-op.
+Handler-thread failures that escape the request path are captured via
+`threading.excepthook` for the duration of `serve()`. Library errors outside
+the server keep surfacing to the embedding application as before.

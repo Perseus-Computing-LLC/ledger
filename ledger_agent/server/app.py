@@ -23,7 +23,7 @@ from .. import __version__, bridge, config as cfgmod, db, pricing
 from ..billing import StripeClient, BillingError, handle_webhook_event
 from ..utils import strict_int
 from ..prebind import validate_prebind
-from . import api, views, auth as authmod
+from . import api, views, auth as authmod, errorhook
 
 # Paths reachable without a session when auth is enabled.
 _PUBLIC_PATHS = {"/", "/index.html",  # public landing for logged-out visitors
@@ -159,6 +159,20 @@ class Handler(BaseHTTPRequestHandler):
     @property
     def ctx(self) -> _Ctx:
         return self.server.ctx
+
+    def handle_one_request(self):
+        """Capture any unhandled request-path exception before re-raising.
+
+        The stdlib server then logs it exactly as before; the capture only
+        adds an opt-in delivery path (Sentry DSN / error webhook). See
+        ledger_agent/server/errorhook.py.
+        """
+        try:
+            super().handle_one_request()
+        except Exception as exc:
+            errorhook.capture_exception(
+                exc, context=f"{self.command} {self.path}")
+            raise
 
     def _conn(self):
         return db.connect(self.ctx.db_path)
@@ -1323,6 +1337,18 @@ def serve(host=None, port=None, db_path=None, demo=False, cfg=None,
             webbrowser.open(url)
         except Exception:
             pass
+    # Capture failures on handler threads that escape the request path
+    # (e.g. connection teardown); the previous hook still runs so stdlib
+    # stderr logging is unchanged.
+    _prev_excepthook = threading.excepthook
+
+    def _capture_hook(args):
+        errorhook.capture_exception(
+            args.exc_value or RuntimeError("unhandled thread failure"),
+            context=f"thread {args.thread.name if args.thread else '?'}")
+        _prev_excepthook(args)
+
+    threading.excepthook = _capture_hook
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

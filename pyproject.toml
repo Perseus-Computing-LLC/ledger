@@ -39,6 +39,8 @@ dependencies = [
 # (reproducibility; deploy a hash-locked artifact for production — see
 # docs/deploy-hardening.md).
 stripe = ["stripe>=7.0,<14"]
+# Optional exception capture for the HTTP server (ledger_agent/server/errorhook.py).
+sentry = ["sentry-sdk>=2.0,<3"]
 pdf = ["reportlab>=4.0,<5"]
 # #109: provider cost fetchers for `ledger close`. Only AWS Bedrock (Cost
 # Explorer) needs an SDK; OpenAI/Anthropic use stdlib urllib, no dependency.
@@ -47,8 +49,8 @@ fetchers = ["boto3>=1.28"]
 # accuracy-gated savings metering. Only needed to run tests/examples that pair
 # behavioral verdicts with metering; the bridge itself is dependency-free.
 invarium = ["invarium>=0.3"]
-all = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "invarium>=0.3; python_version >= '3.10'"]
-dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "pytest>=7.0,<10", "invarium>=0.3; python_version >= '3.10'"]
+all = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "sentry-sdk>=2.0,<3", "invarium>=0.3; python_version >= '3.10'"]
+dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "pytest>=7.0,<10", "sentry-sdk>=2.0,<3", "invarium>=0.3; python_version >= '3.10'"]
 
 [project.urls]
 Homepage = "https://perseus.observer/ledger/"
