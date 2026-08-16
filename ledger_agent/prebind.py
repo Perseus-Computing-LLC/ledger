@@ -22,7 +22,7 @@ _REQUIRED = (
     "evidence_hashes", "selected_context_digest", "resource_ref", "boundary_outcome",
     "non_effective_result", "replay_id",
 )
-_V2_FIELDS = {"stage_trace", "context_hash", "policy_hash", "uncertainty"}
+_V2_FIELDS = {"stage_trace", "context_hash", "policy_hash", "uncertainty", "request_hash", "nonce", "epoch"}
 STAGE_VALUES = {"proposed", "approved", "leased", "executing", "completed", "failed", "cancelled", "interrupted", "recovered"}
 
 
@@ -32,6 +32,17 @@ def _sha(value: Any) -> str:
 
 def _is_hash(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value.lower())
+
+
+def _optional_request_fields(request_hash: str | None, nonce: str | None,
+                            epoch: int | str | None) -> tuple[str | None, str | None, int | str | None]:
+    if request_hash is not None and not _is_hash(request_hash):
+        raise ValueError("request_hash must be a 64-character SHA-256 hex digest")
+    if nonce is not None and (not isinstance(nonce, str) or not nonce.strip()):
+        raise ValueError("nonce must be a non-empty string")
+    if epoch is not None and (isinstance(epoch, bool) or not isinstance(epoch, (int, str))):
+        raise ValueError("epoch must be an integer or string")
+    return (request_hash.lower() if request_hash is not None else None, nonce, epoch)
 
 
 def _scan(value: Any, errors: list[str]) -> None:
@@ -101,7 +112,12 @@ def validate_prebind(block: Mapping[str, Any]) -> tuple[bool, list[str]]:
     if block.get("boundary_outcome") != "allow" and block.get("non_effective_result") == "executed":
         errors.append("outcome_result_mismatch")
     stage_refs = block.get("stage_refs")
-    if not isinstance(stage_refs, list) or any(not isinstance(value, str) or not value for value in stage_refs):
+    # The receipts.py v2 builder predates stage_refs and intentionally omits
+    # it; when present, retain the strict validation used by prebind.py.
+    if stage_refs is not None and (
+        not isinstance(stage_refs, list)
+        or any(not isinstance(value, str) or not value for value in stage_refs)
+    ):
         errors.append("stage_refs")
 
     # v2-specific validation (#219, #220)
@@ -132,6 +148,15 @@ def validate_prebind(block: Mapping[str, Any]) -> tuple[bool, list[str]]:
         uncertainty = block.get("uncertainty")
         if uncertainty is not None and not isinstance(uncertainty, str):
             errors.append("uncertainty_not_string")
+        request_hash = block.get("request_hash")
+        if request_hash is not None and not _is_hash(request_hash):
+            errors.append("prebind_request_hash")
+        nonce = block.get("nonce")
+        if nonce is not None and (not isinstance(nonce, str) or not nonce.strip()):
+            errors.append("prebind_nonce")
+        epoch = block.get("epoch")
+        if epoch is not None and (isinstance(epoch, bool) or not isinstance(epoch, (int, str))):
+            errors.append("prebind_epoch")
 
     supplied = block.get("prebind_hash")
     if not _is_hash(supplied) or supplied != prebind_digest(block):
@@ -196,8 +221,12 @@ def build_prebind_v2(*, attempted_action: str, actor_ref: str, authority_ref: st
                      stage_trace: dict[str, Any] | None = None,
                      context_hash: str | None = None,
                      policy_hash: str | None = None,
-                     uncertainty: str | None = None) -> dict[str, Any]:
+                     uncertainty: str | None = None,
+                     request_hash: str | None = None,
+                     nonce: str | None = None,
+                     epoch: int | str | None = None) -> dict[str, Any]:
     """Build a v2 prebind with stage-aware fields and context/policy hashes."""
+    request_hash, nonce, epoch = _optional_request_fields(request_hash, nonce, epoch)
     block: dict[str, Any] = {
         "schema_version": PREBIND_V2_SCHEMA,
         "attempted_action": attempted_action,
@@ -217,6 +246,9 @@ def build_prebind_v2(*, attempted_action: str, actor_ref: str, authority_ref: st
         "context_hash": context_hash,
         "policy_hash": policy_hash,
         "uncertainty": uncertainty,
+        "request_hash": request_hash,
+        "nonce": nonce,
+        "epoch": epoch,
     }
     block["prebind_hash"] = prebind_digest(block)
     return block

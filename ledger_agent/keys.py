@@ -53,12 +53,22 @@ def custody_label(value: Any) -> dict[str, Any]:
     return {"custody": v, "known": is_known_custody(v)}
 
 
+def _copy_binding_metadata(source: Mapping[str, Any], target: dict[str, Any]) -> None:
+    """Preserve optional CVA identity/revocation metadata during normalization."""
+    for field in ("agent_id", "agent_binding", "revoked", "revoked_at", "status"):
+        if field in source:
+            target[field] = source[field]
+
+
 def normalize_key_registry(registry: Optional[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
     """Normalize a key registry into labeled entries.
 
     Accepts both legacy ``{key_id: bytes}`` registries (entries carry no
     custody — rendered as labeled uncertainty) and labeled
     ``{key_id: {key_material: bytes, custody: str, label: str}}`` entries.
+    Optional ``agent_id``/``agent_binding`` and revocation fields are preserved
+    for CVA principal binding; existing signature consumers continue to use
+    only ``key_material``.
     """
     out: dict[str, dict[str, Any]] = {}
     for key_id, entry in (registry or {}).items():
@@ -73,12 +83,14 @@ def normalize_key_registry(registry: Optional[Mapping[str, Any]]) -> dict[str, d
                 entry.get("key_material"), (bytes, bytearray)):
             label = custody_label(entry.get("custody"))
             entry_label = entry.get("label")
-            out[key_id] = {
+            normalized = {
                 "key_material": bytes(entry["key_material"]),
                 "custody": label["custody"],
                 "known": label["known"],
                 "label": entry_label if isinstance(entry_label, str) else None,
             }
+            _copy_binding_metadata(entry, normalized)
+            out[key_id] = normalized
         else:
             raise ValueError(
                 f"key_registry entry {key_id!r} must be bytes or "

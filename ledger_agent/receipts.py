@@ -52,6 +52,22 @@ def _opt_text(value: Optional[str], field: str, max_len: int = 512) -> Optional[
     return value
 
 
+def _opt_nonce(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("nonce must be a non-empty string when supplied")
+    return value
+
+
+def _opt_epoch(value: Optional[int | str]) -> Optional[int | str]:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError("epoch must be an integer or string when supplied")
+    return value
+
+
 # ── #219 / #220: stage-aware prebind v2 ─────────────────────────────────────
 
 STAGE_VALUES = {
@@ -94,7 +110,10 @@ def build_prebind_v2(*, attempted_action: str, actor_ref: str, authority_ref: st
                      stage_trace: Optional[dict[str, Any]] = None,
                      context_hash: Optional[str] = None,
                      policy_hash: Optional[str] = None,
-                     uncertainty: Optional[str] = None) -> dict[str, Any]:
+                     uncertainty: Optional[str] = None,
+                     request_hash: Optional[str] = None,
+                     nonce: Optional[str] = None,
+                     epoch: Optional[int | str] = None) -> dict[str, Any]:
     """Build a v2 prebind block with stage-aware fields."""
     block: dict[str, Any] = {
         "schema_version": PREBIND_V2_SCHEMA,
@@ -114,6 +133,9 @@ def build_prebind_v2(*, attempted_action: str, actor_ref: str, authority_ref: st
         "context_hash": _opt_hash(context_hash),
         "policy_hash": _opt_hash(policy_hash),
         "uncertainty": uncertainty,
+        "request_hash": _opt_hash(request_hash),
+        "nonce": _opt_nonce(nonce),
+        "epoch": _opt_epoch(epoch),
     }
     block["prebind_hash"] = _sha({k: v for k, v in block.items() if k != "prebind_hash"})
     return block
