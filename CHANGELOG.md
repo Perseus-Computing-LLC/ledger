@@ -23,6 +23,15 @@ All notable changes to Ledger are documented here.
   timestamp window; prebind v2 receipts now carry `request_hash`/`nonce`/
   `epoch` in the hash-covered payload (backward compatible). See
   `docs/cva-contract-spec.md`.
+- **Tool-execution receipts + epistemic-source classification** (#251).
+  Runtime-issued HMAC-SHA256 tool receipts (unforgeable by the model,
+  arXiv:2603.10060) with a pramāṇa claim classifier
+  (pratyakṣa/anumāna/upamāna/śabda/abhāva/ungrounded), six hallucination-type
+  flags, five trust levels, and omitted-call completeness detection. Ships a
+  deterministic 1,800-scenario NyayaVerifyBench adaptation
+  (`benchmark/nyaya_verify_bench.py`) gated at ≥90% fabricated-reference
+  detection and <20 ms/response verification overhead. See
+  `docs/tool-receipts.md`.
 - **Evidence levels for receipts** (#235). Receipts now state what they prove:
   a four-level ladder (`structural` → `attested` → `replay` → `inclusion`)
   under `verification.evidence`, with stable per-level reason codes. A signed
