@@ -102,3 +102,12 @@ belongs in TTL state/leases. Durable action records declare `searchability`:
   detection for an action status.
 - Vault later proves manifest validation, approval lifecycle, scope binding,
   searchability, and lease race safety before Hermes enforcement is enabled.
+
+## CVA property contract
+
+The AAR prebind is Ledger's authorization-request boundary: its optional
+`request_hash`, `context_hash`, `policy_hash`, `nonce`, and `epoch` fields make
+the request, policy, context, and replay window explicit and hash-covered.
+See the [CVA contract specification](cva-contract-spec.md) for the formal
+`BindPrincipal ∧ BindRequest ∧ BindContext ∧ SatisfyPolicy` mapping and its
+runtime-execution/TOCTOU limitation.

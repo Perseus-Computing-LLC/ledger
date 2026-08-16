@@ -14,6 +14,15 @@ All notable changes to Ledger are documented here.
   submission contract, and a `ComposedGate` realizing the paper's
   compositional gating proposition (preventive monitors + evidential gates
   over disjoint requirement sets). See `docs/runtime-contract.md`.
+- **CVA authorization property contract** (#252). Cryptographically
+  verifiable authorization (arXiv:2607.21325) over the AAR prebind:
+  statements bind agent principal + request hash + policy + context +
+  nonce/epoch; `cva_relation_holds` enforces
+  R_CVA = BindPrincipal ∧ BindRequest ∧ BindContext ∧ SatisfyPolicy;
+  replay resistance via a trusted consumed-nonce gateway with an inclusive
+  timestamp window; prebind v2 receipts now carry `request_hash`/`nonce`/
+  `epoch` in the hash-covered payload (backward compatible). See
+  `docs/cva-contract-spec.md`.
 - **Evidence levels for receipts** (#235). Receipts now state what they prove:
   a four-level ladder (`structural` → `attested` → `replay` → `inclusion`)
   under `verification.evidence`, with stable per-level reason codes. A signed
