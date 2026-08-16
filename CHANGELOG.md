@@ -5,6 +5,15 @@ All notable changes to Ledger are documented here.
 ## [Unreleased]
 
 ### Added
+- **Runtime-contract enforcement** (#250). The Agent Trajectory Schema +
+  Evidence Chain from arXiv:2608.11274: hash-chained trajectory events
+  (`tool_call`, `tool_result`, `file_read`, `file_write`, `shell_exec`,
+  `commit`, `screenshot`, `citation_lookup`, `human_approval`,
+  `model_message`), a deterministic verifier registry separating hard from
+  soft evidence, evidence-chain construction, a fail-closed evidence-gated
+  submission contract, and a `ComposedGate` realizing the paper's
+  compositional gating proposition (preventive monitors + evidential gates
+  over disjoint requirement sets). See `docs/runtime-contract.md`.
 - **Evidence levels for receipts** (#235). Receipts now state what they prove:
   a four-level ladder (`structural` → `attested` → `replay` → `inclusion`)
   under `verification.evidence`, with stable per-level reason codes. A signed
