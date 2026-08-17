@@ -173,6 +173,10 @@
      "authority_manifest_custody": {
       "type": "string",
       "description": "Custody disclosure label for the referenced authority manifest (1f916 taxonomy); unknown custody renders as labeled uncertainty (#241)."
+     },
+     "campaign_binding": {
+      "type": "object",
+      "description": "Hash-only acceptance-campaign cell/lane/config/checkpoint binding (#256/#257)."
      }
     },
     "required": [

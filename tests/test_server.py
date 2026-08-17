@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Integration smoke test: boot the HTTP server on an ephemeral port."""
+import hashlib
 import io
 import json
 import os
@@ -13,7 +14,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ledger_agent import Meter, db, demo, metering
+from ledger_agent import Meter, campaigns, db, demo, metering
 from ledger_agent.client import LedgerAuthError, LedgerError
 from ledger_agent.config import DEFAULT_CONFIG
 from ledger_agent.server import app
@@ -45,9 +46,11 @@ class TestServer(unittest.TestCase):
             except OSError:
                 pass
 
-    def _get(self, path):
+    def _get(self, path, token=None):
         url = f"http://127.0.0.1:{self.port}{path}"
-        with urllib.request.urlopen(url, timeout=5) as r:
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as r:
             return r.status, r.read().decode()
 
     def _post(self, path, payload, token=None):
@@ -293,6 +296,86 @@ class TestServer(unittest.TestCase):
         self.assertTrue(captured["ua"].startswith("ledger-agent"))
         self.assertNotIn("urllib", captured["ua"].lower())
 
+    def test_campaign_api_round_trip_and_scope(self):
+        digest = lambda value: hashlib.sha256(value.encode()).hexdigest()
+        campaign_id = "campaign:http-256-257"
+        manifest = campaigns.build_manifest(
+            campaign_id=campaign_id, planned_cells=["cell:http"],
+            provider_lanes=["fixture/lane"], config_hash=digest("config"),
+            fixture_hash=digest("fixture"), hard_stop_micros=1000,
+            action_intent_hash=digest("intent"), continuation_allowed=True,
+        )
+        status, body = self._post("/v1/campaigns", {"manifest": manifest}, token=self.key)
+        self.assertEqual(status, 201)
+        self.assertEqual(body["campaign_id"], campaign_id)
+        binding = campaigns.build_binding(
+            campaign_id=campaign_id, cell_id="cell:http", lane="fixture/lane",
+            config_hash=digest("config"),
+        )
+        status, usage = self._post("/v1/usage", {
+            "provider": "openai", "model": "fixture", "task_type": "benchmark",
+            "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.0001,
+            "external_ref": "cell:http", "campaign_binding": binding,
+        }, token=self.key)
+        self.assertEqual(status, 200)
+        check = campaigns.build_check(
+            campaign_id=campaign_id, cell_id="cell:http", lane="fixture/lane",
+            status="pass", config_hash=digest("config"), result_hash=digest("result"),
+            evidence_hashes=[digest("evidence")], usage_event_ids=[usage["event_id"]],
+        )
+        status, body = self._post("/v1/campaigns/checks", {"check": check}, token=self.key)
+        self.assertEqual(status, 201)
+        receipt = campaigns.build_receipt(
+            manifest=manifest, checks=[check], framework_status="completed",
+            target_status="pass", evidence_status="complete", spent_micros=100,
+        )
+        status, body = self._post("/v1/campaigns/finalize", {"receipt": receipt}, token=self.key)
+        self.assertEqual(status, 200)
+        status, body = self._get(
+            f"/v1/campaigns?campaign_id={campaign_id}", token=self.key)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["verification"]["verified_pass"])
+
+
+
+        status, body = self._get(
+            f"/api/audit?campaign_id={campaign_id}", token=self.key)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["campaign_id"], campaign_id)
+
+        status, body = self._get("/v1/usage/export.json", token=self.key)
+        self.assertEqual(status, 200)
+        exported = json.loads(body)["events"]
+        bound = next(item for item in exported if item["campaign_id"] == campaign_id)
+        self.assertEqual(bound["campaign_binding"]["campaign_id"], campaign_id)
+
+    def test_campaign_budget_stop_is_durable(self):
+        digest = lambda value: hashlib.sha256(value.encode()).hexdigest()
+        campaign_id = "campaign:http-budget-stop"
+        manifest = campaigns.build_manifest(
+            campaign_id=campaign_id, planned_cells=["cell:stop"],
+            provider_lanes=["fixture/lane"], config_hash=digest("config-stop"),
+            fixture_hash=digest("fixture-stop"), hard_stop_micros=1,
+        )
+        status, _ = self._post("/v1/campaigns", {"manifest": manifest}, token=self.key)
+        self.assertEqual(status, 201)
+        binding = campaigns.build_binding(
+            campaign_id=campaign_id, cell_id="cell:stop", lane="fixture/lane",
+            config_hash=digest("config-stop"),
+        )
+        status, body = self._post("/v1/usage", {
+            "provider": "openai", "model": "fixture", "cost_usd": 0.000002,
+            "campaign_binding": binding,
+        }, token=self.key)
+        self.assertEqual(status, 402)
+        self.assertEqual(body["campaign_id"], campaign_id)
+        status, body = self._get(
+            f"/v1/campaigns?campaign_id={campaign_id}", token=self.key)
+        self.assertEqual(status, 200)
+        projection = json.loads(body)
+        self.assertEqual(projection["budget_status"], "stopped")
+        self.assertEqual(projection["usage_events"], 0)
+        self.assertEqual(projection["verification"]["verified_pass"], False)
 
 class TestIngestQuota(unittest.TestCase):
     """Free org past its cap with hard-blocking on → 402."""

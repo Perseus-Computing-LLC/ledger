@@ -101,6 +101,92 @@ paths:
           description: A request with the same `Idempotency-Key` is still in flight.
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 
+  /v1/campaigns:
+    get:
+      tags: [usage]
+      summary: Read one org-scoped acceptance campaign.
+      security:
+        - apiKey: []
+      parameters:
+        - name: campaign_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Public-safe manifest, checks, receipt, and verification projection.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CampaignProjection' } } }
+        '400': { description: Missing campaign_id. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Campaign not found in the authenticated org. }
+    post:
+      tags: [usage]
+      summary: Create or idempotently recover an acceptance campaign manifest.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [manifest]
+              properties:
+                manifest: { $ref: '#/components/schemas/CampaignManifest' }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Campaign created or the same manifest was replayed.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CampaignProjection' } } }
+        '400': { description: Invalid or conflicting manifest. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /v1/campaigns/checks:
+    post:
+      tags: [usage]
+      summary: Persist one immutable campaign cell/check result.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [check]
+              properties:
+                check: { $ref: '#/components/schemas/CampaignCheck' }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Check stored or the same check was replayed.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CampaignProjection' } } }
+        '400': { description: Invalid, conflicting, or out-of-lineage check. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Campaign not found in the authenticated org. }
+  /v1/campaigns/finalize:
+    post:
+      tags: [usage]
+      summary: Persist a final campaign receipt and independent verification state.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receipt]
+              properties:
+                receipt: { $ref: '#/components/schemas/CampaignReceipt' }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Final receipt stored or the same receipt was replayed.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CampaignProjection' } } }
+        '400': { description: Invalid or conflicting receipt. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Campaign not found in the authenticated org. }
+
   /v1/usage/export.csv:
     get:
       tags: [usage]
@@ -369,7 +455,114 @@ components:
         governance_cost: { type: object, nullable: true, description: "Governance self-cost block (wall_ms/cpu_ms/mem_bytes/storage_bytes/tokens/model_calls/approval_waits_ms); internal telemetry excluded from customer-facing totals (#239)." }
         behavior_snapshot: { type: object, nullable: true, description: "Behavior-snapshot receipt pin carrying the sha256 of a canonical agent-run snapshot (#238)." }
         authority_manifest_custody: { type: string, nullable: true, description: "Custody disclosure label for the referenced authority manifest (1f916 taxonomy); unknown custody renders as labeled uncertainty (#241)." }
+        campaign_binding: { $ref: '#/components/schemas/CampaignBinding' }
         source: { type: string, default: api }
+    CampaignBinding:
+      type: object
+      additionalProperties: false
+      description: "Hash-only campaign/cell/lane/config/checkpoint binding."
+      required: [schema, campaign_id, cell_id, lane, config_hash, attempt, continuation, binding_hash]
+      properties:
+        schema: { type: string, const: perseus-ledger-campaign-binding/v1 }
+        campaign_id: { type: string }
+        cell_id: { type: string }
+        lane: { type: string }
+        config_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        attempt: { type: integer, minimum: 1 }
+        continuation: { type: boolean }
+        parent_attempt: { type: integer, minimum: 1, nullable: true }
+        action_intent_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        checkpoint_ref: { type: string, nullable: true }
+        binding_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+    CampaignManifest:
+      type: object
+      additionalProperties: false
+      description: "Hash-only acceptance campaign plan; raw benchmark inputs remain out of band."
+      required: [schema, campaign_id, planned_cells, provider_lanes, config_hash, fixture_hash, retry_policy, continuation_allowed, evidence_required, manifest_hash]
+      properties:
+        schema: { type: string, const: perseus-ledger-acceptance-campaign/v1 }
+        campaign_id: { type: string }
+        planned_cells: { type: array, minItems: 1, items: { type: string } }
+        provider_lanes: { type: array, minItems: 1, items: { type: string } }
+        config_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        fixture_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        target_ref: { type: string, nullable: true }
+        target_commit_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        target_build_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        runtime_identity: { type: string, nullable: true }
+        expected_spend_min_micros: { type: integer, minimum: 0, nullable: true }
+        expected_spend_max_micros: { type: integer, minimum: 0, nullable: true }
+        hard_stop_micros: { type: integer, minimum: 0, nullable: true }
+        runaway_guard_micros: { type: integer, minimum: 0, nullable: true }
+        retry_policy: { type: string, enum: [none, same_config, new_version_only, explicit_continuation] }
+        continuation_allowed: { type: boolean }
+        action_intent_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        evidence_required: { type: boolean }
+        manifest_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+    CampaignCheck:
+      type: object
+      additionalProperties: false
+      description: "One hash-bound campaign cell result or explicit skip/error."
+      required: [schema, campaign_id, cell_id, lane, status, config_hash, attempt, continuation, evidence_hashes, usage_event_ids, check_hash]
+      properties:
+        schema: { type: string, const: perseus-ledger-acceptance-check/v1 }
+        campaign_id: { type: string }
+        cell_id: { type: string }
+        lane: { type: string }
+        status: { type: string, enum: [pass, fail, skip, error] }
+        config_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        attempt: { type: integer, minimum: 1 }
+        continuation: { type: boolean }
+        parent_attempt: { type: integer, minimum: 1, nullable: true }
+        action_intent_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        result_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        evidence_hashes: { type: array, items: { type: string, pattern: '^[0-9a-fA-F]{64}$' } }
+        usage_event_ids: { type: array, items: { type: string } }
+        checkpoint_ref: { type: string, nullable: true }
+        reason_code: { type: string, nullable: true }
+        check_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+    CampaignReceipt:
+      type: object
+      additionalProperties: false
+      description: "Final hash-bound campaign envelope; verified_pass is independent of target_status."
+      required: [schema, campaign_id, manifest_hash, framework_status, target_status, budget_status, evidence_status, finalization_status, counts, check_hashes, spent_micros, receipt_hash]
+      properties:
+        schema: { type: string, const: perseus-ledger-acceptance-receipt/v1 }
+        campaign_id: { type: string }
+        manifest_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        framework_status: { type: string, enum: [completed, error, interrupted, cancelled] }
+        target_status: { type: string, enum: [pass, fail, inconclusive, not_run] }
+        budget_status: { type: string, enum: [not_configured, within_guard, stopped, overrun] }
+        evidence_status: { type: string, enum: [pending, complete, incomplete, invalid] }
+        finalization_status: { type: string, enum: [pending, complete, failed] }
+        finalization_reason: { type: string, nullable: true }
+        counts: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        check_hashes: { type: array, items: { type: string, pattern: '^[0-9a-fA-F]{64}$' } }
+        target_identity: { type: object }
+        evidence_bundle_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        protected_state_before_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        protected_state_after_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        cleanup_manifest_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', nullable: true }
+        spent_micros: { type: integer, minimum: 0 }
+        remaining_micros: { type: integer, minimum: 0, nullable: true }
+        stop_reason: { type: string, nullable: true }
+        last_checkpoint_ref: { type: string, nullable: true }
+        verification: { type: object }
+        receipt_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+    CampaignProjection:
+      type: object
+      properties:
+        org_id: { type: string }
+        campaign_id: { type: string }
+        manifest: { $ref: '#/components/schemas/CampaignManifest' }
+        checks: { type: array, items: { $ref: '#/components/schemas/CampaignCheck' } }
+        receipt: { allOf: [{ $ref: '#/components/schemas/CampaignReceipt' }], nullable: true }
+        verification: { type: object }
+        spend_micros: { type: integer, minimum: 0 }
+        usage_events: { type: integer, minimum: 0 }
+        budget_status: { type: string }
+        stop_reason: { type: string, nullable: true }
+        updated_at: { type: number }
     Prebind:
       type: object
       additionalProperties: false
@@ -412,6 +605,7 @@ components:
         leaked_usd: { type: number, description: "Per-event efficiency leakage vs the on-policy optimal (#8); 0 when no optimal was recorded." }
         workspace_id: { type: string, nullable: true, description: "The workspace the event was actually attributed to." }
         workspace_folded: { type: boolean, description: "True when the client-sent workspace did not exist and the tier's workspace cap (Free = 1) forced the event into the org's earliest workspace instead of creating a new one — the recorded attribution then differs from what was sent." }
+        campaign_id: { type: string, nullable: true, description: "Campaign ID when the event carries a validated acceptance-campaign binding (#256/#257)." }
     UsageResponse:
       type: object
       description: |
@@ -451,6 +645,8 @@ components:
         cost_usd: { type: number }
         baseline_usd: { type: number, nullable: true, description: "Counterfactual cost recorded for savings-share; null when none." }
         external_ref: { type: string, nullable: true, description: "Per-task attribution id (e.g. an Invarium task_id)." }
+        campaign_id: { type: string, nullable: true, description: "Acceptance campaign attribution ID when present." }
+        campaign_binding: { $ref: '#/components/schemas/CampaignBinding' }
         estimated: { type: boolean }
         source: { type: string }
     Org:

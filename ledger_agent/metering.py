@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass, asdict
 from typing import Optional
 
-from . import db, pricing
+from . import db, pricing, campaigns
 from .prebind import validate_prebind
 from .receipts import (
     build_served_claim, validate_served_claim,
@@ -99,6 +99,7 @@ class MeterResult:
     # (Free = 1) forced the event into the org's earliest workspace instead of
     # creating a new one — the recorded attribution differs from what was sent.
     workspace_folded: bool = False
+    campaign_id: Optional[str] = None
 
 
 def _resolve_workspace(conn, org_id: str, workspace: Optional[str],
@@ -185,6 +186,7 @@ def record_usage(conn, org_id: str, provider: str,
                  belief_context: Optional[dict] = None,
                  governance_cost: Optional[dict] = None,
                  behavior_snapshot: Optional[dict] = None,
+                 campaign_binding: Optional[dict] = None,
                  commit: bool = True) -> MeterResult:
     """Meter one LLM/agent call. Returns a :class:`MeterResult`.
 
@@ -301,6 +303,31 @@ def record_usage(conn, org_id: str, provider: str,
     if resource_constraints_hash is not None and not _SHA256_HEX.fullmatch(resource_constraints_hash):
         raise ValueError("resource_constraints_hash must be a 64-character SHA-256 hex digest")
     resource_constraints_hash = resource_constraints_hash.lower() if resource_constraints_hash else None
+
+    # v23: acceptance-campaign binding. It is persisted as a canonical JSON/hash
+    # pair and checked against the org-scoped durable campaign before pricing or
+    # writing the event.
+    campaign_binding_json: Optional[str] = None
+    campaign_binding_hash: Optional[str] = None
+    campaign_id: Optional[str] = None
+    campaign_manifest: Optional[dict] = None
+    if campaign_binding is not None:
+        if not isinstance(campaign_binding, dict):
+            raise ValueError("campaign_binding must be a dict")
+        valid, errors = campaigns.validate_binding(campaign_binding)
+        if not valid:
+            raise ValueError("invalid campaign_binding: " + ", ".join(errors))
+        campaign_id = campaign_binding["campaign_id"]
+        campaign_binding_json = json.dumps(campaign_binding, sort_keys=True, separators=(",", ":"))
+        campaign_binding_hash = campaign_binding["binding_hash"]
+        campaign_row = db.get_campaign(conn, org_id, campaign_id)
+        if campaign_row is None:
+            raise ValueError("campaign_binding references an unknown campaign")
+        campaign_manifest = json.loads(campaign_row["manifest_json"])
+        if campaign_binding["cell_id"] not in campaign_manifest["planned_cells"]:
+            raise ValueError("campaign_binding cell_id is not planned")
+        if campaign_binding["lane"] not in campaign_manifest["provider_lanes"]:
+            raise ValueError("campaign_binding lane is not planned")
 
     # v18: stage-aware action receipts and evidence bindings (#219–#224)
     served_claim_json: Optional[str] = None
@@ -547,6 +574,20 @@ def record_usage(conn, org_id: str, provider: str,
         optimal_micros = db.usd_to_micros(optimal_cost_usd)
         leaked_usd = round(max(0.0, cost_usd - optimal_cost_usd), 6)
 
+    # #257: campaign economics are checked in integer micros before the event
+    # insert. Campaign callers use db.immediate(), so the spend read and insert
+    # share one SQLite write lock and an overrun leaves no usage row.
+    if campaign_binding is not None:
+        decision = campaigns.admit_spend(
+            campaign_manifest,
+            spent_micros=db.campaign_spend_micros(conn, campaign_id),
+            proposed_micros=db.usd_to_micros(cost_usd),
+        )
+        if not decision["allowed"]:
+            raise campaigns.CampaignBudgetError(
+                campaign_id, decision["reason"], decision["remaining_micros"]
+            )
+
     # Fix #28: prepaid credit hard-stop. Skipped for orgs explicitly flagged
     # allow_negative_balance (trusted/internal track-only mode) so they keep
     # full tracking even past zero.
@@ -632,6 +673,10 @@ def record_usage(conn, org_id: str, provider: str,
         # v21 (#238)
         "behavior_snapshot_json": behavior_snapshot_json,
         "behavior_snapshot_hash": behavior_snapshot_hash,
+        # v23 (#256/#257)
+        "campaign_id": campaign_id,
+        "campaign_binding_json": campaign_binding_json,
+        "campaign_binding_hash": campaign_binding_hash,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
@@ -645,8 +690,9 @@ def record_usage(conn, org_id: str, provider: str,
         "belief_context_json,belief_context_hash,"
         "governance_cost_json,governance_cost_hash,"
         "behavior_snapshot_json,behavior_snapshot_hash,"
+        "campaign_id,campaign_binding_json,campaign_binding_hash,"
         "estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES(" + ",".join("?" for _ in range(57)) + ")",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
@@ -665,6 +711,7 @@ def record_usage(conn, org_id: str, provider: str,
          belief_context_json, belief_context_hash,
          governance_cost_json, governance_cost_hash,
          behavior_snapshot_json, behavior_snapshot_hash,
+         campaign_id, campaign_binding_json, campaign_binding_hash,
          int(estimated), source, ts, prev_hash, row_hash),
     )
 
@@ -695,6 +742,7 @@ def record_usage(conn, org_id: str, provider: str,
         external_ref=external_ref,
         user_id=user_id,
         workspace_folded=workspace_folded,
+        campaign_id=campaign_id,
     )
 
 

@@ -154,6 +154,11 @@ def _tools() -> list[dict[str, Any]]:
                                    "taxonomy); unknown custody renders as "
                                    "labeled uncertainty (#241).",
                 },
+                "campaign_binding": {
+                    "type": "object",
+                    "description": "Hash-only acceptance-campaign cell/lane/config/"
+                                   "checkpoint binding (#256/#257).",
+                },
             },
             required=["provider"],
         ),
@@ -264,6 +269,7 @@ def _handle_record(meter: client.Meter, args: dict) -> dict:
         governance_cost=args.get("governance_cost"),
         behavior_snapshot=args.get("behavior_snapshot"),
         authority_manifest_custody=args.get("authority_manifest_custody"),
+        campaign_binding=args.get("campaign_binding"),
         source="mcp",
     )
     return asdict(res)

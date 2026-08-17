@@ -5,7 +5,7 @@ import csv
 import io
 import json
 
-from .. import db, evidence_levels, metering, pricing, savings
+from .. import campaigns, db, evidence_levels, metering, pricing, savings
 from ..prebind import validate_prebind
 
 
@@ -82,6 +82,52 @@ def replay_receipt_prebind(conn, org_id: str, external_ref: str, **kwargs) -> di
     return replay_prebind(prior, **kwargs)
 
 
+def campaign_json(conn, org_id: str, campaign_id: str) -> dict:
+    """Return a public-safe campaign manifest/check/receipt projection."""
+    row = db.get_campaign(conn, org_id, campaign_id)
+    if row is None:
+        raise ValueError("campaign not found")
+    manifest = json.loads(row["manifest_json"])
+    check_rows = db.list_campaign_checks(conn, org_id, campaign_id)
+    checks = [json.loads(item["check_json"]) for item in check_rows]
+    receipt = json.loads(row["receipt_json"]) if row["receipt_json"] else None
+    if receipt is None:
+        verification = {
+            "valid": False, "verified_pass": False,
+            "reasons": ["receipt_missing"], "integrity_ok": False,
+        }
+    else:
+        verification = campaigns.verify_campaign_receipt(
+            receipt, manifest=manifest, checks=checks,
+        )
+        actual_spend = db.campaign_spend_micros(conn, campaign_id)
+        if receipt.get("spent_micros") != actual_spend:
+            verification["valid"] = False
+            verification["verified_pass"] = False
+            verification["integrity_ok"] = False
+            verification["reasons"] = sorted(set(verification["reasons"] + ["spent_micros_mismatch"]))
+        if receipt.get("target_status") == "pass":
+            usage_errors = db.campaign_usage_errors(conn, org_id, campaign_id, checks)
+            if usage_errors:
+                verification["valid"] = False
+                verification["verified_pass"] = False
+                verification["integrity_ok"] = False
+                verification["reasons"] = sorted(set(verification["reasons"] + usage_errors))
+    return {
+        "org_id": org_id,
+        "campaign_id": campaign_id,
+        "manifest": manifest,
+        "checks": checks,
+        "receipt": receipt,
+        "verification": verification,
+        "spend_micros": db.campaign_spend_micros(conn, campaign_id),
+        "usage_events": db.campaign_usage_count(conn, campaign_id),
+        "budget_status": row["budget_status"],
+        "stop_reason": row["stop_reason"],
+        "updated_at": row["updated_at"],
+    }
+
+
 _EXPORT_COLUMNS = ["id", "ts", "provider", "model", "task_type", "workspace",
                    "input_tokens", "output_tokens", "cache_read_tokens",
                    "cache_write_tokens", "reasoning_tokens", "user_id",
@@ -100,6 +146,7 @@ def _csv_safe(value):
 
 def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                external_ref: str | None = None,
+               campaign_id: str | None = None,
                key_registry: dict[str, bytes] | None = None,
                sign_key_id: str | None = None) -> dict:
     """Return either an organization audit summary or one task evidence receipt.
@@ -116,6 +163,8 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
     ``verification.evidence`` block reporting the highest evidence level the
     retained objects actually verify (#235).
     """
+    if campaign_id is not None:
+        return campaign_json(conn, org_id, campaign_id)
     if external_ref is not None:
         org = db.get_org(conn, org_id)
         integrity = db.verify_chain(conn, org_id=org_id, hmac_key=hmac_key)
@@ -161,6 +210,8 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                 if row["governance_cost_json"] is not None else None,
                 "behavior_snapshot": json.loads(row["behavior_snapshot_json"])
                 if row["behavior_snapshot_json"] is not None else None,
+                "campaign_binding": json.loads(row["campaign_binding_json"])
+                if row["campaign_binding_json"] is not None else None,
                 "action_authorization": {
                     "agent_id": row["agent_id"],
                     "authority_manifest_ref": row["authority_manifest_ref"],

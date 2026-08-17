@@ -9,7 +9,7 @@ schema — the database half of the frozen contract whose API half is
 
 `ledger_agent.db.SCHEMA_VERSION` is an integer bumped on every schema change and
 stamped into the `meta` table key `schema_version` on `init_schema()`. The
-runtime currently declares **`SCHEMA_VERSION=22`**. Read the stored value with
+runtime currently declares **`SCHEMA_VERSION=23`**. Read the stored value with
 `db.get_schema_version(conn)`; a fresh database is stamped with the runtime
 value after all additive migrations have run.
 
@@ -34,6 +34,7 @@ value after all additive migrations have run.
 | 20 | Adds nullable hash-covered governance self-cost (#239): `governance_cost_json`/`governance_cost_hash` — internal telemetry (wall/cpu/mem/storage/tokens/model_calls/approval waits), excluded from customer-facing usage and billing totals. |
 | 21 | Adds nullable hash-covered behavior-snapshot receipt pin (#238): `behavior_snapshot_json`/`behavior_snapshot_hash` — the sha256 of a canonical agent-run snapshot, re-verifiable with `ledger diff --require-target-digest`. |
 | 22 | Adds nullable hash-covered custody disclosure for the referenced authority manifest (#241): `authority_manifest_custody` — 1f916 taxonomy label; missing/unknown custody renders as labeled uncertainty in verification output. |
+| 23 | Adds `acceptance_campaigns`/`acceptance_checks` plus nullable hash-covered `usage_events` campaign bindings (`campaign_id`, `campaign_binding_json`, `campaign_binding_hash`) for acceptance integrity, budget guards, and correction/resume lineage (#256/#257). |
 
 ## The contract (within the 1.0 major line)
 

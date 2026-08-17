@@ -327,3 +327,28 @@ def test_stdio_protocol_roundtrip(tmp_path):
             proc.stdin.close()
         proc.terminate()
         proc.wait(timeout=10)
+
+
+def test_record_campaign_binding_round_trip(tmp_path, monkeypatch):
+    from ledger_agent import campaigns, db
+    import hashlib
+    digest = lambda value: hashlib.sha256(value.encode()).hexdigest()
+    meter = _meter(tmp_path, monkeypatch)
+    manifest = campaigns.build_manifest(
+        campaign_id="campaign:mcp-1", planned_cells=["cell:mcp"],
+        provider_lanes=["fixture/lane"], config_hash=digest("config"),
+        fixture_hash=digest("fixture"), hard_stop_micros=1000,
+    )
+    db.create_campaign(meter.conn, meter.org_id, manifest)
+    binding = campaigns.build_binding(
+        campaign_id="campaign:mcp-1", cell_id="cell:mcp", lane="fixture/lane",
+        config_hash=digest("config"),
+    )
+    text, result = _call("ledger_record", {
+        "provider": "openai", "model": "fixture", "task_type": "benchmark",
+        "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.0001,
+        "external_ref": "cell:mcp", "campaign_binding": binding,
+    }, meter)
+    assert result.get("isError") is not True
+    assert text["recorded"] is True
+    assert text["campaign_id"] == "campaign:mcp-1"

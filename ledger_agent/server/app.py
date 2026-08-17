@@ -19,7 +19,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from .. import __version__, bridge, config as cfgmod, db, pricing
+from .. import __version__, bridge, campaigns, config as cfgmod, db, pricing
 from ..billing import StripeClient, BillingError, handle_webhook_event
 from ..utils import strict_int
 from ..prebind import validate_prebind
@@ -31,6 +31,7 @@ _PUBLIC_PATHS = {"/", "/index.html",  # public landing for logged-out visitors
                  "/v1/usage",  # authenticated by its own Bearer API key, not a session
                  "/v1/usage/export.csv", "/v1/usage/export.json",  # Bearer-auth (#66)
                  "/v1/checkpoints",  # Bearer-auth tamper-evidence anchors (#121)
+                 "/v1/campaigns", "/v1/campaigns/checks", "/v1/campaigns/finalize",
                  "/api/audit",  # Bearer-auth evidence receipts (org-scoped API key)
                  "/v1/admin/orgs", "/v1/admin/credits", "/v1/admin/keys",  # admin-token (#66)
                  "/v1/admin/keys/rotate", "/v1/admin/keys/revoke",  # admin-token key lifecycle
@@ -434,7 +435,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self._json(404, {"error": "no organizations"})
                 return self._json(200, api.audit_json(
                     conn, org_id, hmac_key=cfgmod.chain_hmac_key(self.ctx.cfg),
-                    external_ref=q.get("external_ref", [None])[0]))
+                    external_ref=q.get("external_ref", [None])[0],
+                    campaign_id=q.get("campaign_id", [None])[0]))
             if path == "/api/ledger":
                 org_id = self._authz_org(conn, q.get("org", [None])[0])
                 if not org_id:
@@ -453,6 +455,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._usage_export(conn, path, q)
             if path == "/v1/checkpoints":
                 return self._checkpoints_get(conn, q)
+            if path == "/v1/campaigns":
+                return self._campaign_get(conn, q)
             if path.startswith("/v1/admin/"):
                 return self._admin_get(conn, path, q)
             if path in ("/billing/success", "/billing/cancel"):
@@ -502,7 +506,8 @@ class Handler(BaseHTTPRequestHandler):
             needs_csrf_check = (
                 self.ctx.auth_on and
                 path not in {"/v1/usage", "/webhook/stripe",
-                             "/v1/checkpoints"} and  # Bearer-auth (#121)
+                             "/v1/checkpoints", "/v1/campaigns",
+                             "/v1/campaigns/checks", "/v1/campaigns/finalize"} and  # Bearer-auth (#121)
                 self._user is not None  # Cookie-authenticated
             )
             if needs_csrf_check and not (self._same_origin() or self._csrf_token_ok()):
@@ -514,6 +519,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._ingest_usage(conn)
             if path == "/v1/checkpoints":
                 return self._checkpoints_post(conn)
+            if path in {"/v1/campaigns", "/v1/campaigns/checks", "/v1/campaigns/finalize"}:
+                return self._campaign_post(conn, path)
             if path == "/api/users":
                 return self._users_create(conn)
             if path == "/api/users/deactivate":
@@ -645,6 +652,62 @@ class Handler(BaseHTTPRequestHandler):
         csv_text = api.export_csv(conn, org_id, since, until)
         return self._send(200, csv_text, "text/csv; charset=utf-8",
                           {"Content-Disposition": 'attachment; filename="usage.csv"'})
+
+    def _campaign_org(self, conn):
+        org_id = self._bearer_org(conn)
+        if not org_id:
+            self._json(401, {"error": "invalid or missing API key"})
+            return None
+        return org_id
+
+    def _campaign_get(self, conn, q):
+        org_id = self._campaign_org(conn)
+        if not org_id:
+            return
+        campaign_id = (q.get("campaign_id") or [None])[0]
+        if not campaign_id:
+            return self._json(400, {"error": "campaign_id is required"})
+        try:
+            return self._json(200, api.campaign_json(conn, org_id, campaign_id))
+        except ValueError:
+            return self._json(404, {"error": "campaign not found"})
+
+    def _campaign_post(self, conn, path):
+        org_id = self._campaign_org(conn)
+        if not org_id:
+            return
+        try:
+            payload = json.loads(self._body() or b"{}")
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "body must be JSON"})
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "body must be an object"})
+        try:
+            with db.immediate(conn):
+                if path == "/v1/campaigns":
+                    manifest = payload.get("manifest")
+                    if not isinstance(manifest, dict):
+                        return self._json(400, {"error": "manifest must be an object"})
+                    db.create_campaign(conn, org_id, manifest, commit=False)
+                    result = api.campaign_json(conn, org_id, manifest["campaign_id"])
+                    return self._json(201, result)
+                if path == "/v1/campaigns/checks":
+                    check = payload.get("check")
+                    if not isinstance(check, dict):
+                        return self._json(400, {"error": "check must be an object"})
+                    db.record_campaign_check(conn, org_id, check, commit=False)
+                    result = api.campaign_json(conn, org_id, check["campaign_id"])
+                    return self._json(201, result)
+                receipt = payload.get("receipt")
+                if not isinstance(receipt, dict):
+                    return self._json(400, {"error": "receipt must be an object"})
+                db.finalize_campaign(conn, org_id, receipt, commit=False)
+                result = api.campaign_json(conn, org_id, receipt["campaign_id"])
+                return self._json(200, result)
+        except ValueError as exc:
+            message = str(exc)
+            status = 404 if message == "campaign not found" else 400
+            return self._json(status, {"error": message})
 
     def _checkpoints_get(self, conn, q):
         """GET /v1/checkpoints — the org's retained anchors (#121). Bearer-
@@ -858,6 +921,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "governance_cost must be an object"})
             if ev.get("behavior_snapshot") is not None and not isinstance(ev["behavior_snapshot"], dict):
                 return self._json(400, {"error": "behavior_snapshot must be an object"})
+            if ev.get("campaign_binding") is not None:
+                if not isinstance(ev["campaign_binding"], dict):
+                    return self._json(400, {"error": "campaign_binding must be an object"})
+                valid, errors = campaigns.validate_binding(ev["campaign_binding"])
+                if not valid:
+                    return self._json(400, {"error": "invalid campaign_binding", "fields": errors})
 
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
@@ -926,6 +995,7 @@ class Handler(BaseHTTPRequestHandler):
                             belief_context=ev.get("belief_context"),
                             governance_cost=ev.get("governance_cost"),
                             behavior_snapshot=ev.get("behavior_snapshot"),
+                            campaign_binding=ev.get("campaign_binding"),
                             user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
@@ -959,12 +1029,32 @@ class Handler(BaseHTTPRequestHandler):
                             # collapse.
                             "workspace_id": res.workspace_id,
                             "workspace_folded": res.workspace_folded,
+                            "campaign_id": res.campaign_id,
                         })
                     code, body = self._usage_response(
                         conn, org_id, out, n_blocked, n_over_balance, cfg)
                     if idem_key:
                         db.store_idempotency_response(
                             conn, org_id, idem_key, code, json.dumps(body), commit=False)
+        except campaigns.CampaignBudgetError as e:
+            # The usage transaction has rolled back. Persist only the bounded
+            # campaign stop marker in a fresh transaction; no overrun event or
+            # partial batch may survive the rejected admission.
+            try:
+                with db.immediate(conn):
+                    db.mark_campaign_budget_stop(
+                        conn, org_id, e.campaign_id,
+                        remaining_micros=e.remaining_micros, reason=e.reason,
+                        commit=False,
+                    )
+            except Exception:
+                self._log_exc("POST", "/v1/usage campaign stop", e)
+            return self._json(402, {
+                "error": "campaign budget guard stopped the campaign",
+                "campaign_id": e.campaign_id,
+                "reason": e.reason,
+                "remaining_micros": e.remaining_micros,
+            })
         except sqlite3.OperationalError as e:
             # Transient write contention (e.g. "database is locked" after the
             # busy_timeout). The batch did NOT commit — BEGIN IMMEDIATE rolled it
