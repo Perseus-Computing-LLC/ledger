@@ -5,7 +5,7 @@ hash-only fields, see [Memory governance and Ledger provenance](memory-governanc
 For a local Perseus + Vault + Ledger walkthrough, see
 [the local integration guide](local-perseus-vault-ledger.md).
 
-An evidence receipt is a task-scoped, machine-readable view of hash-chained Ledger events. It answers a bounded question:
+An evidence receipt is a task-scoped, machine-readable view of hash-chained Ledger events. For multi-check acceptance and benchmark runs, compose it with the hash-only [Acceptance Campaign contract](acceptance-campaigns.md): campaign framework integrity, target outcome, budget state, and evidence state remain separate. It answers a bounded question:
 
 > For this externally identified task or artifact, which recorded autonomous-system actions exist, what resource allocation accompanied them, and does their containing organization ledger verify?
 

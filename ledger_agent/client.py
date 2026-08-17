@@ -25,13 +25,14 @@ way; ``balance()`` / ``summary()`` / ``topup()`` are local-only.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import urllib.error
 import urllib.request
 from typing import Optional
 
-from . import __version__, config as cfgmod, db, metering
+from . import __version__, campaigns, config as cfgmod, db, metering
 
 # A real User-Agent — some CDNs/WAFs (e.g. Cloudflare, error 1010) hard-block the
 # default "Python-urllib/x.y" signature, which would break ingest from behind a
@@ -128,6 +129,7 @@ class Meter:
               belief_context: Optional[dict] = None,
               governance_cost: Optional[dict] = None,
               behavior_snapshot: Optional[dict] = None,
+              campaign_binding: Optional[dict] = None,
               user_id: Optional[str] = None,
               source: str = "sdk"):
         """Meter one call. Returns a :class:`metering.MeterResult`.
@@ -201,6 +203,7 @@ class Meter:
                 "belief_context": belief_context,
                 "governance_cost": governance_cost,
                 "behavior_snapshot": behavior_snapshot,
+                "campaign_binding": campaign_binding,
             }
             event.update({key: value for key, value in optional_fields.items()
                           if value is not None})
@@ -208,49 +211,60 @@ class Meter:
                 event["user_id"] = user_id
             return self._track_remote(event)
 
-        return metering.record_usage(
-            self.conn, self.org_id, provider=provider, model=model,
-            task_type=task_type, workspace=workspace,
-            input_tokens=input_tokens, output_tokens=output_tokens,
-            cache_read_tokens=cache_read_tokens, reasoning_tokens=reasoning_tokens,
-            cache_write_tokens=cache_write_tokens,
-            cost_usd=cost_usd,
-            baseline_cost_usd=baseline_cost_usd, baseline_model=baseline_model,
-            baseline_input_tokens=baseline_input_tokens,
-            baseline_output_tokens=baseline_output_tokens,
-            external_ref=external_ref,
-            evidence_hashes=evidence_hashes,
-            policy_version=policy_version,
-            result_hash=result_hash,
-            human_review=human_review,
-            correction_ref=correction_ref,
-            agent_id=agent_id,
-            authority_manifest_ref=authority_manifest_ref,
-            authority_manifest_custody=authority_manifest_custody,
-            scope_anchor=scope_anchor,
-            action_intent_hash=action_intent_hash,
-            action_status=action_status,
-            approval_ref=approval_ref,
-            context_render_schema=context_render_schema,
-            context_render_hash=context_render_hash,
-            served_memory_provenance_hash=served_memory_provenance_hash,
-            action_receipt_hash=action_receipt_hash,
-            resource_constraints_version=resource_constraints_version,
-            resource_constraints_hash=resource_constraints_hash,
-            belief_context=belief_context,
-            prebind=prebind,
-            governance_cost=governance_cost,
-            behavior_snapshot=behavior_snapshot,
-            user_id=user_id,
-            source=source,
-            pricing_overrides=self.cfg.get("pricing", {}).get("overrides"),
-            alert_cfg=self.cfg.get("alerts", {}),
-            block_over_limit=bool(self.cfg.get("pricing", {}).get("block_over_free_limit")),
-            # P1 fix: enforce the prepaid hard-stop on the embedded path too, not
-            # just the hosted API. Default on (matches DEFAULT_CONFIG); only bites
-            # orgs that actually hold prepaid credit.
-            block_over_balance=bool(self.cfg.get("pricing", {}).get("block_over_balance", True)),
-        )
+        local_tx = (db.immediate(self.conn)
+                    if campaign_binding is not None else contextlib.nullcontext())
+        try:
+            with local_tx:
+                return metering.record_usage(
+                    self.conn, self.org_id, provider=provider, model=model,
+                    task_type=task_type, workspace=workspace,
+                    input_tokens=input_tokens, output_tokens=output_tokens,
+                    cache_read_tokens=cache_read_tokens, reasoning_tokens=reasoning_tokens,
+                    cache_write_tokens=cache_write_tokens,
+                    cost_usd=cost_usd,
+                    baseline_cost_usd=baseline_cost_usd, baseline_model=baseline_model,
+                    baseline_input_tokens=baseline_input_tokens,
+                    baseline_output_tokens=baseline_output_tokens,
+                    external_ref=external_ref,
+                    evidence_hashes=evidence_hashes,
+                    policy_version=policy_version,
+                    result_hash=result_hash,
+                    human_review=human_review,
+                    correction_ref=correction_ref,
+                    agent_id=agent_id,
+                    authority_manifest_ref=authority_manifest_ref,
+                    authority_manifest_custody=authority_manifest_custody,
+                    scope_anchor=scope_anchor,
+                    action_intent_hash=action_intent_hash,
+                    action_status=action_status,
+                    approval_ref=approval_ref,
+                    context_render_schema=context_render_schema,
+                    context_render_hash=context_render_hash,
+                    served_memory_provenance_hash=served_memory_provenance_hash,
+                    action_receipt_hash=action_receipt_hash,
+                    resource_constraints_version=resource_constraints_version,
+                    resource_constraints_hash=resource_constraints_hash,
+                    belief_context=belief_context,
+                    prebind=prebind,
+                    governance_cost=governance_cost,
+                    behavior_snapshot=behavior_snapshot,
+                    campaign_binding=campaign_binding,
+                    user_id=user_id,
+                    source=source,
+                    pricing_overrides=self.cfg.get("pricing", {}).get("overrides"),
+                    alert_cfg=self.cfg.get("alerts", {}),
+                    block_over_limit=bool(self.cfg.get("pricing", {}).get("block_over_free_limit")),
+                    # P1 fix: enforce the prepaid hard-stop on the embedded path too.
+                    block_over_balance=bool(self.cfg.get("pricing", {}).get("block_over_balance", True)),
+                    commit=campaign_binding is None,
+                )
+        except campaigns.CampaignBudgetError as exc:
+            with db.immediate(self.conn):
+                db.mark_campaign_budget_stop(
+                    self.conn, self.org_id, exc.campaign_id,
+                    remaining_micros=exc.remaining_micros, reason=exc.reason,
+                )
+            raise
 
     def _track_remote(self, event: dict) -> "metering.MeterResult":
         req = urllib.request.Request(
@@ -302,6 +316,7 @@ class Meter:
             over_free_limit=bool(body.get("over_free_limit", False)),
             over_balance=bool(body.get("over_balance", False)),
             unpriced=bool(body.get("unpriced", False)),
+            campaign_id=body.get("campaign_id") or event.get("campaign_binding", {}).get("campaign_id"),
         )
 
     def _local_only(self, what: str):

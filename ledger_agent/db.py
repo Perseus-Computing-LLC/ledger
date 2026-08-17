@@ -61,7 +61,9 @@ from typing import Optional
 # 18 = adds stage-aware action receipts and evidence bindings (#219–#224):
 #     served_claim_json/hash (#221), evidence_status (#222),
 #     runtime_manifest_json/hash (#223), external_artifact_json/hash (#224).
-SCHEMA_VERSION = 22
+# 23 = adds acceptance campaign manifests/checks/receipts and optional campaign
+#      usage-event bindings for #256/#257.
+SCHEMA_VERSION = 23
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -177,6 +179,11 @@ _CHAIN_FIELDS_OPTIONAL = (
     # v21 (#238): behavior-snapshot receipt pin. Trailing and optional.
     "behavior_snapshot_json",
     "behavior_snapshot_hash",
+    # v23 (#256/#257): hash-only campaign/cell attribution and continuation
+    # lineage. Optional so every historical event keeps its canonical bytes.
+    "campaign_id",
+    "campaign_binding_json",
+    "campaign_binding_hash",
 )
 
 
@@ -643,6 +650,12 @@ CREATE TABLE IF NOT EXISTS usage_events (
     -- `ledger diff --require-target-digest`.
     behavior_snapshot_json TEXT,
     behavior_snapshot_hash TEXT,
+    -- v23 (#256/#257): optional hash-only acceptance-campaign binding. The
+    -- campaign_id is indexed for integer-exact spend guards; the JSON/hash pair
+    -- carries cell, lane, config, checkpoint, and attempt lineage.
+    campaign_id       TEXT,
+    campaign_binding_json TEXT,
+    campaign_binding_hash TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -812,6 +825,44 @@ CREATE TABLE IF NOT EXISTS reconciliation_events (
     ts        REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_recon_event ON reconciliation_events(event_id);
+
+-- Acceptance campaigns (#256/#257). The manifest, checks, and final receipt are
+-- hash-bound public-safe projections; raw benchmark inputs remain out of Ledger.
+CREATE TABLE IF NOT EXISTS acceptance_campaigns (
+    id                 TEXT PRIMARY KEY,
+    org_id             TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    manifest_json      TEXT NOT NULL,
+    manifest_hash      TEXT NOT NULL,
+    framework_status   TEXT NOT NULL DEFAULT 'error',
+    target_status      TEXT NOT NULL DEFAULT 'not_run',
+    budget_status      TEXT NOT NULL DEFAULT 'not_configured',
+    evidence_status    TEXT NOT NULL DEFAULT 'pending',
+    finalization_status TEXT NOT NULL DEFAULT 'pending',
+    receipt_json       TEXT,
+    receipt_hash       TEXT,
+    spent_micros       INTEGER NOT NULL DEFAULT 0,
+    remaining_micros   INTEGER,
+    stop_reason        TEXT,
+    last_checkpoint_ref TEXT,
+    created_at         REAL NOT NULL,
+    updated_at         REAL NOT NULL,
+    UNIQUE(org_id, id)
+);
+CREATE INDEX IF NOT EXISTS ix_campaign_org ON acceptance_campaigns(org_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS acceptance_checks (
+    id                 TEXT PRIMARY KEY,
+    campaign_id        TEXT NOT NULL REFERENCES acceptance_campaigns(id) ON DELETE CASCADE,
+    org_id             TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    cell_id            TEXT NOT NULL,
+    attempt            INTEGER NOT NULL,
+    status             TEXT NOT NULL,
+    check_json         TEXT NOT NULL,
+    check_hash         TEXT NOT NULL,
+    created_at         REAL NOT NULL,
+    UNIQUE(campaign_id, cell_id, attempt)
+);
+CREATE INDEX IF NOT EXISTS ix_campaign_checks ON acceptance_checks(org_id, campaign_id, cell_id, attempt);
 """
 
 # Public prefix for ingest API keys. The secret is `ledger_sk_<random>`; only its
@@ -1005,6 +1056,10 @@ def _migrate_add_columns(conn) -> None:
         # existing rows and their historical hash canonical form.
         ("usage_events", "behavior_snapshot_json", "TEXT"),
         ("usage_events", "behavior_snapshot_hash", "TEXT"),
+        # v23 (#256/#257): campaign binding; nullable preserves existing chains.
+        ("usage_events", "campaign_id", "TEXT"),
+        ("usage_events", "campaign_binding_json", "TEXT"),
+        ("usage_events", "campaign_binding_hash", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
@@ -1023,6 +1078,230 @@ def _migrate_add_columns(conn) -> None:
             "CREATE INDEX IF NOT EXISTS ix_usage_user "
             "ON usage_events(org_id, user_id)"
         )
+
+
+def _campaign_row(row):
+    return dict(row) if row is not None else None
+
+
+def create_campaign(conn, org_id: str, manifest: dict, *, commit: bool = True) -> dict:
+    """Persist a hash-bound campaign manifest idempotently within one org."""
+    from . import campaigns
+    valid, errors = campaigns.validate_manifest(manifest)
+    if not valid:
+        raise ValueError("invalid campaign manifest: " + ", ".join(errors))
+    if not get_org(conn, org_id):
+        raise ValueError("organization not found")
+    cid = manifest["campaign_id"]
+    existing = conn.execute(
+        "SELECT * FROM acceptance_campaigns WHERE org_id=? AND id=?", (org_id, cid)
+    ).fetchone()
+    if existing:
+        if existing["manifest_hash"] != manifest["manifest_hash"]:
+            raise ValueError("manifest conflict")
+        return _campaign_row(existing)
+    now = time.time()
+    conn.execute(
+        "INSERT INTO acceptance_campaigns(id,org_id,manifest_json,manifest_hash,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?)",
+        (cid, org_id, json.dumps(manifest, sort_keys=True, separators=(",", ":")),
+         manifest["manifest_hash"], now, now),
+    )
+    if commit:
+        conn.commit()
+    return get_campaign(conn, org_id, cid)
+
+
+def get_campaign(conn, org_id: str, campaign_id: str) -> Optional[dict]:
+    row = conn.execute(
+        "SELECT * FROM acceptance_campaigns WHERE org_id=? AND id=?",
+        (org_id, campaign_id),
+    ).fetchone()
+    return _campaign_row(row)
+
+
+def list_campaign_checks(conn, org_id: str, campaign_id: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM acceptance_checks WHERE org_id=? AND campaign_id=? "
+        "ORDER BY cell_id, attempt",
+        (org_id, campaign_id),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _campaign_check_objects(conn, org_id: str, campaign_id: str) -> list[dict]:
+    return [json.loads(row["check_json"])
+            for row in list_campaign_checks(conn, org_id, campaign_id)]
+
+
+def campaign_usage_errors(conn, org_id: str, campaign_id: str,
+                          checks: list[dict]) -> list[str]:
+    """Validate that executed check references resolve to bound usage rows.
+
+    This is intentionally read-only and is applied at finalization/readback. A
+    runner may persist a check before its usage event arrives, but such a check
+    can never become a verified pass until the event exists and its binding
+    agrees with the check lineage.
+    """
+    from . import campaigns
+    errors: list[str] = []
+    seen: set[str] = set()
+    for check in checks:
+        if check.get("status") == "skip":
+            continue
+        event_ids = check.get("usage_event_ids") or []
+        for event_id in event_ids:
+            if event_id in seen:
+                errors.append(f"usage_duplicate:{event_id}")
+            seen.add(event_id)
+            row = conn.execute(
+                "SELECT id,campaign_id,campaign_binding_json FROM usage_events "
+                "WHERE org_id=? AND id=?", (org_id, event_id)
+            ).fetchone()
+            if row is None:
+                errors.append(f"usage_missing:{event_id}")
+                continue
+            if row["campaign_id"] != campaign_id:
+                errors.append(f"usage_campaign_mismatch:{event_id}")
+                continue
+            try:
+                binding = json.loads(row["campaign_binding_json"])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                errors.append(f"usage_binding_invalid:{event_id}")
+                continue
+            valid, binding_errors = campaigns.validate_binding(binding)
+            if not valid:
+                errors.extend(f"usage_binding:{event_id}:{item}" for item in binding_errors)
+                continue
+            for field in ("campaign_id", "cell_id", "lane", "config_hash",
+                          "attempt", "continuation", "parent_attempt",
+                          "action_intent_hash", "checkpoint_ref"):
+                if binding.get(field) != check.get(field):
+                    errors.append(f"usage_binding_mismatch:{event_id}:{field}")
+    return sorted(set(errors))
+
+
+def record_campaign_check(conn, org_id: str, check: dict, *, commit: bool = True) -> dict:
+    """Store one immutable campaign check; conflicting hashes never overwrite."""
+    from . import campaigns
+    valid, errors = campaigns.validate_check(check)
+    if not valid:
+        raise ValueError("invalid campaign check: " + ", ".join(errors))
+    campaign = get_campaign(conn, org_id, check["campaign_id"])
+    if campaign is None:
+        raise ValueError("campaign not found")
+    manifest = json.loads(campaign["manifest_json"])
+    if check["cell_id"] not in manifest["planned_cells"]:
+        raise ValueError("check cell_id is not planned")
+    if check["attempt"] > 1 and not manifest.get("continuation_allowed"):
+        raise ValueError("campaign continuation is not allowed by the manifest")
+    prior = _campaign_check_objects(conn, org_id, check["campaign_id"])
+    valid, errors = campaigns.validate_attempt_lineage(prior + [check])
+    if not valid:
+        raise ValueError("invalid campaign attempt lineage: " + ", ".join(errors))
+    existing = conn.execute(
+        "SELECT * FROM acceptance_checks WHERE org_id=? AND campaign_id=? AND cell_id=? AND attempt=?",
+        (org_id, check["campaign_id"], check["cell_id"], check["attempt"]),
+    ).fetchone()
+    if existing:
+        if existing["check_hash"] != check["check_hash"]:
+            raise ValueError("check conflict")
+        return dict(existing)
+    now = time.time()
+    conn.execute(
+        "INSERT INTO acceptance_checks(id,campaign_id,org_id,cell_id,attempt,status,check_json,check_hash,created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        (new_id("chk"), check["campaign_id"], org_id, check["cell_id"],
+         check["attempt"], check["status"],
+         json.dumps(check, sort_keys=True, separators=(",", ":")),
+         check["check_hash"], now),
+    )
+    conn.execute("UPDATE acceptance_campaigns SET updated_at=? WHERE id=? AND org_id=?",
+                 (now, check["campaign_id"], org_id))
+    if commit:
+        conn.commit()
+    return dict(conn.execute(
+        "SELECT * FROM acceptance_checks WHERE org_id=? AND campaign_id=? AND cell_id=? AND attempt=?",
+        (org_id, check["campaign_id"], check["cell_id"], check["attempt"]),
+    ).fetchone())
+
+
+def finalize_campaign(conn, org_id: str, receipt: dict, *, commit: bool = True) -> dict:
+    """Persist the final campaign receipt without mutating prior checks."""
+    from . import campaigns
+    campaign = get_campaign(conn, org_id, receipt.get("campaign_id"))
+    if campaign is None:
+        raise ValueError("campaign not found")
+    manifest = json.loads(campaign["manifest_json"])
+    checks = _campaign_check_objects(conn, org_id, receipt["campaign_id"])
+    verification = campaigns.verify_campaign_receipt(receipt, manifest=manifest, checks=checks)
+    actual_spend = campaign_spend_micros(conn, receipt["campaign_id"])
+    if receipt.get("spent_micros") != actual_spend:
+        verification["valid"] = False
+        verification["verified_pass"] = False
+        verification["integrity_ok"] = False
+        verification["reasons"] = sorted(set(verification["reasons"] + ["spent_micros_mismatch"]))
+    if receipt.get("target_status") == "pass":
+        usage_errors = campaign_usage_errors(conn, org_id, receipt["campaign_id"], checks)
+        if usage_errors:
+            verification["valid"] = False
+            verification["verified_pass"] = False
+            verification["integrity_ok"] = False
+            verification["reasons"] = sorted(set(verification["reasons"] + usage_errors))
+    if not verification["valid"]:
+        raise ValueError("invalid campaign receipt: " + ", ".join(verification["reasons"]))
+    if campaign["receipt_hash"] is not None:
+        if campaign["receipt_hash"] != receipt["receipt_hash"]:
+            raise ValueError("receipt conflict")
+        return campaign
+    now = time.time()
+    conn.execute(
+        "UPDATE acceptance_campaigns SET framework_status=?,target_status=?,budget_status=?,"
+        "evidence_status=?,finalization_status=?,receipt_json=?,receipt_hash=?,spent_micros=?,"
+        "remaining_micros=?,stop_reason=?,last_checkpoint_ref=?,updated_at=? WHERE id=? AND org_id=?",
+        (receipt["framework_status"], receipt["target_status"], receipt["budget_status"],
+         receipt["evidence_status"], receipt["finalization_status"],
+         json.dumps(receipt, sort_keys=True, separators=(",", ":")), receipt["receipt_hash"],
+         receipt["spent_micros"], receipt["remaining_micros"], receipt["stop_reason"],
+         receipt["last_checkpoint_ref"], now, receipt["campaign_id"], org_id),
+    )
+    if commit:
+        conn.commit()
+    return get_campaign(conn, org_id, receipt["campaign_id"])
+
+
+def campaign_spend_micros(conn, campaign_id: str) -> int:
+    row = conn.execute(
+        "SELECT COALESCE(SUM(cost_micros),0) AS spend FROM usage_events WHERE campaign_id=?",
+        (campaign_id,),
+    ).fetchone()
+    return int(row["spend"] or 0)
+
+
+def campaign_usage_count(conn, campaign_id: str) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS count FROM usage_events WHERE campaign_id=?",
+        (campaign_id,),
+    ).fetchone()
+    return int(row["count"] or 0)
+
+
+def mark_campaign_budget_stop(conn, org_id: str, campaign_id: str, *,
+                              remaining_micros: int, reason: str,
+                              commit: bool = True) -> dict:
+    """Durably mark a campaign stopped after a rejected spend admission."""
+    row = get_campaign(conn, org_id, campaign_id)
+    if row is None:
+        raise ValueError("campaign not found")
+    now = time.time()
+    conn.execute(
+        "UPDATE acceptance_campaigns SET budget_status='stopped',remaining_micros=?,"
+        "stop_reason=?,updated_at=? WHERE org_id=? AND id=?",
+        (max(0, int(remaining_micros)), reason, now, org_id, campaign_id),
+    )
+    if commit:
+        conn.commit()
+    return get_campaign(conn, org_id, campaign_id)
 
 
 def _table_columns(conn, table: str) -> set:
@@ -1693,6 +1972,7 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
            "ue.cache_read_tokens, ue.cache_write_tokens, ue.reasoning_tokens, "
            "ue.user_id, ue.cost_micros, "
            "ue.baseline_micros, ue.optimal_micros, ue.external_ref, "
+           "ue.campaign_id, ue.campaign_binding_json, "
            "ue.estimated, ue.source "
            "FROM usage_events ue "
            "LEFT JOIN workspaces w ON w.id=ue.workspace_id WHERE ue.org_id=?")
@@ -1715,6 +1995,8 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
         d["baseline_usd"] = None if bm is None else micros_to_usd(int(bm))
         om = d.pop("optimal_micros", None)
         d["optimal_usd"] = None if om is None else micros_to_usd(int(om))
+        binding = d.pop("campaign_binding_json", None)
+        d["campaign_binding"] = json.loads(binding) if binding is not None else None
         d["estimated"] = bool(d["estimated"])
         out.append(d)
     return out
