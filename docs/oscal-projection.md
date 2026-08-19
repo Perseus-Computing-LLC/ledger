@@ -45,11 +45,16 @@ being silently discarded.
 
 Raw prompts, memory bodies, provider payloads, credentials, private policy
 text, and other sensitive content are forbidden. References are bounded opaque
-labels without whitespace; only those references and source digests are
-retained.
+labels without whitespace; reserved scalar markers (`null`, booleans, `none`,
+`undefined`, `nan`, and raw-sensitive sentinel labels) are rejected as well.
+Only those references and source digests are retained.
+
+`observed_at` timestamps are normalized to UTC and ordered as parsed instants,
+including fractional seconds, rather than by lexical string order.
 
 `project_oscal()` validates both generated envelopes against the packaged official
-NIST OSCAL 1.2.3 JSON schemas before returning. The schemas are shipped with
+NIST OSCAL 1.2.3 JSON schemas before returning, including the schema format
+checker for UUID and timestamp constraints. The schemas are shipped with
 the package, while the test suite also keeps source fixtures for independent
 regression checks. The local validator normalizes only NIST's `\\p{L}`/`\\p{N}`
 pattern notation to equivalent ASCII classes because Python's standard regex
