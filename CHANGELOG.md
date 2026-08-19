@@ -5,6 +5,12 @@ All notable changes to Ledger are documented here.
 ## [Unreleased]
 
 ### Added
+- **Deterministic OSCAL evidence projection** (#259). A hash-only input
+  contract projects explicit Ledger evidence states into schema-valid OSCAL
+  1.2.3 Assessment Results and POA&M JSON/YAML, with stable UUIDs,
+  reproducible export hashes, coverage by expected/observed control, and
+  fail-closed handling for missing, unknown, stale, superseded, and
+  unreported evidence. See `docs/oscal-projection.md`.
 - **Runtime-contract enforcement** (#250). The Agent Trajectory Schema +
   Evidence Chain from arXiv:2608.11274: hash-chained trajectory events
   (`tool_call`, `tool_result`, `file_read`, `file_write`, `shell_exec`,

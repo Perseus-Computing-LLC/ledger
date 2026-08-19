@@ -14,5 +14,6 @@ stripe==13.2.0
 reportlab==4.5.1
 boto3==1.43.69
 invarium==0.3.1
+jsonschema==4.26.0
 build==1.5.0
 twine==7.0.0
