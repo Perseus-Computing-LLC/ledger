@@ -83,6 +83,7 @@ _TOMBSTONE_FIELDS = {
 }
 _MAX_OSCAL_EVIDENCE_REFS = 32
 _MAX_HISTORY_RECORDS = 256
+_MAX_VALIDATION_DEPTH = 64
 
 
 def _bounded_list(values: Iterable[Any] | None, *, limit: int, field: str) -> list[Any]:
@@ -102,11 +103,19 @@ def _bounded_list(values: Iterable[Any] | None, *, limit: int, field: str) -> li
             bounded.append(next(iterator))
         except StopIteration:
             return bounded
+        except Exception as exc:
+            raise ValueError(f"{field} iterator failed") from exc
     raise ValueError(f"{field} exceeds {limit} items")
 
 
 def canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def _sha(value: Any) -> str:
@@ -172,7 +181,10 @@ def _find_forbidden(
     value: Any,
     path: str = "",
     _seen: set[int] | None = None,
+    _depth: int = 0,
 ) -> list[str]:
+    if _depth > _MAX_VALIDATION_DEPTH:
+        return [f"depth:{path}"]
     seen = set() if _seen is None else _seen
     errors: list[str] = []
     if isinstance(value, Mapping):
@@ -189,7 +201,7 @@ def _find_forbidden(
                 if key_text == "oscal_evidence_refs" and isinstance(child, list) and len(child) > _MAX_OSCAL_EVIDENCE_REFS:
                     errors.append(f"{child_path}.too_many")
                     continue
-                errors.extend(_find_forbidden(child, child_path, seen))
+                errors.extend(_find_forbidden(child, child_path, seen, _depth + 1))
         finally:
             seen.remove(marker)
     elif isinstance(value, list):
@@ -199,7 +211,7 @@ def _find_forbidden(
         seen.add(marker)
         try:
             for index, child in enumerate(value):
-                errors.extend(_find_forbidden(child, f"{path}[{index}]", seen))
+                errors.extend(_find_forbidden(child, f"{path}[{index}]", seen, _depth + 1))
         finally:
             seen.remove(marker)
     return errors
@@ -230,7 +242,7 @@ def _decision_hash_matches(decision: Mapping[str, Any], claimed: str) -> bool:
                     legacy.pop(field, None)
             if claimed.lower() == decision_digest(legacy):
                 return True
-    except (TypeError, ValueError):
+    except (OverflowError, RecursionError, TypeError, ValueError):
         return False
     return False
 
@@ -334,7 +346,10 @@ def _decision_errors(decision: Any) -> list[str]:
 
 
 def validate_context_release_decision(decision: Mapping[str, Any]) -> tuple[bool, list[str]]:
-    errors = _decision_errors(decision)
+    try:
+        errors = _decision_errors(decision)
+    except Exception:
+        return False, ["malformed_decision"]
     return not errors, errors
 
 
@@ -391,6 +406,10 @@ def build_context_release_decision(
     for item in raw_refs:
         if not isinstance(item, Mapping):
             raise ValueError("OSCAL evidence references must be objects")
+        unknown = set(item) - {"ref", "digest"}
+        if unknown:
+            names = ", ".join(sorted((str(key) for key in unknown)))
+            raise ValueError("invalid OSCAL evidence reference: unknown:" + names)
         refs.append({
             "ref": _opaque_label(item.get("ref"), "oscal_evidence_refs.ref", max_len=1024),
             "digest": _digest(item.get("digest"), "oscal_evidence_refs.digest"),
@@ -469,8 +488,12 @@ def read_context_release_decision(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _result(decision: Mapping[str, Any], state: str, reason: str, **extra: Any) -> dict[str, Any]:
-    result = {"allowed": False, "state": state, "reason": reason, "decision_hash": decision.get("decision_hash")}
+def _result(decision: Any, state: str, reason: str, **extra: Any) -> dict[str, Any]:
+    try:
+        decision_hash = decision.get("decision_hash") if isinstance(decision, Mapping) else None
+    except Exception:
+        decision_hash = None
+    result = {"allowed": False, "state": state, "reason": reason, "decision_hash": decision_hash}
     result.update(extra)
     return result
 
@@ -513,7 +536,13 @@ def evaluate_publication(
     except ValueError:
         return _result(decision, "DENIED", "invalid_admission_time")
     for tombstone in tombstone_list:
-        tomb_valid, tomb_errors = validate_tombstone(tombstone)
+        try:
+            tomb_valid, tomb_errors = _validate_tombstone(
+                tombstone,
+                require_decision_binding=False,
+            )
+        except Exception:
+            tomb_valid, tomb_errors = False, ["malformed_tombstone"]
         if not tomb_valid:
             return _result(decision, "TAMPERED", "tombstone_invalid", validation_errors=tomb_errors)
         if _tombstone_matches(decision, tombstone):
@@ -631,10 +660,64 @@ def build_outbox_receipt(
         "publication_status": "DELIVERY_CONFIRMED",
     }
     receipt["receipt_hash"] = outbox_receipt_digest(receipt)
+    receipt_valid, receipt_errors = validate_outbox_receipt(receipt, decision=decision)
+    if not receipt_valid:
+        raise ValueError("invalid outbox receipt: " + ", ".join(receipt_errors))
     return receipt
 
 
-def validate_outbox_receipt(receipt: Mapping[str, Any]) -> tuple[bool, list[str]]:
+def _decision_binding_errors(
+    record: Mapping[str, Any],
+    decision: Mapping[str, Any] | None,
+    *,
+    record_kind: str,
+    require_decision_binding: bool = True,
+) -> list[str]:
+    if decision is None:
+        return ["decision_binding_required"] if require_decision_binding else []
+    if not isinstance(decision, Mapping):
+        return ["decision_binding"]
+    decision_valid, _ = validate_context_release_decision(decision)
+    if not decision_valid:
+        return ["decision_binding"]
+    fields = (
+        "decision_id", "decision_hash", "source_digest", "projection_digest",
+        "released_artifact_digest", "destination_scope",
+    )
+    if record_kind == "outbox":
+        fields += ("audience_class",)
+    if any(record.get(field) != decision.get(field) for field in fields):
+        return ["decision_binding"]
+    expected_id = _stable_id(record_kind, decision["decision_id"], decision["decision_hash"])
+    if record_kind == "tombstone":
+        expected_id = _stable_id(
+            "tombstone", decision["decision_id"], decision["decision_hash"], record["reason"],
+        )
+    id_field = "receipt_id" if record_kind == "outbox" else "tombstone_id"
+    if record.get(id_field) != expected_id:
+        return ["decision_binding"]
+    return []
+
+
+def _self_digest_matches(
+    record: Mapping[str, Any],
+    field: str,
+    digest_fn: Any,
+) -> bool:
+    try:
+        claimed = record.get(field)
+        if not isinstance(claimed, str):
+            return False
+        return claimed == digest_fn(record)
+    except Exception:
+        return False
+
+
+def _validate_outbox_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    decision: Mapping[str, Any] | None = None,
+) -> tuple[bool, list[str]]:
     if not isinstance(receipt, Mapping):
         return False, ["receipt"]
     errors = _find_forbidden(receipt)
@@ -659,9 +742,21 @@ def validate_outbox_receipt(receipt: Mapping[str, Any]) -> tuple[bool, list[str]
         errors.append("delivered_at")
     if receipt.get("publication_status") != "DELIVERY_CONFIRMED":
         errors.append("publication_status")
-    if not isinstance(receipt.get("receipt_hash"), str) or receipt.get("receipt_hash") != outbox_receipt_digest(receipt):
+    if not _self_digest_matches(receipt, "receipt_hash", outbox_receipt_digest):
         errors.append("receipt_hash")
+    errors.extend(_decision_binding_errors(receipt, decision, record_kind="outbox"))
     return not errors, sorted(set(errors))
+
+
+def validate_outbox_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    decision: Mapping[str, Any] | None = None,
+) -> tuple[bool, list[str]]:
+    try:
+        return _validate_outbox_receipt(receipt, decision=decision)
+    except Exception:
+        return False, ["malformed_receipt"]
 
 
 def tombstone_digest(tombstone: Mapping[str, Any]) -> str:
@@ -696,10 +791,18 @@ def build_publication_tombstone(
         "resurrection_blocked": True,
     }
     tombstone["tombstone_hash"] = tombstone_digest(tombstone)
+    tombstone_valid, tombstone_errors = validate_tombstone(tombstone, decision=decision)
+    if not tombstone_valid:
+        raise ValueError("invalid tombstone: " + ", ".join(tombstone_errors))
     return tombstone
 
 
-def validate_tombstone(tombstone: Mapping[str, Any]) -> tuple[bool, list[str]]:
+def _validate_tombstone(
+    tombstone: Mapping[str, Any],
+    *,
+    decision: Mapping[str, Any] | None = None,
+    require_decision_binding: bool = True,
+) -> tuple[bool, list[str]]:
     if not isinstance(tombstone, Mapping):
         return False, ["tombstone"]
     errors = _find_forbidden(tombstone)
@@ -733,9 +836,28 @@ def validate_tombstone(tombstone: Mapping[str, Any]) -> tuple[bool, list[str]]:
         errors.append("revocation_ref")
     if tombstone.get("content_free") is not True or tombstone.get("resurrection_blocked") is not True:
         errors.append("tombstone_flags")
-    if tombstone.get("tombstone_hash") != tombstone_digest(tombstone):
+    if not _self_digest_matches(tombstone, "tombstone_hash", tombstone_digest):
         errors.append("tombstone_hash")
+    errors.extend(
+        _decision_binding_errors(
+            tombstone,
+            decision,
+            record_kind="tombstone",
+            require_decision_binding=require_decision_binding,
+        )
+    )
     return not errors, sorted(set(errors))
+
+
+def validate_tombstone(
+    tombstone: Mapping[str, Any],
+    *,
+    decision: Mapping[str, Any] | None = None,
+) -> tuple[bool, list[str]]:
+    try:
+        return _validate_tombstone(tombstone, decision=decision)
+    except Exception:
+        return False, ["malformed_tombstone"]
 
 
 def check_idempotent_retry(
@@ -785,22 +907,41 @@ def check_publication_order(
     relevant = [
         prior for prior in prior_list
         if prior.get("source_ref") == decision.get("source_ref")
+        and prior.get("scope_anchor") == decision.get("scope_anchor")
         and prior.get("destination_scope") == decision.get("destination_scope")
     ]
-    if not relevant:
+    by_revision: dict[int, Mapping[str, Any]] = {}
+    for prior in relevant:
+        revision = prior["publication_revision"]
+        if revision in by_revision:
+            return {"allowed": False, "reason": "duplicate_revision"}
+        by_revision[revision] = prior
+    if not by_revision:
         if decision["publication_revision"] != 1:
             return {"allowed": False, "reason": "revision_gap"}
         if decision.get("previous_decision_hash") is not None:
             return {"allowed": False, "reason": "lineage_mismatch"}
         return {"allowed": True, "reason": "first_revision"}
-    latest = max(relevant, key=lambda prior: prior.get("publication_revision", 0))
-    if decision["publication_revision"] <= latest["publication_revision"]:
-        if decision.get("decision_hash") == latest.get("decision_hash"):
+
+    latest_revision = max(by_revision)
+    if set(by_revision) != set(range(1, latest_revision + 1)):
+        return {"allowed": False, "reason": "revision_history_incomplete"}
+    for revision in range(1, latest_revision + 1):
+        current = by_revision[revision]
+        if revision == 1:
+            if current.get("previous_decision_hash") is not None:
+                return {"allowed": False, "reason": "lineage_mismatch"}
+        elif current.get("previous_decision_hash") != by_revision[revision - 1].get("decision_hash"):
+            return {"allowed": False, "reason": "lineage_mismatch"}
+
+    current_revision = decision["publication_revision"]
+    if current_revision in by_revision:
+        if decision.get("decision_hash") == by_revision[current_revision].get("decision_hash"):
             return {"allowed": True, "reason": "idempotent_retry"}
         return {"allowed": False, "reason": "out_of_order_publication"}
-    if decision["publication_revision"] != latest["publication_revision"] + 1:
+    if current_revision != latest_revision + 1:
         return {"allowed": False, "reason": "revision_gap"}
-    if decision.get("previous_decision_hash") != latest.get("decision_hash"):
+    if decision.get("previous_decision_hash") != by_revision[latest_revision].get("decision_hash"):
         return {"allowed": False, "reason": "lineage_mismatch"}
     return {"allowed": True, "reason": "next_revision"}
 

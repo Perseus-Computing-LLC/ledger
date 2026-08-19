@@ -78,10 +78,20 @@ the original decision and any later decision that reuses the same source /
 projection / destination tuple. A new safe projection must carry a new digest,
 revision, and prior-decision lineage.
 
+`validate_outbox_receipt()` and `validate_tombstone()` require the authoritative
+decision as keyword context; omitting it is invalid. With that context they
+cross-bind the decision ID/hash, source/projection/artifact digests,
+destination, and deterministic record ID before accepting a self-digest.
+Builders run the same bound validation before returning. Malformed mappings,
+cyclic/unsupported values, non-finite JSON numbers, iterator failures, and
+excessively deep nested values fail closed without echoing raw values.
+
 `check_idempotent_retry()` permits an exact same-hash retry but rejects reuse
 of an idempotency key with a changed payload. `check_publication_order()`
-requires contiguous revisions and the exact previous decision hash, blocking
-out-of-order publication.
+requires a complete, scope-bound, contiguous revision chain with unique
+revision numbers and exact predecessor hashes; missing predecessors,
+duplicate revisions, conflicting lineage, and out-of-order publication are
+blocked.
 
 ## OSCAL linkage
 

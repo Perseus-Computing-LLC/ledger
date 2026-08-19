@@ -77,6 +77,11 @@ All notable changes to Ledger are documented here.
   revocation state, fractional expiry boundaries, cyclic/malformed mappings,
   and legacy normalized decision hashes now fail closed without exceptions;
   optional-field compatibility remains structurally revalidatable.
+- **Context-release review follow-up** (#260). Direct outbox/tombstone
+  validators now require and cross-bind an authoritative decision, malformed
+  records and iterators fail closed, nested OSCAL reference keys are rejected
+  instead of dropped, and publication order requires a complete unique
+  scope-bound predecessor chain.
 - **Remote-mode `Meter.track` no longer drops the savings fields** (#143). The
   `/v1/usage` response has carried `savings_usd`/`leaked_usd` since #7/#134,
   but the SDK's response→result mapping predated them, so a remote `track()`
