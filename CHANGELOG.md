@@ -73,6 +73,10 @@ All notable changes to Ledger are documented here.
   sentinels are rejected from opaque evidence references, schema validation
   enforces UUID/timestamp formats, and fractional-second observations are
   ordered by timestamp value instead of lexical spelling.
+- **Context-release admission hardening** (#260 follow-up). Unknown
+  revocation state, fractional expiry boundaries, cyclic/malformed mappings,
+  and legacy normalized decision hashes now fail closed without exceptions;
+  optional-field compatibility remains structurally revalidatable.
 - **Remote-mode `Meter.track` no longer drops the savings fields** (#143). The
   `/v1/usage` response has carried `savings_usd`/`leaked_usd` since #7/#134,
   but the SDK's response→result mapping predated them, so a remote `track()`

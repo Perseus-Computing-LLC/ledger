@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any, cast
 
 import pytest
 
@@ -104,6 +105,18 @@ def test_legacy_reader_preserves_hash_validity_and_defaults_new_fields():
     assert set(result["legacy_fields_missing"]) == {"revocation_ref", "oscal_evidence_refs"}
     assert result["decision"]["revocation_ref"] is None
     assert result["decision"]["oscal_evidence_refs"] == []
+
+
+def test_legacy_reader_defaults_remain_valid_for_downstream_admission():
+    legacy = make_decision()
+    legacy.pop("revocation_ref")
+    legacy.pop("oscal_evidence_refs")
+    legacy["decision_hash"] = context_release.decision_digest(legacy)
+
+    result = context_release.read_context_release_decision(legacy)
+
+    assert context_release.validate_context_release_decision(result["decision"]) == (True, [])
+    assert admission(result["decision"])["reason"] == "oscal_evidence_missing"
 
 
 def test_internal_visibility_cannot_authorize_external_publication():
@@ -371,6 +384,53 @@ def test_decision_revocation_ref_and_evidence_reference_count_are_bounded():
     ]
     with pytest.raises(ValueError, match="oscal_evidence_refs"):
         make_decision(idempotency_key="too-many-refs", oscal_evidence_refs=refs)
+
+
+@pytest.mark.parametrize("external_release", [False, True])
+def test_unknown_revocation_state_blocks_all_publication_modes(external_release):
+    decision = make_decision(revocation_state="unknown")
+
+    result = admission(decision, external_release=external_release)
+
+    assert result["allowed"] is False
+    assert result["reason"] == "revocation_state_not_clear"
+
+
+def test_fractional_expiry_is_compared_as_an_instant():
+    decision = make_decision(
+        decision_at="2026-08-19T12:00:00Z",
+        expires_at="2026-08-19T12:00:00.100000Z",
+    )
+
+    result = admission(decision, now="2026-08-19T12:00:00Z")
+
+    assert result["allowed"] is True
+
+
+def test_malformed_non_string_keys_fail_closed_without_raising():
+    forged = make_decision()
+    cast(Any, forged)[1] = "raw scalar"
+
+    valid, errors = context_release.validate_context_release_decision(forged)
+    result = admission(forged)
+
+    assert valid is False
+    assert any(error.startswith("unknown:") for error in errors)
+    assert result["allowed"] is False
+    assert result["state"] == "TAMPERED"
+
+
+def test_cyclic_malformed_input_fails_closed_without_recursion_error():
+    forged = make_decision()
+    cast(Any, forged)["cycle"] = forged
+
+    valid, errors = context_release.validate_context_release_decision(forged)
+    result = admission(forged)
+
+    assert valid is False
+    assert any(error.startswith("cycle:") for error in errors)
+    assert result["allowed"] is False
+    assert result["state"] == "TAMPERED"
 
 
 @pytest.mark.parametrize("external_release", [0, 1, "false", None])
