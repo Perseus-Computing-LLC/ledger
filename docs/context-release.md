@@ -29,11 +29,15 @@ payload fields are rejected. A changed projection, policy, authority,
 redaction receipt, or released artifact therefore cannot reuse an earlier
 decision hash.
 
+Timestamps are normalized to UTC and compared as parsed instants, including
+fractional seconds; admission does not use lexical ordering for expiry.
+
 The reader accepts older v1 records that omitted optional fields by verifying
 the hash over the exact older field set, then reporting the missing fields and
-adding read-time defaults. Read compatibility never upgrades authorization:
-publication admission still requires fresh evidence and explicit external-safe
-references.
+adding read-time defaults. The normalized record remains structurally
+revalidatable against its legacy hash basis. Read compatibility never upgrades
+authorization: publication admission still requires fresh evidence and explicit
+external-safe references.
 
 ## Fail-closed admission
 
@@ -48,6 +52,7 @@ all of the following:
 - available classifier and complete redaction;
 - fresh evidence and a present redaction receipt;
 - active authority and exact scope/destination matches;
+- `not-revoked` revocation state;
 - requester/approver separation;
 - unexpired approval;
 - released-artifact digest and at least one OSCAL evidence reference.

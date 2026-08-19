@@ -151,7 +151,7 @@ def _purpose_code(value: Any, field: str, *, optional: bool = False) -> str | No
     return value
 
 
-def _timestamp(value: Any, field: str) -> str:
+def _parse_timestamp(value: Any, field: str) -> datetime:
     value = _text(value, field, max_len=64)
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -159,26 +159,49 @@ def _timestamp(value: Any, field: str) -> str:
         raise ValueError(f"{field} must be an ISO-8601 timestamp") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"{field} must include a timezone")
-    parsed = parsed.astimezone(timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _timestamp(value: Any, field: str) -> str:
+    parsed = _parse_timestamp(value, field)
     timespec = "microseconds" if parsed.microsecond else "seconds"
     return parsed.isoformat(timespec=timespec).replace("+00:00", "Z")
 
 
-def _find_forbidden(value: Any, path: str = "") -> list[str]:
+def _find_forbidden(
+    value: Any,
+    path: str = "",
+    _seen: set[int] | None = None,
+) -> list[str]:
+    seen = set() if _seen is None else _seen
     errors: list[str] = []
     if isinstance(value, Mapping):
-        for key, child in value.items():
-            key_text = str(key).lower()
-            child_path = f"{path}.{key}" if path else str(key)
-            if key_text in _FORBIDDEN_KEYS or key_text.startswith("raw_"):
-                errors.append(f"forbidden:{child_path}")
-            if key_text == "oscal_evidence_refs" and isinstance(child, list) and len(child) > _MAX_OSCAL_EVIDENCE_REFS:
-                errors.append(f"{child_path}.too_many")
-                continue
-            errors.extend(_find_forbidden(child, child_path))
+        marker = id(value)
+        if marker in seen:
+            return [f"cycle:{path}"]
+        seen.add(marker)
+        try:
+            for key, child in value.items():
+                key_text = str(key).lower()
+                child_path = f"{path}.{key}" if path else str(key)
+                if key_text in _FORBIDDEN_KEYS or key_text.startswith("raw_"):
+                    errors.append(f"forbidden:{child_path}")
+                if key_text == "oscal_evidence_refs" and isinstance(child, list) and len(child) > _MAX_OSCAL_EVIDENCE_REFS:
+                    errors.append(f"{child_path}.too_many")
+                    continue
+                errors.extend(_find_forbidden(child, child_path, seen))
+        finally:
+            seen.remove(marker)
     elif isinstance(value, list):
-        for index, child in enumerate(value):
-            errors.extend(_find_forbidden(child, f"{path}[{index}]") )
+        marker = id(value)
+        if marker in seen:
+            return [f"cycle:{path}"]
+        seen.add(marker)
+        try:
+            for index, child in enumerate(value):
+                errors.extend(_find_forbidden(child, f"{path}[{index}]", seen))
+        finally:
+            seen.remove(marker)
     return errors
 
 
@@ -189,6 +212,27 @@ def _stable_id(kind: str, *parts: str) -> str:
 
 def decision_digest(decision: Mapping[str, Any]) -> str:
     return _sha({key: value for key, value in decision.items() if key != "decision_hash"})
+
+
+def _decision_hash_matches(decision: Mapping[str, Any], claimed: str) -> bool:
+    optional_defaults = (
+        ("revocation_ref", None),
+        ("previous_decision_hash", None),
+        ("oscal_evidence_refs", []),
+    )
+    try:
+        if claimed.lower() == decision_digest(decision):
+            return True
+        for mask in range(1, 1 << len(optional_defaults)):
+            legacy = dict(decision)
+            for index, (field, default) in enumerate(optional_defaults):
+                if mask & (1 << index) and legacy.get(field) == default:
+                    legacy.pop(field, None)
+            if claimed.lower() == decision_digest(legacy):
+                return True
+    except (TypeError, ValueError):
+        return False
+    return False
 
 
 def _ref_digest_errors(value: Any, path: str) -> list[str]:
@@ -203,7 +247,10 @@ def _ref_digest_errors(value: Any, path: str) -> list[str]:
             continue
         errors.extend(_find_forbidden(item, f"{path}[{index}]") )
         if set(item) != {"ref", "digest"}:
-            errors.extend(f"unknown:{path}[{index}].{key}" for key in sorted(set(item) - {"ref", "digest"}))
+            errors.extend(
+                f"unknown:{path}[{index}].{key}"
+                for key in sorted(set(item) - {"ref", "digest"}, key=str)
+            )
         try:
             _opaque_label(item.get("ref"), f"{path}[{index}].ref", max_len=1024)
         except ValueError:
@@ -219,7 +266,8 @@ def _decision_errors(decision: Any) -> list[str]:
     if not isinstance(decision, Mapping):
         return ["decision"]
     errors = _find_forbidden(decision)
-    errors.extend(f"unknown:{key}" for key in sorted(set(decision) - _ALLOWED_FIELDS))
+    unknown_fields = set(decision) - _ALLOWED_FIELDS
+    errors.extend(f"unknown:{key}" for key in sorted(unknown_fields, key=str))
     if decision.get("schema") != CONTEXT_RELEASE_SCHEMA:
         errors.append("schema")
     label_fields = (
@@ -257,7 +305,7 @@ def _decision_errors(decision: Any) -> list[str]:
             errors.append(field)
     if isinstance(decision.get("decision_at"), str) and isinstance(decision.get("expires_at"), str):
         try:
-            if _timestamp(decision["expires_at"], "expires_at") < _timestamp(decision["decision_at"], "decision_at"):
+            if _parse_timestamp(decision["expires_at"], "expires_at") < _parse_timestamp(decision["decision_at"], "decision_at"):
                 errors.append("expiry_not_after_decision")
         except ValueError:
             pass
@@ -280,7 +328,7 @@ def _decision_errors(decision: Any) -> list[str]:
     digest = decision.get("decision_hash")
     if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
         errors.append("decision_hash")
-    elif digest.lower() != decision_digest(decision):
+    elif not _decision_hash_matches(decision, digest):
         errors.append("decision_hash_mismatch")
     return sorted(set(errors))
 
@@ -459,9 +507,9 @@ def evaluate_publication(
     except ValueError:
         return _result(decision, "TAMPERED", "tombstone_history_too_large")
     try:
-        current = _timestamp(now, "now")
-        decision_at = _timestamp(decision["decision_at"], "decision_at")
-        expires_at = _timestamp(decision["expires_at"], "expires_at")
+        current = _parse_timestamp(now, "now")
+        decision_at = _parse_timestamp(decision["decision_at"], "decision_at")
+        expires_at = _parse_timestamp(decision["expires_at"], "expires_at")
     except ValueError:
         return _result(decision, "DENIED", "invalid_admission_time")
     for tombstone in tombstone_list:
@@ -472,6 +520,8 @@ def evaluate_publication(
             return _result(decision, "DENIED", "publication_tombstoned")
     if decision["authority_state"] == "revoked" or decision["revocation_state"] == "revoked" or decision["decision_state"] == "REVOKED":
         return _result(decision, "REVOKED", "authority_revoked")
+    if decision["revocation_state"] != "not-revoked":
+        return _result(decision, "DENIED", "revocation_state_not_clear")
     if decision["decision_state"] == "TAMPERED":
         return _result(decision, "TAMPERED", "decision_marked_tampered")
     if current >= expires_at:
