@@ -116,6 +116,7 @@ Ledger integrity is not a marketing assertion. It is checked from the recorded c
 - [Ledger integrity](docs/ledger-integrity.md)
 - [Continuous attestation](docs/continuous-attestation.md) — admission vs. runtime evidence; attestation blocks; mechanical vs. reasoning provenance
 - [Evidence receipts](docs/evidence-receipts.md) — task-scoped, machine-readable views of hash-chained events
+- [Deterministic OSCAL projection](docs/oscal-projection.md) — bounded Assessment Results and POA&M evidence exports
 - [API reference](docs/api.md)
 - [Schema](docs/schema.md)
 - [Reconciliation](docs/reconciliation.md) — optional provider-cost and Stripe settlement reconciliation

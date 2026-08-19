@@ -32,6 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "PyYAML>=5.4,<7",
+    "jsonschema>=4.18,<5",
 ]
 
 [project.optional-dependencies]
@@ -49,8 +50,8 @@ fetchers = ["boto3>=1.28"]
 # accuracy-gated savings metering. Only needed to run tests/examples that pair
 # behavioral verdicts with metering; the bridge itself is dependency-free.
 invarium = ["invarium>=0.3"]
-all = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "sentry-sdk>=2.0,<3", "invarium>=0.3; python_version >= '3.10'"]
-dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "pytest>=7.0,<10", "sentry-sdk>=2.0,<3", "invarium>=0.3; python_version >= '3.10'"]
+all = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "sentry-sdk>=2.0,<3", "invarium>=0.3; python_version >= '3.10'", "jsonschema>=4.18,<5"]
+dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "pytest>=7.0,<10", "sentry-sdk>=2.0,<3", "invarium>=0.3; python_version >= '3.10'", "jsonschema>=4.18,<5"]
 
 [project.urls]
 Homepage = "https://perseus.observer/ledger/"
@@ -78,4 +79,8 @@ packages = [
     "ledger_agent.billing",
     "ledger_agent.server",
     "ledger_agent.integrations",
+    "ledger_agent.schemas",
 ]
+
+[tool.setuptools.package-data]
+ledger_agent = ["schemas/*.json"]
