@@ -43,6 +43,20 @@ ATTESTATION_STATES = ("attested", "not-attested", "pending", "unknown")
 _OSCAL_UUID_NAMESPACE = uuid.UUID("8e4e3c82-6f4e-5ef1-8c67-49e6e1a6a2e0")
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+#%?=&,-]{0,1023}$")
+_REF_RESERVED_VALUES = frozenset(
+    {
+        "false",
+        "nan",
+        "none",
+        "null",
+        "raw-sensitive-sentinel",
+        "raw_sensitive_sentinel",
+        "raw-sentinel",
+        "raw_sentinel",
+        "undefined",
+        "true",
+    }
+)
 _TOKEN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9.\-_]*$")
 _VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$")
 _FORBIDDEN_KEYS = {
@@ -121,8 +135,8 @@ def _timestamp(value: Any, field: str) -> str:
 
 def _opaque_ref(value: Any, field: str) -> str:
     value = _text(value, field, max_len=1024)
-    if not _REF_RE.fullmatch(value):
-        raise ValueError(f"{field} must be an opaque reference without whitespace")
+    if not _REF_RE.fullmatch(value) or value.casefold() in _REF_RESERVED_VALUES:
+        raise ValueError(f"{field} must be an opaque reference without whitespace or reserved scalar markers")
     return value
 
 
@@ -352,7 +366,11 @@ def _observation(
     clean: bool,
     assessment_end: str,
 ) -> dict[str, Any]:
-    observed_at = max((event["observed_at"] for event in events), default=assessment_end)
+    observed_at = max(
+        (event["observed_at"] for event in events),
+        key=lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")),
+        default=assessment_end,
+    )
     digests = sorted({item["digest"] for event in events for item in event["evidence"]})
     observation = {
         "uuid": _stable_uuid("observation", control_id),

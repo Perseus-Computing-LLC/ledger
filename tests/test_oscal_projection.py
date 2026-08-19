@@ -242,6 +242,46 @@ def test_observed_without_retained_evidence_is_not_clean():
     assert finding["target"]["status"]["state"] == "not-satisfied"
 
 
+@pytest.mark.parametrize(
+    "sentinel",
+    ["RAW-SENSITIVE-SENTINEL", "null", "true", "false", "none", "undefined"],
+)
+def test_opaque_evidence_refs_reject_reserved_scalar_sentinels(sentinel: str):
+    event = _event("evt-ref-sentinel", "ac-2")
+    event["evidence"][0]["ref"] = sentinel
+
+    with pytest.raises(ValueError, match="ref"):
+        oscal.validate_ledger_event(event)
+
+    event["evidence"][0]["ref"] = "ledger:evidence/valid"
+    event["evidence"][0]["superseded_by"] = sentinel
+    with pytest.raises(ValueError, match="superseded_by"):
+        oscal.validate_ledger_event(event)
+
+
+def test_production_validator_rejects_an_invalid_uuid_in_isolation():
+    malformed = deepcopy(_project([_event("evt-uuid", "ac-2")])["assessment_results"])
+    malformed["assessment-results"]["uuid"] = "not-a-uuid"
+
+    valid, errors = oscal.validate_oscal_document(malformed, "assessment-results")
+
+    assert valid is False
+    assert errors
+    assert all("not-a-uuid" not in error for error in errors)
+
+
+def test_projection_orders_fractional_timestamps_numerically():
+    whole_second = _event("evt-whole-second", "ac-2")
+    fractional_second = _event("evt-fractional-second", "ac-2")
+    whole_second["observed_at"] = "2026-08-19T12:00:00Z"
+    fractional_second["observed_at"] = "2026-08-19T12:00:00.500000Z"
+
+    projected = _project([whole_second, fractional_second])
+    observation = projected["assessment_results"]["assessment-results"]["results"][0]["observations"][0]
+
+    assert observation["collected"] == "2026-08-19T12:00:00.500000Z"
+
+
 def test_round_trip_and_stable_ids_do_not_depend_on_input_order():
     events = [_event("evt-ac-3", "ac-3"), _event("evt-ac-2", "ac-2")]
     reversed_events = list(reversed(events))

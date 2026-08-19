@@ -69,6 +69,10 @@ All notable changes to Ledger are documented here.
   (#4/#164) pass.
 
 ### Fixed
+- **OSCAL projection boundary hardening** (#259 follow-up). Reserved scalar
+  sentinels are rejected from opaque evidence references, schema validation
+  enforces UUID/timestamp formats, and fractional-second observations are
+  ordered by timestamp value instead of lexical spelling.
 - **Remote-mode `Meter.track` no longer drops the savings fields** (#143). The
   `/v1/usage` response has carried `savings_usd`/`leaked_usd` since #7/#134,
   but the SDK's response→result mapping predated them, so a remote `track()`
