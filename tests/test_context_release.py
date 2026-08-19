@@ -15,6 +15,11 @@ INTERNAL_DEST = "workspace:synthetic"
 EXTERNAL_DEST = "proposal-partner:synthetic"
 
 
+class ExplodingMapping(dict):
+    def items(self):
+        raise RuntimeError("malformed mapping")
+
+
 def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -181,7 +186,7 @@ def test_approved_external_public_safe_release_requires_outbox_receipt():
     assert receipt["decision_hash"] == decision["decision_hash"]
     assert receipt["released_artifact_digest"] == decision["released_artifact_digest"]
     assert receipt["receipt_hash"] == context_release.outbox_receipt_digest(receipt)
-    assert context_release.validate_outbox_receipt(receipt) == (True, [])
+    assert context_release.validate_outbox_receipt(receipt, decision=decision) == (True, [])
 
     forged = dict(receipt)
     forged["notes"] = "raw prompt content must never enter a receipt"
@@ -274,7 +279,7 @@ def test_tombstone_blocks_resurrection_but_allows_a_new_projection():
     assert blocked["allowed"] is False
     assert blocked["reason"] == "publication_tombstoned"
     assert allowed["allowed"] is True
-    assert context_release.validate_tombstone(tombstone) == (True, [])
+    assert context_release.validate_tombstone(tombstone, decision=decision) == (True, [])
 
     forged = dict(tombstone)
     forged["notes"] = "raw prompt content must never enter a tombstone"
@@ -282,6 +287,29 @@ def test_tombstone_blocks_resurrection_but_allows_a_new_projection():
     valid, errors = context_release.validate_tombstone(forged)
     assert valid is False
     assert "unknown:notes" in errors
+
+
+def test_old_tombstone_does_not_block_a_new_projection_in_history():
+    decision = make_decision(idempotency_key="old-tombstone-history-key")
+    tombstone = context_release.build_publication_tombstone(
+        decision,
+        reason="REVOKED",
+        tombstone_at=NOW,
+        revocation_ref="authority:old-history",
+    )
+    new_projection = make_decision(
+        decision_id="release:ctx-1:new-history-projection",
+        projection_ref="vault:projection/ctx-1-safe-history-v2",
+        projection_digest=digest("projection-history-v2"),
+        released_artifact_digest=digest("released-history-v2"),
+        publication_revision=2,
+        previous_decision_hash=decision["decision_hash"],
+        idempotency_key="new-history-projection-key",
+    )
+
+    result = admission(new_projection, tombstones=[tombstone])
+
+    assert result["allowed"] is True
 
 
 def test_retry_is_idempotent_and_changed_payload_cannot_reuse_key():
@@ -516,3 +544,217 @@ def test_history_iterables_are_bounded_fail_closed():
     result = admission(decision, tombstones=tombstones)
     assert result["allowed"] is False
     assert result["reason"] == "tombstone_history_too_large"
+
+
+def test_non_mapping_decision_returns_fail_closed_result_without_raising():
+    result = context_release.evaluate_publication(
+        cast(Any, ["not", "a", "decision"]),
+        now=NOW,
+        required_scope=SCOPE,
+        required_destination=EXTERNAL_DEST,
+        external_release=True,
+    )
+
+    assert result["allowed"] is False
+    assert result["state"] == "TAMPERED"
+    assert result["reason"] == "decision_hash_invalid"
+    assert result["decision_hash"] is None
+
+
+def test_deep_malformed_input_fails_closed_without_recursion_error():
+    forged = make_decision()
+    nested: dict[str, Any] = {}
+    forged["extra"] = nested
+    cursor = nested
+    for _ in range(256):
+        child: dict[str, Any] = {}
+        cursor["child"] = child
+        cursor = child
+
+    valid, errors = context_release.validate_context_release_decision(forged)
+
+    assert valid is False
+    assert any(error.startswith("depth:") for error in errors)
+
+
+def test_canonical_json_rejects_non_finite_and_unsupported_values():
+    with pytest.raises(ValueError):
+        context_release.canonical_json({"value": float("nan")})
+    with pytest.raises(TypeError):
+        context_release.canonical_json({"value": object()})
+
+
+def test_builder_rejects_unknown_nested_oscal_reference_keys():
+    with pytest.raises(ValueError, match="unknown"):
+        make_decision(
+            idempotency_key="nested-unknown-key",
+            oscal_evidence_refs=[
+                {
+                    "ref": "ledger:oscal/assessment-results",
+                    "digest": digest("oscal-ar-v1"),
+                    "notes": "must not be silently dropped",
+                },
+            ],
+        )
+
+
+def test_receipt_and_tombstone_validators_require_decision_binding():
+    decision = make_decision(idempotency_key="binding-required-key")
+    receipt = context_release.build_outbox_receipt(
+        decision,
+        tombstones=[],
+        delivered_at="2026-08-19T12:15:00Z",
+        transport_receipt_ref="transport:binding-required",
+        transport_receipt_digest=digest("transport-binding-required"),
+    )
+    tombstone = context_release.build_publication_tombstone(
+        decision,
+        reason="REVOKED",
+        tombstone_at=LATER,
+        revocation_ref="authority:binding-required",
+    )
+
+    assert context_release.validate_outbox_receipt(receipt) == (
+        False,
+        ["decision_binding_required"],
+    )
+    assert context_release.validate_outbox_receipt(receipt, decision=decision) == (True, [])
+    assert context_release.validate_tombstone(tombstone) == (
+        False,
+        ["decision_binding_required"],
+    )
+    assert context_release.validate_tombstone(tombstone, decision=decision) == (True, [])
+
+    forged_receipt = dict(receipt)
+    forged_receipt["decision_id"] = "release:forged"
+    forged_receipt["receipt_hash"] = context_release.outbox_receipt_digest(forged_receipt)
+    valid, errors = context_release.validate_outbox_receipt(forged_receipt, decision=decision)
+    assert valid is False
+    assert "decision_binding" in errors
+
+    forged_audience = dict(receipt)
+    forged_audience["audience_class"] = "INTERNAL_AGENT"
+    forged_audience["receipt_hash"] = context_release.outbox_receipt_digest(forged_audience)
+    valid, errors = context_release.validate_outbox_receipt(forged_audience, decision=decision)
+    assert valid is False
+    assert "decision_binding" in errors
+
+    forged_tombstone = dict(tombstone)
+    forged_tombstone["destination_scope"] = INTERNAL_DEST
+    forged_tombstone["tombstone_hash"] = context_release.tombstone_digest(forged_tombstone)
+    valid, errors = context_release.validate_tombstone(forged_tombstone, decision=decision)
+    assert valid is False
+    assert "decision_binding" in errors
+
+
+def test_receipt_and_tombstone_validation_rejects_unsupported_and_cyclic_values():
+    decision = make_decision(idempotency_key="malformed-record-key")
+    receipt = context_release.build_outbox_receipt(
+        decision,
+        tombstones=[],
+        delivered_at="2026-08-19T12:15:00Z",
+        transport_receipt_ref="transport:malformed-record",
+        transport_receipt_digest=digest("transport-malformed-record"),
+    )
+    forged_receipt = dict(receipt)
+    forged_receipt["notes"] = object()
+    valid, _ = context_release.validate_outbox_receipt(forged_receipt, decision=decision)
+    assert valid is False
+
+    forged_tombstone = context_release.build_publication_tombstone(
+        decision,
+        reason="REVOKED",
+        tombstone_at=LATER,
+        revocation_ref="authority:malformed-record",
+    )
+    forged_tombstone["notes"] = forged_tombstone
+    valid, _ = context_release.validate_tombstone(forged_tombstone, decision=decision)
+    assert valid is False
+
+
+def test_publication_order_rejects_missing_predecessors_and_ambiguous_history():
+    first = make_decision(idempotency_key="lineage-first")
+    second = make_decision(
+        decision_id="release:ctx-1:lineage-second",
+        projection_ref="vault:projection/ctx-1-lineage-v2",
+        projection_digest=digest("projection-lineage-v2"),
+        released_artifact_digest=digest("released-lineage-v2"),
+        publication_revision=2,
+        previous_decision_hash=first["decision_hash"],
+        idempotency_key="lineage-second",
+    )
+    third = make_decision(
+        decision_id="release:ctx-1:lineage-third",
+        projection_ref="vault:projection/ctx-1-lineage-v3",
+        projection_digest=digest("projection-lineage-v3"),
+        released_artifact_digest=digest("released-lineage-v3"),
+        publication_revision=3,
+        previous_decision_hash=second["decision_hash"],
+        idempotency_key="lineage-third",
+    )
+    conflicting_first = make_decision(
+        decision_id="release:ctx-1:lineage-conflict",
+        projection_ref="vault:projection/ctx-1-lineage-conflict",
+        projection_digest=digest("projection-lineage-conflict"),
+        released_artifact_digest=digest("released-lineage-conflict"),
+        publication_revision=1,
+        idempotency_key="lineage-conflict",
+    )
+    broken_second = make_decision(
+        decision_id="release:ctx-1:lineage-broken-second",
+        projection_ref="vault:projection/ctx-1-lineage-broken-v2",
+        projection_digest=digest("projection-lineage-broken-v2"),
+        released_artifact_digest=digest("released-lineage-broken-v2"),
+        publication_revision=2,
+        previous_decision_hash=digest("missing-parent"),
+        idempotency_key="lineage-broken-second",
+    )
+    broken_third = make_decision(
+        decision_id="release:ctx-1:lineage-broken-third",
+        projection_ref="vault:projection/ctx-1-lineage-broken-v3",
+        projection_digest=digest("projection-lineage-broken-v3"),
+        released_artifact_digest=digest("released-lineage-broken-v3"),
+        publication_revision=3,
+        previous_decision_hash=broken_second["decision_hash"],
+        idempotency_key="lineage-broken-third",
+    )
+
+    assert context_release.check_publication_order(third, [second]) == {
+        "allowed": False,
+        "reason": "revision_history_incomplete",
+    }
+    assert context_release.check_publication_order(second, [first, conflicting_first]) == {
+        "allowed": False,
+        "reason": "duplicate_revision",
+    }
+    assert context_release.check_publication_order(broken_third, [first, broken_second]) == {
+        "allowed": False,
+        "reason": "lineage_mismatch",
+    }
+
+
+def test_malformed_mapping_validators_fail_closed_without_raising():
+    malformed = cast(Any, ExplodingMapping())
+
+    decision_valid, decision_errors = context_release.validate_context_release_decision(malformed)
+    receipt_valid, receipt_errors = context_release.validate_outbox_receipt(malformed)
+    tombstone_valid, tombstone_errors = context_release.validate_tombstone(malformed)
+
+    assert decision_valid is False
+    assert decision_errors == ["malformed_decision"]
+    assert receipt_valid is False
+    assert receipt_errors == ["malformed_receipt"]
+    assert tombstone_valid is False
+    assert tombstone_errors == ["malformed_tombstone"]
+
+
+def test_iterable_failures_are_converted_to_bounded_input_errors():
+    def broken_references():
+        yield {"ref": "ledger:oscal/one", "digest": digest("oscal-one")}
+        raise RuntimeError("iterator failed")
+
+    with pytest.raises(ValueError, match="oscal_evidence_refs"):
+        make_decision(
+            idempotency_key="broken-iterator-key",
+            oscal_evidence_refs=broken_references(),
+        )
