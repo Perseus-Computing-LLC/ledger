@@ -11,6 +11,12 @@ All notable changes to Ledger are documented here.
   reproducible export hashes, coverage by expected/observed control, and
   fail-closed handling for missing, unknown, stale, superseded, and
   unreported evidence. See `docs/oscal-projection.md`.
+- **CUI-safe context release decisions** (#260). A versioned, hash-bound
+  publication-boundary contract separates internal visibility from external
+  release, binds source/projection/redaction/policy/authority/destination and
+  artifact digests, fails closed on unknown or stale evidence, and provides
+  idempotent outbox receipts plus non-resurrecting expiry/revocation tombstones.
+  See `docs/context-release.md`.
 - **Runtime-contract enforcement** (#250). The Agent Trajectory Schema +
   Evidence Chain from arXiv:2608.11274: hash-chained trajectory events
   (`tool_call`, `tool_result`, `file_read`, `file_write`, `shell_exec`,
