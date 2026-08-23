@@ -31,16 +31,19 @@ lifecycle remain owned by the authority/AAR and context systems.
 2. `CompositionEngine.start_lineage()` verifies it and creates one durable
    task-lineage state with the policy/taxonomy versions and context head.
 3. The caller resolves a candidate through `CompositionEngine.admit()` before
-   executing it. The engine serializes the read/check/transition under
-   `BEGIN IMMEDIATE`.
+   executing it. Ordinary admissions must use the lineage's signed
+   `authority_action_id`; a different ID is accepted only when it is the ID in
+   a verified signed override, and the request must match that override. The
+   engine serializes the read/check/transition under `BEGIN IMMEDIATE`.
 4. Only an `allow` verdict may be passed to the effect executor. The verdict is
-   idempotent when retried with the same `idempotency_key` and action digest.
+   idempotent when retried with the same `idempotency_key`, action ID, and action
+   digest; a same-key retry for another action is a conflict, not a replay.
 5. The caller passes that verdict to `Meter.track(...,
-   composition_verdict=verdict)` and, where applicable, includes
-   `composition_binding(verdict)` in the prebind. Ledger accepts the usage
-   event only when the allow is present in the durable admission table and the
-   supplied verdict exactly matches the stored admission (apart from replay
-   metadata).
+   composition_verdict=verdict)` and includes `composition_binding(verdict)` in
+   the prebind. Ledger accepts the usage event only when the allow is present in
+   the durable admission table, the binding exactly matches, and the outer
+   prebind/action, authority, policy, context, scope, task, external-reference,
+   and workspace fields all cross-bind to the verdict.
 
 A missing lineage is a hold, not an implicit fresh budget. A reset requires a
 new signed reset authorization and creates a new lineage identifier. Session
@@ -76,9 +79,12 @@ action digest. `composition_binding()` contains only schema/version fields,
 policy and taxonomy digests, state/action/profile digests, opaque authority and
 scope references, verdict outcome, and the composition hash.
 
-The binding is accepted by prebind validation and is carried into the
+The binding is accepted by prebind validation only as the projection of a
+full durable composition verdict; its `composition_hash` commits the public
+binding body and is independently recomputable. It is carried into the
 hash-covered usage event projection. Usage exports expose the same safe
-composition projection. No prompt, credential, raw argument, or tool payload is
+composition projection, but suppress it whenever the binding/denormalized pair
+or event chain fails verification. No prompt, credential, raw argument, or tool payload is
 stored in the composition state or receipt projection.
 
 ## HTTP API

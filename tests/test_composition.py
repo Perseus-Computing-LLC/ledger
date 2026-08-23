@@ -132,7 +132,7 @@ def _admit(engine, conn, org_id, *, action_id, tool, args, session="session-1",
         task_lineage_id=lineage,
         session_id=session,
         workspace_scope=workspace,
-        authority_action_id=authority_action_id or "aar-" + action_id,
+        authority_action_id=authority_action_id or "aar-root-1",
         authority_ref="authority/v1",
         context_head_digest=CONTEXT_HASH,
         action_id=action_id,
@@ -329,11 +329,11 @@ def test_retry_is_idempotent_and_conflicting_retry_cannot_change_state(tmp_path)
     engine = _engine()
     conn, org_id, _ = _setup(tmp_path, engine)
     first = _admit(engine, conn, org_id, action_id="read-1", tool="data.read",
-                   args={"resource_id": "alpha"})
+                   args={"resource_id": "alpha"}, idempotency_key="idem-1")
     replay = _admit(engine, conn, org_id, action_id="read-1", tool="data.read",
-                    args={"resource_id": "alpha"})
-    conflict = _admit(engine, conn, org_id, action_id="read-1", tool="data.read",
-                      args={"resource_id": "different"})
+                    args={"resource_id": "alpha"}, idempotency_key="idem-1")
+    conflict = _admit(engine, conn, org_id, action_id="read-2", tool="data.read",
+                      args={"resource_id": "alpha"}, idempotency_key="idem-1")
 
     assert replay["outcome"] == first["outcome"] == "allow"
     assert replay["action_digest"] == first["action_digest"]
@@ -385,9 +385,11 @@ def test_authenticated_override_can_admit_policy_conflict_but_untrusted_text_can
         context_head_digest=CONTEXT_HASH, approval_ref="approval-1",
     )
     allowed = _admit(engine, conn, org_id, action_id="send-1", tool="net.send",
-                     args={"destination": "https://example.test"}, override=override)
+                     args={"destination": "https://example.test"},
+                     authority_action_id="override-aar", override=override)
     assert allowed["outcome"] == "allow"
     assert allowed["reason_code"] == "override_authorized"
+    assert allowed["authority_action_id"] == "override-aar"
 
     forged = dict(override)
     forged["signature"] = "0" * 64
@@ -417,7 +419,7 @@ def test_composition_verdict_binds_hash_only_receipt_and_rejects_non_allow_effec
 
     result = metering.record_usage(
         conn, org_id, provider="ledger", model="fixture", task_type="read",
-        external_ref="task-1", input_tokens=1, output_tokens=0, cost_usd=0.01,
+        workspace="ws-a", external_ref="task-1", input_tokens=1, output_tokens=0, cost_usd=0.01,
         composition_verdict=verdict, prebind=prebind,
     )
     receipt = audit_json(conn, org_id, external_ref="task-1")
@@ -453,4 +455,100 @@ def test_composition_verdict_binds_hash_only_receipt_and_rejects_non_allow_effec
     conn.execute("UPDATE usage_events SET composition_policy_hash=? WHERE id=?",
                  ("0" * 64, result.event_id))
     assert db.verify_chain(conn, org_id)["ok"] is False
+    conn.close()
+
+
+def test_invalid_identity_is_not_reflected_in_review_or_binding(tmp_path):
+    engine = _engine()
+    conn, org_id, _ = _setup(tmp_path, engine, lineage="privacy-task")
+    secretish = '{"api_key":"SECRET-SENTINEL"}'
+    verdict = _admit(
+        engine, conn, org_id, action_id=secretish, tool="data.read",
+        args={"resource_id": "alpha"}, lineage="privacy-task",
+    )
+    assert verdict["outcome"] == "review"
+    assert verdict["action_id"] == "unbound"
+    assert secretish not in json.dumps(verdict, sort_keys=True)
+
+    valid = _admit(
+        engine, conn, org_id, action_id="safe-1", tool="data.read",
+        args={"resource_id": "alpha"}, lineage="privacy-task",
+    )
+    tampered = {**valid, "action_id": secretish}
+    ok, errors = validate_verdict(tampered)
+    assert not ok
+    assert "action_id" in errors
+    conn.close()
+
+
+def test_admission_rejects_unbound_authority_action_id(tmp_path):
+    engine = _engine()
+    conn, org_id, _ = _setup(tmp_path, engine, lineage="authority-task")
+    verdict = _admit(
+        engine, conn, org_id, action_id="safe-1", tool="data.read",
+        args={"resource_id": "alpha"}, lineage="authority-task",
+        authority_action_id="unbound-aar",
+    )
+    assert verdict["outcome"] == "hold"
+    assert verdict["reason_code"] == "lineage_binding_mismatch"
+    conn.close()
+
+
+def test_composition_binding_cannot_be_persisted_without_durable_allow(tmp_path):
+    engine = _engine()
+    conn, org_id, _ = _setup(tmp_path, engine, lineage="binding-task")
+    verdict = _admit(
+        engine, conn, org_id, action_id="read-1", tool="data.read",
+        args={"resource_id": "alpha"}, lineage="binding-task",
+    )
+    from ledger_agent.prebind import build_prebind_v2
+    prebind = build_prebind_v2(
+        attempted_action="action:read-1", actor_ref="agent:test",
+        authority_ref="authority/v1", trusted_scope="workspace:ws-a",
+        policy_version="policy/v1", evidence_hashes=["a" * 64],
+        selected_context_digest=CONTEXT_HASH, resource_ref="dataset",
+        boundary_outcome="allow", non_effective_result="not_executed",
+        replay_id="replay:read-1", composition_binding=composition_binding(verdict),
+    )
+    with pytest.raises(ValueError, match="durable composition verdict"):
+        metering.record_usage(
+            conn, org_id, provider="ledger", model="fixture", cost_usd=0,
+            prebind=prebind,
+        )
+    assert conn.execute("SELECT COUNT(*) FROM usage_events").fetchone()[0] == 0
+    conn.close()
+
+
+def test_tampered_composition_projection_is_suppressed_from_receipt_and_export(tmp_path):
+    engine = _engine()
+    conn, org_id, _ = _setup(tmp_path, engine, lineage="export-task")
+    verdict = _admit(
+        engine, conn, org_id, action_id="read-1", tool="data.read",
+        args={"resource_id": "alpha"}, lineage="export-task",
+    )
+    from ledger_agent.prebind import build_prebind_v2
+    prebind = build_prebind_v2(
+        attempted_action="action:read-1", actor_ref="agent:test",
+        authority_ref="authority/v1", trusted_scope="workspace:ws-a",
+        policy_version="policy/v1", evidence_hashes=["a" * 64],
+        selected_context_digest=CONTEXT_HASH, resource_ref="dataset",
+        boundary_outcome="allow", non_effective_result="not_executed",
+        replay_id="replay:read-1", composition_binding=composition_binding(verdict),
+    )
+    result = metering.record_usage(
+        conn, org_id, provider="ledger", model="fixture", task_type="read",
+        workspace="ws-a", external_ref="export-task", cost_usd=0, prebind=prebind,
+        composition_verdict=verdict,
+    )
+    conn.execute(
+        "UPDATE usage_events SET composition_json=? WHERE id=?",
+        (json.dumps({"composition_hash": "0" * 64, "raw": "SECRET-SENTINEL"}), result.event_id),
+    )
+    conn.commit()
+    receipt = audit_json(conn, org_id, external_ref="export-task")
+    exported = db.export_events(conn, org_id)
+    assert receipt["events"][0]["composition"] is None
+    assert exported[0]["composition"] is None
+    assert "SECRET-SENTINEL" not in json.dumps(receipt)
+    assert "SECRET-SENTINEL" not in json.dumps(exported)
     conn.close()

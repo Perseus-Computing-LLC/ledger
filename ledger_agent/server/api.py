@@ -7,6 +7,7 @@ import json
 
 from .. import campaigns, db, evidence_levels, metering, pricing, savings
 from ..prebind import validate_prebind
+from ..composition import safe_composition_projection
 
 
 def default_org_id(conn) -> str | None:
@@ -171,7 +172,9 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
         org_chain = integrity["orgs"][0] if integrity["orgs"] else {}
         rows = list(reversed(db.events_by_ref(conn, org_id, external_ref)))
         events = []
+        chain_ok = org_chain.get("status") == "ok"
         for row in rows:
+            composition = safe_composition_projection(dict(row), chain_ok=chain_ok)
             events.append({
                 "event_id": row["id"],
                 "ts": row["ts"],
@@ -212,8 +215,7 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                 if row["behavior_snapshot_json"] is not None else None,
                 "campaign_binding": json.loads(row["campaign_binding_json"])
                 if row["campaign_binding_json"] is not None else None,
-                "composition": json.loads(row["composition_json"])
-                if row["composition_json"] is not None else None,
+                "composition": composition,
                 "action_authorization": {
                     "agent_id": row["agent_id"],
                     "authority_manifest_ref": row["authority_manifest_ref"],
@@ -315,14 +317,16 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
     }
 
 
-def export_csv(conn, org_id: str, since=None, until=None) -> str:
+def export_csv(conn, org_id: str, since=None, until=None,
+               hmac_key: bytes | None = None) -> str:
     """Org-scoped usage events as CSV text (fix #66).
 
     Cells are formula-injection neutralized (2026-07-05 security review):
     ``provider``/``model``/``workspace``/``task_type`` are tenant-controlled at
     ingest, so a crafted value like ``=HYPERLINK(...)`` would otherwise execute
     when a teammate opens the export in a spreadsheet."""
-    rows = db.export_events(conn, org_id, since=since, until=until)
+    rows = db.export_events(conn, org_id, since=since, until=until,
+                             hmac_key=hmac_key)
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=_EXPORT_COLUMNS, extrasaction="ignore")
     w.writeheader()
@@ -331,6 +335,8 @@ def export_csv(conn, org_id: str, since=None, until=None) -> str:
     return buf.getvalue()
 
 
-def export_json(conn, org_id: str, since=None, until=None) -> dict:
-    rows = db.export_events(conn, org_id, since=since, until=until)
+def export_json(conn, org_id: str, since=None, until=None,
+                hmac_key: bytes | None = None) -> dict:
+    rows = db.export_events(conn, org_id, since=since, until=until,
+                             hmac_key=hmac_key)
     return {"org_id": org_id, "count": len(rows), "events": rows}

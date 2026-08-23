@@ -11,7 +11,11 @@ All notable changes to Ledger are documented here.
   ordered prohibited sequences, authenticated overrides, idempotent retries,
   and hash-only composition bindings for prebind, usage, export, and HTTP/MCP
   surfaces. Unknown or caller-claimed policy/profile/cost data fails closed.
-  See `docs/action-composition.md`.
+  Follow-up hardening rejects credential-like identity references, binds ordinary
+  admissions to the signed lineage authority action, rejects same-key action
+  conflicts and forged prebind-only bindings, cross-binds usage to its prebind,
+  propagates prebind through MCP, and suppresses unverified receipt/export
+  projections. See `docs/action-composition.md`.
 - **Deterministic OSCAL evidence projection** (#259). A hash-only input
   contract projects explicit Ledger evidence states into schema-valid OSCAL
   1.2.3 Assessment Results and POA&M JSON/YAML, with stable UUIDs,

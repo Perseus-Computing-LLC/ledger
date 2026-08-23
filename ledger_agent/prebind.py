@@ -134,6 +134,10 @@ def validate_prebind(block: Mapping[str, Any]) -> tuple[bool, list[str]]:
         if not isinstance(composition, dict):
             errors.append("composition_binding_not_dict")
         else:
+            from .composition import validate_composition_binding
+            binding_valid, binding_errors = validate_composition_binding(composition)
+            if not binding_valid:
+                errors.extend("composition_binding_" + error for error in binding_errors)
             if set(composition) != _COMPOSITION_BINDING_FIELDS:
                 errors.append("composition_binding_fields")
             if composition.get("schema") != "perseus-ledger-composition-binding/v1":

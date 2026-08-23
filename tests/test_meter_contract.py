@@ -187,3 +187,5 @@ def test_meter_and_openapi_have_cross_product_field_parity():
     prebind_schema = spec["components"]["schemas"]["Prebind"]
     assert PREBIND_PROPERTIES <= set(prebind_schema["properties"])
     assert spec["components"]["schemas"]["UsageEvent"]["properties"]["prebind"]["$ref"] == "#/components/schemas/Prebind"
+    assert spec["components"]["schemas"]["UsageEvent"]["properties"]["composition_verdict"]["$ref"] == "#/components/schemas/CompositionVerdict"
+    assert "composition_binding" in spec["components"]["schemas"]["Prebind"]["properties"]

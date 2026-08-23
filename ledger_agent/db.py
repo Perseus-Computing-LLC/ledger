@@ -2049,7 +2049,8 @@ def events_by_ref(conn, org_id: str, external_ref: str) -> list[sqlite3.Row]:
 
 
 def export_events(conn, org_id: str, since: Optional[float] = None,
-                  until: Optional[float] = None, limit: int = 50_000) -> list[dict]:
+                  until: Optional[float] = None, limit: int = 50_000,
+                  hmac_key: Optional[bytes] = None) -> list[dict]:
     """Org-scoped usage events for CSV/JSON export (fix #66), newest first,
     optionally bounded by [since, until) epoch seconds. ``limit`` caps the rows
     returned so an export can't exhaust memory."""
@@ -2059,7 +2060,11 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
            "ue.user_id, ue.cost_micros, "
            "ue.baseline_micros, ue.optimal_micros, ue.external_ref, "
            "ue.campaign_id, ue.campaign_binding_json, "
-           "ue.composition_json, "
+           "ue.composition_schema, ue.composition_policy_version, "
+           "ue.composition_policy_hash, ue.composition_state_hash, "
+           "ue.composition_profile_hash, ue.composition_action_id, "
+           "ue.composition_lineage_id, ue.composition_verdict, "
+           "ue.composition_json, ue.composition_hash, ue.prev_hash, ue.row_hash, "
            "ue.estimated, ue.source "
            "FROM usage_events ue "
            "LEFT JOIN workspaces w ON w.id=ue.workspace_id WHERE ue.org_id=?")
@@ -2073,7 +2078,16 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
     sql += " ORDER BY ue.ts DESC, ue.rowid DESC LIMIT ?"
     args.append(int(limit))
     out = []
-    for r in conn.execute(sql, args).fetchall():
+    rows = conn.execute(sql, args).fetchall()
+    from .composition import safe_composition_projection
+    composition_chain_ok = True
+    if any(row["composition_json"] is not None for row in rows):
+        try:
+            composition_chain_ok = bool(verify_chain(
+                conn, org_id=org_id, hmac_key=hmac_key).get("ok"))
+        except (sqlite3.Error, TypeError, ValueError):
+            composition_chain_ok = False
+    for r in rows:
         d = dict(r)
         d["cost_usd"] = micros_to_usd(int(d.pop("cost_micros")))
         bm = d.pop("baseline_micros", None)
@@ -2084,8 +2098,15 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
         d["optimal_usd"] = None if om is None else micros_to_usd(int(om))
         binding = d.pop("campaign_binding_json", None)
         d["campaign_binding"] = json.loads(binding) if binding is not None else None
-        composition = d.pop("composition_json", None)
-        d["composition"] = json.loads(composition) if composition is not None else None
+        composition = safe_composition_projection(d, chain_ok=composition_chain_ok)
+        for field in (
+            "composition_schema", "composition_policy_version", "composition_policy_hash",
+            "composition_state_hash", "composition_profile_hash", "composition_action_id",
+            "composition_lineage_id", "composition_verdict", "composition_json",
+            "composition_hash", "prev_hash", "row_hash",
+        ):
+            d.pop(field, None)
+        d["composition"] = composition
         d["estimated"] = bool(d["estimated"])
         out.append(d)
     return out

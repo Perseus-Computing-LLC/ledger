@@ -42,6 +42,17 @@ OUTCOMES = frozenset({"allow", "deny", "hold", "review", "abstain"})
 POLICY_SCOPES = frozenset({"task", "session"})
 _HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 _IDENT = re.compile(r"^[a-z][a-z0-9_.:/-]{0,127}$")
+_OPAQUE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$")
+_CREDENTIAL_REF = re.compile(
+    r"(?:api[_-]?key|secret|password|passwd|token|credential|authorization|bearer|private[_-]?key)",
+    re.IGNORECASE,
+)
+_COMPOSITION_BINDING_FIELDS = frozenset({
+    "schema", "policy_version", "policy_hash", "taxonomy_version", "taxonomy_hash",
+    "state_hash", "profile_digest", "action_digest", "action_id", "task_lineage_id",
+    "authority_action_id", "authority_ref", "context_head_digest", "workspace_scope",
+    "verdict", "composition_hash",
+})
 _SAFE_TEXT_MAX = 512
 
 
@@ -82,6 +93,24 @@ def _text(value: Any, field: str, *, identifier: bool = False) -> str:
     if identifier and not _IDENT.fullmatch(value):
         raise CompositionError("malformed_" + field, f"{field} is not canonical")
     return value
+
+
+def _opaque_ref(value: Any, field: str) -> str:
+    """Accept only bounded printable references, never credential-like text."""
+    if (
+        not isinstance(value, str)
+        or not _OPAQUE_REF.fullmatch(value)
+        or _CREDENTIAL_REF.search(value)
+    ):
+        raise CompositionError("malformed_" + field, f"{field} must be an opaque reference")
+    return value
+
+
+def _public_ref(value: Any) -> str:
+    """Return a safe identity for a review projection or an unbound sentinel."""
+    if isinstance(value, str) and _OPAQUE_REF.fullmatch(value) and not _CREDENTIAL_REF.search(value):
+        return value
+    return "unbound"
 
 
 def _finite_nonnegative(value: Any, field: str) -> float:
@@ -458,25 +487,34 @@ def _safe_digest_field(value: Any, field: str) -> str:
     return value.lower()
 
 
-def _safe_binding(verdict: Mapping[str, Any]) -> dict[str, Any]:
+def _binding_body(value: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema": COMPOSITION_BINDING_SCHEMA,
-        "policy_version": verdict["policy_version"],
-        "policy_hash": verdict["policy_hash"],
-        "taxonomy_version": verdict["taxonomy_version"],
-        "taxonomy_hash": verdict["taxonomy_hash"],
-        "state_hash": verdict["state_hash"],
-        "profile_digest": verdict["profile_digest"],
-        "action_digest": verdict["action_digest"],
-        "action_id": verdict["action_id"],
-        "task_lineage_id": verdict["task_lineage_id"],
-        "authority_action_id": verdict["authority_action_id"],
-        "authority_ref": verdict["authority_ref"],
-        "context_head_digest": verdict["context_head_digest"],
-        "workspace_scope": verdict["workspace_scope"],
-        "verdict": verdict["outcome"],
-        "composition_hash": verdict["composition_hash"],
+        "policy_version": value["policy_version"],
+        "policy_hash": value["policy_hash"],
+        "taxonomy_version": value["taxonomy_version"],
+        "taxonomy_hash": value["taxonomy_hash"],
+        "state_hash": value["state_hash"],
+        "profile_digest": value["profile_digest"],
+        "action_digest": value["action_digest"],
+        "action_id": value["action_id"],
+        "task_lineage_id": value["task_lineage_id"],
+        "authority_action_id": value["authority_action_id"],
+        "authority_ref": value["authority_ref"],
+        "context_head_digest": value["context_head_digest"],
+        "workspace_scope": value["workspace_scope"],
+        "verdict": value["outcome"] if "outcome" in value else value["verdict"],
     }
+
+
+def _binding_hash(value: Mapping[str, Any]) -> str:
+    return _sha(_binding_body(value))
+
+
+def _safe_binding(verdict: Mapping[str, Any]) -> dict[str, Any]:
+    binding = _binding_body(verdict)
+    binding["composition_hash"] = verdict["composition_hash"]
+    return binding
 
 
 def composition_binding(verdict: Mapping[str, Any]) -> dict[str, Any]:
@@ -500,8 +538,8 @@ def _is_ordered_subsequence(sequence: Sequence[str], classes: Sequence[str]) -> 
 
 
 def _verdict_hash(body: Mapping[str, Any]) -> str:
-    return _sha({key: value for key, value in body.items()
-                 if key not in {"composition_hash", "idempotent_replay", "state_mutated"}})
+    """Commit the public-safe binding projection, not transient verdict metadata."""
+    return _binding_hash(body)
 
 
 def validate_verdict(verdict: Mapping[str, Any]) -> tuple[bool, list[str]]:
@@ -526,7 +564,9 @@ def validate_verdict(verdict: Mapping[str, Any]) -> tuple[bool, list[str]]:
                   "authority_action_id", "authority_ref", "policy_version", "policy_scope",
                   "taxonomy_version", "action_class", "resource_hash", "data_classification",
                   "impact", "reason_code"):
-        if not isinstance(verdict.get(field), str) or not verdict[field]:
+        try:
+            _opaque_ref(verdict.get(field), field)
+        except CompositionError:
             errors.append(field)
     for field in ("policy_hash", "taxonomy_hash", "profile_digest", "action_digest",
                   "context_head_digest", "resource_hash", "prior_state_hash", "state_hash"):
@@ -557,9 +597,68 @@ def validate_verdict(verdict: Mapping[str, Any]) -> tuple[bool, list[str]]:
     if verdict.get("state_mutated") is not None and type(verdict["state_mutated"]) is not bool:
         errors.append("state_mutated")
     supplied = verdict.get("composition_hash")
-    if not _is_hash(supplied) or supplied != _verdict_hash(verdict):
+    if not isinstance(supplied, str) or not _is_hash(supplied) \
+            or supplied.lower() != _verdict_hash(verdict):
         errors.append("composition_hash")
     return not errors, sorted(set(errors))
+
+
+def validate_composition_binding(binding: Mapping[str, Any]) -> tuple[bool, list[str]]:
+    """Validate a persisted hash-only binding and recompute its commitment."""
+    if not isinstance(binding, Mapping):
+        return False, ["not_object"]
+    errors: list[str] = []
+    if set(binding) != _COMPOSITION_BINDING_FIELDS:
+        errors.append("fields")
+    if binding.get("schema") != COMPOSITION_BINDING_SCHEMA:
+        errors.append("schema")
+    for field in ("policy_version", "taxonomy_version", "action_id", "task_lineage_id",
+                  "authority_action_id", "authority_ref", "workspace_scope", "verdict"):
+        try:
+            _opaque_ref(binding.get(field), field)
+        except CompositionError:
+            errors.append(field)
+    for field in ("policy_hash", "taxonomy_hash", "state_hash", "profile_digest",
+                  "action_digest", "context_head_digest", "composition_hash"):
+        if not _is_hash(binding.get(field)):
+            errors.append(field)
+    if binding.get("verdict") not in OUTCOMES:
+        errors.append("verdict")
+    if not errors:
+        supplied = binding["composition_hash"]
+        if supplied.lower() != _binding_hash(binding):
+            errors.append("composition_hash")
+    return not errors, sorted(set(errors))
+
+
+def safe_composition_projection(row: Mapping[str, Any], *, chain_ok: bool = True) -> Optional[dict[str, Any]]:
+    """Return a composition projection only when its row-level evidence verifies."""
+    if not chain_ok:
+        return None
+    raw = row.get("composition_json")
+    if raw is None:
+        return None
+    try:
+        binding = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    valid, _ = validate_composition_binding(binding)
+    if not valid:
+        return None
+    columns = {
+        "schema": "composition_schema",
+        "policy_version": "composition_policy_version",
+        "policy_hash": "composition_policy_hash",
+        "state_hash": "composition_state_hash",
+        "profile_digest": "composition_profile_hash",
+        "action_id": "composition_action_id",
+        "task_lineage_id": "composition_lineage_id",
+        "verdict": "composition_verdict",
+        "composition_hash": "composition_hash",
+    }
+    if any(row.get(column) != binding[field] for field, column in columns.items()):
+        return None
+    return dict(binding)
 
 
 def verify_persisted_admission(conn: sqlite3.Connection, org_id: str,
@@ -650,12 +749,12 @@ class CompositionEngine:
                                     authority_action_id: str, authority_ref: str,
                                     context_head_digest: str) -> dict[str, Any]:
         return self._authorization({
-            "kind": "lineage_start", "org_id": _text(org_id, "org_id"),
-            "task_lineage_id": _text(task_lineage_id, "task_lineage_id"),
-            "session_id": _text(session_id, "session_id"),
-            "workspace_scope": _text(workspace_scope, "workspace_scope"),
-            "authority_action_id": _text(authority_action_id, "authority_action_id"),
-            "authority_ref": _text(authority_ref, "authority_ref"),
+            "kind": "lineage_start", "org_id": _opaque_ref(org_id, "org_id"),
+            "task_lineage_id": _opaque_ref(task_lineage_id, "task_lineage_id"),
+            "session_id": _opaque_ref(session_id, "session_id"),
+            "workspace_scope": _opaque_ref(workspace_scope, "workspace_scope"),
+            "authority_action_id": _opaque_ref(authority_action_id, "authority_action_id"),
+            "authority_ref": _opaque_ref(authority_ref, "authority_ref"),
             "context_head_digest": _safe_digest_field(context_head_digest, "context_head_digest"),
         }, key=self.authority_key)
 
@@ -664,13 +763,13 @@ class CompositionEngine:
                                    workspace_scope: str, authority_action_id: str,
                                    authority_ref: str, context_head_digest: str) -> dict[str, Any]:
         return self._authorization({
-            "kind": "lineage_reset", "org_id": _text(org_id, "org_id"),
-            "prior_lineage_id": _text(prior_lineage_id, "prior_lineage_id"),
-            "successor_lineage_id": _text(successor_lineage_id, "successor_lineage_id"),
-            "session_id": _text(session_id, "session_id"),
-            "workspace_scope": _text(workspace_scope, "workspace_scope"),
-            "authority_action_id": _text(authority_action_id, "authority_action_id"),
-            "authority_ref": _text(authority_ref, "authority_ref"),
+            "kind": "lineage_reset", "org_id": _opaque_ref(org_id, "org_id"),
+            "prior_lineage_id": _opaque_ref(prior_lineage_id, "prior_lineage_id"),
+            "successor_lineage_id": _opaque_ref(successor_lineage_id, "successor_lineage_id"),
+            "session_id": _opaque_ref(session_id, "session_id"),
+            "workspace_scope": _opaque_ref(workspace_scope, "workspace_scope"),
+            "authority_action_id": _opaque_ref(authority_action_id, "authority_action_id"),
+            "authority_ref": _opaque_ref(authority_ref, "authority_ref"),
             "context_head_digest": _safe_digest_field(context_head_digest, "context_head_digest"),
         }, key=self.reset_key)
 
@@ -679,15 +778,15 @@ class CompositionEngine:
                        workspace_scope: str, context_head_digest: str,
                        approval_ref: str) -> dict[str, Any]:
         return self._authorization({
-            "kind": "composition_override", "org_id": _text(org_id, "org_id"),
-            "task_lineage_id": _text(task_lineage_id, "task_lineage_id"),
-            "action_id": _text(action_id, "action_id"),
+            "kind": "composition_override", "org_id": _opaque_ref(org_id, "org_id"),
+            "task_lineage_id": _opaque_ref(task_lineage_id, "task_lineage_id"),
+            "action_id": _opaque_ref(action_id, "action_id"),
             "action_digest": _safe_digest_field(action_digest, "action_digest"),
-            "authority_action_id": _text(authority_action_id, "authority_action_id"),
-            "authority_ref": _text(authority_ref, "authority_ref"),
-            "workspace_scope": _text(workspace_scope, "workspace_scope"),
+            "authority_action_id": _opaque_ref(authority_action_id, "authority_action_id"),
+            "authority_ref": _opaque_ref(authority_ref, "authority_ref"),
+            "workspace_scope": _opaque_ref(workspace_scope, "workspace_scope"),
             "context_head_digest": _safe_digest_field(context_head_digest, "context_head_digest"),
-            "approval_ref": _text(approval_ref, "approval_ref"),
+            "approval_ref": _opaque_ref(approval_ref, "approval_ref"),
             "decision": "allow",
         }, key=self.authority_key)
 
@@ -813,12 +912,12 @@ class CompositionEngine:
                       context_head_digest: str, authorization: Optional[Mapping[str, Any]] = None,
                       parent_lineage_id: Optional[str] = None,
                       reset_authorization_hash: Optional[str] = None) -> dict[str, Any]:
-        org_id = _text(org_id, "org_id")
-        task_lineage_id = _text(task_lineage_id, "task_lineage_id")
-        session_id = _text(session_id, "session_id")
-        workspace_scope = _text(workspace_scope, "workspace_scope")
-        authority_action_id = _text(authority_action_id, "authority_action_id")
-        authority_ref = _text(authority_ref, "authority_ref")
+        org_id = _opaque_ref(org_id, "org_id")
+        task_lineage_id = _opaque_ref(task_lineage_id, "task_lineage_id")
+        session_id = _opaque_ref(session_id, "session_id")
+        workspace_scope = _opaque_ref(workspace_scope, "workspace_scope")
+        authority_action_id = _opaque_ref(authority_action_id, "authority_action_id")
+        authority_ref = _opaque_ref(authority_ref, "authority_ref")
         context_head_digest = _safe_digest_field(context_head_digest, "context_head_digest")
         if parent_lineage_id is not None or reset_authorization_hash is not None:
             raise CompositionError("reset_requires_authorization",
@@ -873,13 +972,13 @@ class CompositionEngine:
                       task_lineage_id: str, successor_lineage_id: str, session_id: str,
                       workspace_scope: str, authority_action_id: str, authority_ref: str,
                       context_head_digest: str, authorization: Optional[Mapping[str, Any]] = None) -> dict[str, Any]:
-        org_id = _text(org_id, "org_id")
-        task_lineage_id = _text(task_lineage_id, "task_lineage_id")
-        successor_lineage_id = _text(successor_lineage_id, "successor_lineage_id")
-        session_id = _text(session_id, "session_id")
-        workspace_scope = _text(workspace_scope, "workspace_scope")
-        authority_action_id = _text(authority_action_id, "authority_action_id")
-        authority_ref = _text(authority_ref, "authority_ref")
+        org_id = _opaque_ref(org_id, "org_id")
+        task_lineage_id = _opaque_ref(task_lineage_id, "task_lineage_id")
+        successor_lineage_id = _opaque_ref(successor_lineage_id, "successor_lineage_id")
+        session_id = _opaque_ref(session_id, "session_id")
+        workspace_scope = _opaque_ref(workspace_scope, "workspace_scope")
+        authority_action_id = _opaque_ref(authority_action_id, "authority_action_id")
+        authority_ref = _opaque_ref(authority_ref, "authority_ref")
         context_head_digest = _safe_digest_field(context_head_digest, "context_head_digest")
         auth = self._verify_authorization(authorization, expected={
             "kind": "lineage_reset", "org_id": org_id, "prior_lineage_id": task_lineage_id,
@@ -937,11 +1036,11 @@ class CompositionEngine:
         return {
             "schema": COMPOSITION_VERDICT_SCHEMA,
             "outcome": "review",
-            "reason_code": reason_code,
-            "action_id": action_id or "unbound",
-            "task_lineage_id": task_lineage_id or "unbound",
-            "session_id": session_id or "unbound",
-            "workspace_scope": workspace_scope or "unbound",
+            "reason_code": _public_ref(reason_code),
+            "action_id": _public_ref(action_id),
+            "task_lineage_id": _public_ref(task_lineage_id),
+            "session_id": _public_ref(session_id),
+            "workspace_scope": _public_ref(workspace_scope),
             "state_mutated": False,
         }
 
@@ -997,19 +1096,22 @@ class CompositionEngine:
                          workspace_scope: str, context_head_digest: str) -> dict[str, Any]:
         if not self.authority_key or not isinstance(override, Mapping):
             raise CompositionError("invalid_override", "override is not authenticated")
+        try:
+            override_authority_action_id = _opaque_ref(
+                override.get("authority_action_id"), "authority_action_id")
+            approval_ref = _opaque_ref(override.get("approval_ref"), "approval_ref")
+        except CompositionError as exc:
+            raise CompositionError("invalid_override", "override references are invalid") from exc
         expected = {
             "kind": "composition_override", "org_id": org_id,
             "task_lineage_id": task_lineage_id, "action_id": action_id,
             "action_digest": action_digest,
-            "authority_action_id": override.get("authority_action_id"),
+            "authority_action_id": override_authority_action_id,
             "authority_ref": authority_ref,
             "workspace_scope": workspace_scope,
             "context_head_digest": context_head_digest,
-            "approval_ref": override.get("approval_ref"), "decision": "allow",
+            "approval_ref": approval_ref, "decision": "allow",
         }
-        if not isinstance(expected["authority_action_id"], str) or not expected["authority_action_id"] \
-                or not isinstance(expected["approval_ref"], str) or not expected["approval_ref"]:
-            raise CompositionError("invalid_override", "override lacks authenticated approval references")
         body = dict(override)
         signature = body.pop("signature", None)
         if not isinstance(signature, str) or not _HEX64.fullmatch(signature):
@@ -1050,16 +1152,16 @@ class CompositionEngine:
             "session_id": session_id, "workspace_scope": workspace_scope,
         }
         try:
-            org_id = _text(org_id, "org_id")
-            task_lineage_id = _text(task_lineage_id, "task_lineage_id")
-            session_id = _text(session_id, "session_id")
-            workspace_scope = _text(workspace_scope, "workspace_scope")
-            authority_action_id = _text(authority_action_id, "authority_action_id")
-            authority_ref = _text(authority_ref, "authority_ref")
-            action_id = _text(action_id, "action_id")
+            org_id = _opaque_ref(org_id, "org_id")
+            task_lineage_id = _opaque_ref(task_lineage_id, "task_lineage_id")
+            session_id = _opaque_ref(session_id, "session_id")
+            workspace_scope = _opaque_ref(workspace_scope, "workspace_scope")
+            authority_action_id = _opaque_ref(authority_action_id, "authority_action_id")
+            authority_ref = _opaque_ref(authority_ref, "authority_ref")
+            action_id = _opaque_ref(action_id, "action_id")
             context_head_digest = _safe_digest_field(context_head_digest, "context_head_digest")
             if idempotency_key is not None:
-                idempotency_key = _text(idempotency_key, "idempotency_key")
+                idempotency_key = _opaque_ref(idempotency_key, "idempotency_key")
         except CompositionError as exc:
             return self._review(**raw_ids, reason_code=exc.code)
         if any(value is not None for value in (claimed_profile, claimed_impact,
@@ -1073,6 +1175,24 @@ class CompositionEngine:
             return self._review(action_id=action_id, task_lineage_id=task_lineage_id,
                                 session_id=session_id, workspace_scope=workspace_scope,
                                 reason_code=exc.code)
+        verified_override = None
+        if override is not None:
+            try:
+                verified_override = self._verify_override(
+                    override, org_id=org_id, task_lineage_id=task_lineage_id,
+                    action_id=action_id, action_digest=resolved.action_digest,
+                    policy_hash=self.policy.policy_hash, taxonomy_hash=self.taxonomy.taxonomy_hash,
+                    authority_ref=authority_ref, workspace_scope=workspace_scope,
+                    context_head_digest=context_head_digest,
+                )
+            except CompositionError:
+                return self._review(action_id=action_id, task_lineage_id=task_lineage_id,
+                                    session_id=session_id, workspace_scope=workspace_scope,
+                                    reason_code="invalid_override")
+            if verified_override["authority_action_id"] != authority_action_id:
+                return self._review(action_id=action_id, task_lineage_id=task_lineage_id,
+                                    session_id=session_id, workspace_scope=workspace_scope,
+                                    reason_code="invalid_override")
         self._ensure_tables(conn)
         with db.immediate(conn):
             row = conn.execute(
@@ -1090,7 +1210,8 @@ class CompositionEngine:
                                     session_id=session_id, workspace_scope=workspace_scope,
                                     reason_code="policy_binding_mismatch") | {"outcome": "hold"}
             if state["workspace_scope"] != workspace_scope or state["authority_ref"] != authority_ref \
-                    or state["context_head_digest"] != context_head_digest:
+                    or state["context_head_digest"] != context_head_digest \
+                    or (override is None and state["authority_action_id"] != authority_action_id):
                 return self._review(action_id=action_id, task_lineage_id=task_lineage_id,
                                     session_id=session_id, workspace_scope=workspace_scope,
                                     reason_code="lineage_binding_mismatch") | {"outcome": "hold"}
@@ -1111,17 +1232,19 @@ class CompositionEngine:
                     (org_id, task_lineage_id, idempotency_key),
                 ).fetchone()
             if existing is not None:
-                if existing["action_digest"] != resolved.action_digest:
+                try:
+                    replay = json.loads(existing["verdict_json"])
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise CompositionError("invalid_admission", "stored admission is invalid") from exc
+                if (existing["action_digest"] != resolved.action_digest
+                        or replay.get("action_id") != action_id
+                        or replay.get("authority_action_id") != authority_action_id):
                     return self._review(action_id=action_id, task_lineage_id=task_lineage_id,
                                         session_id=session_id, workspace_scope=workspace_scope,
                                         reason_code="idempotency_conflict") | {"outcome": "deny"}
-                try:
-                    replay = json.loads(existing["verdict_json"])
-                    valid, errors = validate_verdict(replay)
-                    if not valid:
-                        raise CompositionError("invalid_admission", ",".join(errors))
-                except (TypeError, ValueError, json.JSONDecodeError, CompositionError) as exc:
-                    raise CompositionError("invalid_admission", "stored admission is invalid") from exc
+                valid, errors = validate_verdict(replay)
+                if not valid:
+                    raise CompositionError("invalid_admission", "stored admission is invalid")
                 replay["idempotent_replay"] = True
                 return replay
 
@@ -1154,19 +1277,7 @@ class CompositionEngine:
                 outcome, reason_code = "deny", "budget_exceeded"
 
             override_ref = None
-            if outcome != "allow" and override is not None:
-                try:
-                    verified_override = self._verify_override(
-                        override, org_id=org_id, task_lineage_id=task_lineage_id,
-                        action_id=action_id, action_digest=resolved.action_digest,
-                        policy_hash=self.policy.policy_hash, taxonomy_hash=self.taxonomy.taxonomy_hash,
-                        authority_ref=authority_ref, workspace_scope=workspace_scope,
-                        context_head_digest=context_head_digest,
-                    )
-                except CompositionError:
-                    return self._review(action_id=action_id, task_lineage_id=task_lineage_id,
-                                        session_id=session_id, workspace_scope=workspace_scope,
-                                        reason_code="invalid_override")
+            if outcome != "allow" and verified_override is not None:
                 outcome, reason_code = "allow", "override_authorized"
                 override_ref = verified_override["approval_ref"]
 
@@ -1248,5 +1359,6 @@ __all__ = [
     "CompositionError", "ActionProfile", "ResolvedAction", "TrustedActionRegistry",
     "TrustedActionTaxonomy", "ActionTaxonomy", "CompositionPolicy", "CompositionEngine",
     "CompositionChecker", "composition_binding", "build_composition_binding",
-    "validate_verdict", "verify_persisted_admission",
+    "validate_verdict", "validate_composition_binding", "safe_composition_projection",
+    "verify_persisted_admission",
 ]

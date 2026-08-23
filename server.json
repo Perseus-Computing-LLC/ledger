@@ -178,6 +178,10 @@
       "type": "object",
       "description": "Hash-only acceptance-campaign cell/lane/config/checkpoint binding (#256/#257)."
      },
+     "prebind": {
+      "type": "object",
+      "description": "Hash-only pre-execution boundary binding; required with a composition binding."
+     },
      "composition_verdict": {
       "type": "object",
       "description": "Durable hash-only action-composition allow verdict (#266)."

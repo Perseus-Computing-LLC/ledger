@@ -233,6 +233,8 @@ def record_usage(conn, org_id: str, provider: str,
         valid, errors = validate_prebind(prebind)
         if not valid:
             raise ValueError("invalid prebind: " + ", ".join(errors))
+    if external_ref is not None:
+        external_ref = _optional_text(external_ref, "external_ref")
     composition_json: Optional[str] = None
     composition_hash: Optional[str] = None
     composition_schema: Optional[str] = None
@@ -244,6 +246,8 @@ def record_usage(conn, org_id: str, provider: str,
     composition_lineage_id: Optional[str] = None
     composition_verdict_value: Optional[str] = None
     composition_projection: Optional[dict] = None
+    if prebind is not None and prebind.get("composition_binding") is not None and composition_verdict is None:
+        raise ValueError("durable composition verdict is required with composition binding")
     if composition_verdict is not None:
         if not isinstance(composition_verdict, dict):
             raise ValueError("composition verdict must be a dict")
@@ -254,6 +258,26 @@ def record_usage(conn, org_id: str, provider: str,
         binding = composition_binding(composition_verdict)
         if not verify_persisted_admission(conn, org_id, composition_verdict):
             raise ValueError("composition verdict is not a durable admission")
+        if prebind is None or prebind.get("composition_binding") != binding:
+            raise ValueError("composition verdict is not bound into the prebind")
+        if prebind["attempted_action"] not in {
+            binding["action_id"], "action:" + binding["action_id"]
+        }:
+            raise ValueError("composition verdict action is not bound to the prebind")
+        if prebind["authority_ref"] != binding["authority_ref"]:
+            raise ValueError("composition verdict authority is not bound to the prebind")
+        if prebind["policy_version"] != binding["policy_version"]:
+            raise ValueError("composition verdict policy is not bound to the prebind")
+        if prebind["selected_context_digest"] != binding["context_head_digest"]:
+            raise ValueError("composition verdict context is not bound to the prebind")
+        if prebind["trusted_scope"] not in {
+            binding["workspace_scope"], "workspace:" + binding["workspace_scope"]
+        }:
+            raise ValueError("composition verdict scope is not bound to the prebind")
+        if external_ref != binding["task_lineage_id"]:
+            raise ValueError("composition verdict lineage is not bound to external_ref")
+        if workspace != binding["workspace_scope"]:
+            raise ValueError("composition verdict workspace is not bound to the event")
         composition_projection = binding
         composition_json = json.dumps(binding, sort_keys=True, separators=(",", ":"))
         composition_schema = binding["schema"]
