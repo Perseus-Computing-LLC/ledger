@@ -501,7 +501,7 @@ components:
         task_lineage_id: { type: string }
         session_id: { type: string }
         workspace_scope: { type: string }
-        authority_action_id: { type: string, description: "Opaque AAR/prebind action identifier supplied by the authority plane." }
+        authority_action_id: { type: string, description: "Opaque AAR/prebind action identifier supplied by the authority plane; ordinary admissions must match the signed lineage root, while an override must match its signed authority action identifier." }
         authority_ref: { type: string }
         context_head_digest: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
         action_id: { type: string }

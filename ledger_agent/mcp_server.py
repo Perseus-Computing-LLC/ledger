@@ -159,6 +159,10 @@ def _tools() -> list[dict[str, Any]]:
                     "description": "Hash-only acceptance-campaign cell/lane/config/"
                                    "checkpoint binding (#256/#257).",
                 },
+                "prebind": {
+                    "type": "object",
+                    "description": "Hash-only pre-execution boundary binding; required with a composition binding.",
+                },
                 "composition_verdict": {
                     "type": "object",
                     "description": "Durable hash-only action-composition allow verdict (#266).",
@@ -273,6 +277,7 @@ def _handle_record(meter: client.Meter, args: dict) -> dict:
         governance_cost=args.get("governance_cost"),
         behavior_snapshot=args.get("behavior_snapshot"),
         authority_manifest_custody=args.get("authority_manifest_custody"),
+        prebind=args.get("prebind"),
         campaign_binding=args.get("campaign_binding"),
         composition_verdict=args.get("composition_verdict"),
         source="mcp",

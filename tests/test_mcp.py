@@ -17,7 +17,7 @@ import pytest
 
 from typing import Any
 
-from ledger_agent import mcp_server
+from ledger_agent import mcp_server, metering
 
 
 def _meter(tmp_path, monkeypatch=None):
@@ -217,6 +217,32 @@ def test_record_partial_action_provenance_rejected(tmp_path, monkeypatch):
     }, meter)
     assert result.get("isError") is True
     assert "required together" in text["error"]
+
+
+def test_record_propagates_prebind_with_composition_verdict(tmp_path, monkeypatch):
+    meter = _meter(tmp_path, monkeypatch)
+    captured = {}
+
+    def fake_track(provider, **kwargs):
+        captured["provider"] = provider
+        captured.update(kwargs)
+        return metering.MeterResult(
+            event_id="evt-fixture", org_id=str(meter.org_id), workspace_id=None,
+            provider=provider, model=kwargs.get("model"), task_type=kwargs["task_type"],
+            cost_usd=0.0, estimated=False, balance_after=0.0, alerts=[],
+        )
+
+    monkeypatch.setattr(meter, "track", fake_track)
+    prebind = {"composition_binding": {"sentinel": "fixture"}}
+    verdict = {"outcome": "allow", "composition_hash": "a" * 64}
+    text, result = _call("ledger_record", {
+        "provider": "fixture", "task_type": "deploy", "prebind": prebind,
+        "composition_verdict": verdict,
+    }, meter)
+    assert result.get("isError") is not True
+    assert text["event_id"] == "evt-fixture"
+    assert captured["prebind"] == prebind
+    assert captured["composition_verdict"] == verdict
 
 
 def test_remote_mode_guards_local_tools(tmp_path, monkeypatch):

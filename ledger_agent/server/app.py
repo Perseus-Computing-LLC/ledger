@@ -654,9 +654,12 @@ class Handler(BaseHTTPRequestHandler):
         if not org_id:
             return self._json(401, {"error": "invalid or missing API key"})
         since, until = _qs_float(q, "since"), _qs_float(q, "until")
+        chain_key = cfgmod.chain_hmac_key(self.ctx.cfg)
         if path.endswith(".json"):
-            return self._json(200, api.export_json(conn, org_id, since, until))
-        csv_text = api.export_csv(conn, org_id, since, until)
+            return self._json(200, api.export_json(conn, org_id, since, until,
+                                                    hmac_key=chain_key))
+        csv_text = api.export_csv(conn, org_id, since, until,
+                                  hmac_key=chain_key)
         return self._send(200, csv_text, "text/csv; charset=utf-8",
                           {"Content-Disposition": 'attachment; filename="usage.csv"'})
 
