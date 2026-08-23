@@ -22,7 +22,13 @@ _REQUIRED = (
     "evidence_hashes", "selected_context_digest", "resource_ref", "boundary_outcome",
     "non_effective_result", "replay_id",
 )
-_V2_FIELDS = {"stage_trace", "context_hash", "policy_hash", "uncertainty", "request_hash", "nonce", "epoch"}
+_V2_FIELDS = {"stage_trace", "context_hash", "policy_hash", "uncertainty", "request_hash", "nonce", "epoch", "composition_binding"}
+_COMPOSITION_BINDING_FIELDS = {
+    "schema", "policy_version", "policy_hash", "taxonomy_version", "taxonomy_hash",
+    "state_hash", "profile_digest", "action_digest", "action_id", "task_lineage_id",
+    "authority_action_id", "authority_ref", "context_head_digest", "workspace_scope",
+    "verdict", "composition_hash",
+}
 STAGE_VALUES = {"proposed", "approved", "leased", "executing", "completed", "failed", "cancelled", "interrupted", "recovered"}
 
 
@@ -65,7 +71,8 @@ def build_prebind(*, attempted_action: str, actor_ref: str, authority_ref: str, 
                   policy_version: str, evidence_hashes: list[str], selected_context_digest: str,
                   resource_ref: str, boundary_outcome: str, non_effective_result: str,
                   replay_id: str, approval_ref: str | None = None,
-                  stage_refs: list[str] | None = None) -> dict[str, Any]:
+                  stage_refs: list[str] | None = None,
+                  composition_binding: dict[str, Any] | None = None) -> dict[str, Any]:
     block: dict[str, Any] = {
         "schema_version": PREBIND_SCHEMA,
         "attempted_action": attempted_action,
@@ -82,6 +89,8 @@ def build_prebind(*, attempted_action: str, actor_ref: str, authority_ref: str, 
         "approval_ref": approval_ref,
         "stage_refs": list(stage_refs or []),
     }
+    if composition_binding is not None:
+        block["composition_binding"] = composition_binding
     block["prebind_hash"] = prebind_digest(block)
     return block
 
@@ -119,6 +128,26 @@ def validate_prebind(block: Mapping[str, Any]) -> tuple[bool, list[str]]:
         or any(not isinstance(value, str) or not value for value in stage_refs)
     ):
         errors.append("stage_refs")
+
+    composition = block.get("composition_binding")
+    if composition is not None:
+        if not isinstance(composition, dict):
+            errors.append("composition_binding_not_dict")
+        else:
+            if set(composition) != _COMPOSITION_BINDING_FIELDS:
+                errors.append("composition_binding_fields")
+            if composition.get("schema") != "perseus-ledger-composition-binding/v1":
+                errors.append("composition_binding_schema")
+            if composition.get("verdict") not in {"allow", "deny", "hold", "review", "abstain"}:
+                errors.append("composition_binding_verdict")
+            for field in ("policy_hash", "taxonomy_hash", "state_hash", "profile_digest",
+                          "action_digest", "context_head_digest", "composition_hash"):
+                if not _is_hash(composition.get(field)):
+                    errors.append("composition_binding_" + field)
+            for field in ("policy_version", "taxonomy_version", "action_id", "task_lineage_id",
+                          "authority_action_id", "authority_ref", "workspace_scope"):
+                if not isinstance(composition.get(field), str) or not composition[field]:
+                    errors.append("composition_binding_" + field)
 
     # v2-specific validation (#219, #220)
     if schema_ver == PREBIND_V2_SCHEMA:
@@ -161,7 +190,7 @@ def validate_prebind(block: Mapping[str, Any]) -> tuple[bool, list[str]]:
     supplied = block.get("prebind_hash")
     if not _is_hash(supplied) or supplied != prebind_digest(block):
         errors.append("prebind_hash")
-    allowed = set(_REQUIRED) | {"schema_version", "approval_ref", "stage_refs", "prebind_hash"}
+    allowed = set(_REQUIRED) | {"schema_version", "approval_ref", "stage_refs", "composition_binding", "prebind_hash"}
     if schema_ver == PREBIND_V2_SCHEMA:
         allowed |= _V2_FIELDS
     for key in set(block) - allowed:
@@ -224,7 +253,8 @@ def build_prebind_v2(*, attempted_action: str, actor_ref: str, authority_ref: st
                      uncertainty: str | None = None,
                      request_hash: str | None = None,
                      nonce: str | None = None,
-                     epoch: int | str | None = None) -> dict[str, Any]:
+                     epoch: int | str | None = None,
+                     composition_binding: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build a v2 prebind with stage-aware fields and context/policy hashes."""
     request_hash, nonce, epoch = _optional_request_fields(request_hash, nonce, epoch)
     block: dict[str, Any] = {
@@ -250,6 +280,8 @@ def build_prebind_v2(*, attempted_action: str, actor_ref: str, authority_ref: st
         "nonce": nonce,
         "epoch": epoch,
     }
+    if composition_binding is not None:
+        block["composition_binding"] = composition_binding
     block["prebind_hash"] = prebind_digest(block)
     return block
 

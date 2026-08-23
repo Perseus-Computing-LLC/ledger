@@ -101,6 +101,40 @@ paths:
           description: A request with the same `Idempotency-Key` is still in flight.
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 
+  /v1/composition/admit:
+    post:
+      tags: [usage]
+      summary: Admit one tool action against trusted composition state.
+      description: |
+        Resolve the exact tool endpoint and validated arguments through the
+        server-configured trusted taxonomy, then evaluate the action against
+        the durable task-lineage/session history. Unknown, aliased, ambiguous,
+        malformed, or unprofiled actions return an explicit `review` result;
+        they never fail open. The request cannot supply taxonomy, policy,
+        impact, classification, risk, or cost metadata. Only an `allow` verdict
+        may be bound into a later usage event/prebind; the verdict contains
+        hashes and a safe projection, not raw arguments.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompositionAdmissionRequest' }
+      responses:
+        '200':
+          description: Hash-only composition verdict (`allow`, `deny`, `hold`, or `review`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompositionVerdict' }
+        '400':
+          description: Malformed JSON or a request attempting to provide trusted profile/policy values.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503':
+          description: Composition admission is not configured by the embedding server.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
   /v1/campaigns:
     get:
       tags: [usage]
@@ -456,7 +490,88 @@ components:
         behavior_snapshot: { type: object, nullable: true, description: "Behavior-snapshot receipt pin carrying the sha256 of a canonical agent-run snapshot (#238)." }
         authority_manifest_custody: { type: string, nullable: true, description: "Custody disclosure label for the referenced authority manifest (1f916 taxonomy); unknown custody renders as labeled uncertainty (#241)." }
         campaign_binding: { $ref: '#/components/schemas/CampaignBinding' }
+        composition_verdict: { $ref: '#/components/schemas/CompositionVerdict' }
         source: { type: string, default: api }
+    CompositionAdmissionRequest:
+      type: object
+      additionalProperties: false
+      description: "Request fields for trusted composition admission. Taxonomy, policy, impact, classification, risk, and cost are server-owned and cannot be supplied here."
+      required: [task_lineage_id, session_id, workspace_scope, authority_action_id, authority_ref, context_head_digest, action_id, tool_endpoint]
+      properties:
+        task_lineage_id: { type: string }
+        session_id: { type: string }
+        workspace_scope: { type: string }
+        authority_action_id: { type: string, description: "Opaque AAR/prebind action identifier supplied by the authority plane." }
+        authority_ref: { type: string }
+        context_head_digest: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        action_id: { type: string }
+        tool_endpoint: { type: string, description: "Exact canonical endpoint from the trusted taxonomy; aliases are rejected." }
+        arguments: { type: object, additionalProperties: true, description: "Validated against the trusted profile; values are committed only by digest." }
+        idempotency_key: { type: string, nullable: true }
+        override: { type: object, nullable: true, description: "Authenticated, pre-declared authority override; model text and retrieved content cannot create one." }
+        lineage_authorization: { type: object, nullable: true, description: "Signed authority decision that may initialize this lineage; it is required when the durable lineage does not already exist." }
+    CompositionVerdict:
+      type: object
+      additionalProperties: false
+      description: "Hash-bound composition result. Review/hold responses contain the common decision fields; an allow verdict includes the full hash-bound admission fields. Raw tool arguments are never returned or persisted in this projection."
+      required: [schema, outcome, reason_code, action_id, task_lineage_id, session_id, workspace_scope]
+      properties:
+        schema: { type: string, const: perseus-ledger-composition-verdict/v1 }
+        outcome: { type: string, enum: [allow, deny, hold, review, abstain] }
+        reason_code: { type: string }
+        action_id: { type: string }
+        task_lineage_id: { type: string }
+        session_id: { type: string }
+        workspace_scope: { type: string }
+        authority_action_id: { type: string }
+        authority_ref: { type: string }
+        context_head_digest: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        policy_version: { type: string }
+        policy_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        policy_scope: { type: string, enum: [task, session] }
+        taxonomy_version: { type: string }
+        taxonomy_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        profile_digest: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        action_digest: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        action_class: { type: string }
+        resource_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$', description: "SHA-256 digest of the normalized resource; the resource argument is never returned." }
+        data_classification: { type: string, enum: [public, internal, confidential, restricted] }
+        impact: { type: string, enum: [low, medium, high, critical] }
+        budget_cost: { type: number, minimum: 0 }
+        budget_used_before: { type: number, minimum: 0 }
+        budget_used_after: { type: number, minimum: 0 }
+        prior_action_classes: { type: array, items: { type: string } }
+        prior_state_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        state_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        state_version: { type: integer, minimum: 0 }
+        sequence_no: { type: integer, minimum: 0 }
+        matched_sequence: { type: array, items: { type: string } }
+        override_ref: { type: string, nullable: true }
+        idempotent_replay: { type: boolean, nullable: true }
+        state_mutated: { type: boolean, nullable: true }
+        composition_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+    CompositionBinding:
+      type: object
+      additionalProperties: false
+      description: "Hash-only composition projection suitable for prebind and evidence receipts."
+      required: [schema, policy_version, policy_hash, taxonomy_version, taxonomy_hash, state_hash, profile_digest, action_digest, action_id, task_lineage_id, authority_action_id, authority_ref, context_head_digest, workspace_scope, verdict, composition_hash]
+      properties:
+        schema: { type: string, const: perseus-ledger-composition-binding/v1 }
+        policy_version: { type: string }
+        policy_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        taxonomy_version: { type: string }
+        taxonomy_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        state_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        profile_digest: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        action_digest: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        action_id: { type: string }
+        task_lineage_id: { type: string }
+        authority_action_id: { type: string }
+        authority_ref: { type: string }
+        context_head_digest: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        workspace_scope: { type: string }
+        verdict: { type: string, enum: [allow, deny, hold, review, abstain] }
+        composition_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
     CampaignBinding:
       type: object
       additionalProperties: false
@@ -589,6 +704,7 @@ components:
           type: array
           items: { type: string }
         prebind_hash: { type: string, pattern: '^[0-9a-fA-F]{64}$' }
+        composition_binding: { $ref: '#/components/schemas/CompositionBinding' }
     EventResult:
       type: object
       properties:
@@ -647,6 +763,7 @@ components:
         external_ref: { type: string, nullable: true, description: "Per-task attribution id (e.g. an Invarium task_id)." }
         campaign_id: { type: string, nullable: true, description: "Acceptance campaign attribution ID when present." }
         campaign_binding: { $ref: '#/components/schemas/CampaignBinding' }
+        composition: { $ref: '#/components/schemas/CompositionBinding' }
         estimated: { type: boolean }
         source: { type: string }
     Org:

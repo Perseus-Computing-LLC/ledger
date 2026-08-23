@@ -130,6 +130,7 @@ class Meter:
               governance_cost: Optional[dict] = None,
               behavior_snapshot: Optional[dict] = None,
               campaign_binding: Optional[dict] = None,
+              composition_verdict: Optional[dict] = None,
               user_id: Optional[str] = None,
               source: str = "sdk"):
         """Meter one call. Returns a :class:`metering.MeterResult`.
@@ -204,6 +205,7 @@ class Meter:
                 "governance_cost": governance_cost,
                 "behavior_snapshot": behavior_snapshot,
                 "campaign_binding": campaign_binding,
+                "composition_verdict": composition_verdict,
             }
             event.update({key: value for key, value in optional_fields.items()
                           if value is not None})
@@ -249,6 +251,7 @@ class Meter:
                     governance_cost=governance_cost,
                     behavior_snapshot=behavior_snapshot,
                     campaign_binding=campaign_binding,
+                    composition_verdict=composition_verdict,
                     user_id=user_id,
                     source=source,
                     pricing_overrides=self.cfg.get("pricing", {}).get("overrides"),

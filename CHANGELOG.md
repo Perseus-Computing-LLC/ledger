@@ -5,6 +5,13 @@ All notable changes to Ledger are documented here.
 ## [Unreleased]
 
 ### Added
+- **Session-scoped action-composition admission** (#266). Schema v24 adds a
+  trusted action taxonomy, canonical action/resource digests, durable task
+  lineage state, serialized cumulative budgets, unordered prohibited pairs,
+  ordered prohibited sequences, authenticated overrides, idempotent retries,
+  and hash-only composition bindings for prebind, usage, export, and HTTP/MCP
+  surfaces. Unknown or caller-claimed policy/profile/cost data fails closed.
+  See `docs/action-composition.md`.
 - **Deterministic OSCAL evidence projection** (#259). A hash-only input
   contract projects explicit Ledger evidence states into schema-valid OSCAL
   1.2.3 Assessment Results and POA&M JSON/YAML, with stable UUIDs,

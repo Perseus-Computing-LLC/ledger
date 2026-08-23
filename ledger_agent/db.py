@@ -63,7 +63,8 @@ from typing import Optional
 #     runtime_manifest_json/hash (#223), external_artifact_json/hash (#224).
 # 23 = adds acceptance campaign manifests/checks/receipts and optional campaign
 #      usage-event bindings for #256/#257.
-SCHEMA_VERSION = 23
+# 24 = adds hash-only action-composition lineage/admission bindings for #266.
+SCHEMA_VERSION = 24
 
 # ---- money: integer micro-dollars ------------------------------------------
 # All money is stored as integer micro-dollars (1 USD == MICROS_PER_USD micros).
@@ -184,6 +185,19 @@ _CHAIN_FIELDS_OPTIONAL = (
     "campaign_id",
     "campaign_binding_json",
     "campaign_binding_hash",
+    # v24 (#266): hash-only session/task-lineage composition admission. Raw
+    # arguments never enter the event row; only the safe verdict projection and
+    # its bound digests are retained.
+    "composition_schema",
+    "composition_policy_version",
+    "composition_policy_hash",
+    "composition_state_hash",
+    "composition_profile_hash",
+    "composition_action_id",
+    "composition_lineage_id",
+    "composition_verdict",
+    "composition_json",
+    "composition_hash",
 )
 
 
@@ -656,6 +670,19 @@ CREATE TABLE IF NOT EXISTS usage_events (
     campaign_id       TEXT,
     campaign_binding_json TEXT,
     campaign_binding_hash TEXT,
+    -- v24 (#266): the composition verdict is a public-safe projection. The
+    -- separate columns make the policy/profile/state commitments queryable;
+    -- composition_json repeats only this projection, never raw tool arguments.
+    composition_schema TEXT,
+    composition_policy_version TEXT,
+    composition_policy_hash TEXT,
+    composition_state_hash TEXT,
+    composition_profile_hash TEXT,
+    composition_action_id TEXT,
+    composition_lineage_id TEXT,
+    composition_verdict TEXT,
+    composition_json TEXT,
+    composition_hash TEXT,
     estimated         INTEGER NOT NULL DEFAULT 1,
     source            TEXT NOT NULL DEFAULT 'api',
     ts                REAL NOT NULL,
@@ -863,6 +890,53 @@ CREATE TABLE IF NOT EXISTS acceptance_checks (
     UNIQUE(campaign_id, cell_id, attempt)
 );
 CREATE INDEX IF NOT EXISTS ix_campaign_checks ON acceptance_checks(org_id, campaign_id, cell_id, attempt);
+
+-- Action-composition admission state (#266). The lineage row is the
+-- authoritative serialized state; only admitted actions enter its history.
+CREATE TABLE IF NOT EXISTS composition_lineages (
+    org_id                    TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    task_lineage_id           TEXT NOT NULL,
+    session_id                TEXT NOT NULL,
+    workspace_scope           TEXT NOT NULL,
+    policy_scope              TEXT NOT NULL,
+    policy_version            TEXT NOT NULL,
+    policy_hash               TEXT NOT NULL,
+    taxonomy_version          TEXT NOT NULL,
+    taxonomy_hash             TEXT NOT NULL,
+    authority_action_id       TEXT NOT NULL,
+    authority_ref             TEXT NOT NULL,
+    context_head_digest       TEXT NOT NULL,
+    state_version              INTEGER NOT NULL DEFAULT 0,
+    budget_used_micros        INTEGER NOT NULL DEFAULT 0,
+    admitted_actions_json     TEXT NOT NULL DEFAULT '[]',
+    state_hash                TEXT NOT NULL,
+    parent_lineage_id         TEXT,
+    reset_authorization_hash  TEXT,
+    created_at                REAL NOT NULL,
+    updated_at                REAL NOT NULL,
+    PRIMARY KEY(org_id, task_lineage_id)
+);
+CREATE INDEX IF NOT EXISTS ix_composition_lineages_org
+    ON composition_lineages(org_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS composition_admissions (
+    id              TEXT PRIMARY KEY,
+    org_id          TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    task_lineage_id TEXT NOT NULL,
+    action_id       TEXT NOT NULL,
+    idempotency_key TEXT,
+    action_digest   TEXT NOT NULL,
+    verdict_json    TEXT NOT NULL,
+    outcome         TEXT NOT NULL,
+    reason_code     TEXT NOT NULL,
+    state_version   INTEGER NOT NULL,
+    state_hash      TEXT NOT NULL,
+    created_at      REAL NOT NULL,
+    UNIQUE(org_id, task_lineage_id, action_id),
+    UNIQUE(org_id, task_lineage_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS ix_composition_admissions_lineage
+    ON composition_admissions(org_id, task_lineage_id, created_at);
 """
 
 # Public prefix for ingest API keys. The secret is `ledger_sk_<random>`; only its
@@ -1060,6 +1134,18 @@ def _migrate_add_columns(conn) -> None:
         ("usage_events", "campaign_id", "TEXT"),
         ("usage_events", "campaign_binding_json", "TEXT"),
         ("usage_events", "campaign_binding_hash", "TEXT"),
+        # v24 (#266): hash-only composition verdict and bound lineage/profile
+        # commitments. Nullable keeps historical rows and their chain bytes.
+        ("usage_events", "composition_schema", "TEXT"),
+        ("usage_events", "composition_policy_version", "TEXT"),
+        ("usage_events", "composition_policy_hash", "TEXT"),
+        ("usage_events", "composition_state_hash", "TEXT"),
+        ("usage_events", "composition_profile_hash", "TEXT"),
+        ("usage_events", "composition_action_id", "TEXT"),
+        ("usage_events", "composition_lineage_id", "TEXT"),
+        ("usage_events", "composition_verdict", "TEXT"),
+        ("usage_events", "composition_json", "TEXT"),
+        ("usage_events", "composition_hash", "TEXT"),
     ]
     for table, col, defn in additions:
         cols = _table_columns(conn, table)
@@ -1973,6 +2059,7 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
            "ue.user_id, ue.cost_micros, "
            "ue.baseline_micros, ue.optimal_micros, ue.external_ref, "
            "ue.campaign_id, ue.campaign_binding_json, "
+           "ue.composition_json, "
            "ue.estimated, ue.source "
            "FROM usage_events ue "
            "LEFT JOIN workspaces w ON w.id=ue.workspace_id WHERE ue.org_id=?")
@@ -1997,6 +2084,8 @@ def export_events(conn, org_id: str, since: Optional[float] = None,
         d["optimal_usd"] = None if om is None else micros_to_usd(int(om))
         binding = d.pop("campaign_binding_json", None)
         d["campaign_binding"] = json.loads(binding) if binding is not None else None
+        composition = d.pop("composition_json", None)
+        d["composition"] = json.loads(composition) if composition is not None else None
         d["estimated"] = bool(d["estimated"])
         out.append(d)
     return out

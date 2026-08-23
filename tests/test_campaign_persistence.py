@@ -80,7 +80,7 @@ def test_campaign_manifest_check_and_receipt_survive_restart(tmp_path):
     assert json.loads(loaded["receipt_json"]) == receipt
     assert db.list_campaign_checks(conn, org_id, manifest["campaign_id"])[0]["check_hash"] == check["check_hash"]
     assert db.campaign_spend_micros(conn, manifest["campaign_id"]) == 100
-    assert db.get_schema_version(conn) == 23
+    assert db.get_schema_version(conn) == db.SCHEMA_VERSION
     conn.close()
 
 
