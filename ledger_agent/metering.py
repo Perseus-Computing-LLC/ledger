@@ -26,6 +26,7 @@ from typing import Optional
 
 from . import db, pricing, campaigns
 from .prebind import validate_prebind
+from .composition import composition_binding, validate_verdict, verify_persisted_admission
 from .receipts import (
     build_served_claim, validate_served_claim,
     validate_external_artifact_binding, validate_runtime_manifest,
@@ -187,6 +188,7 @@ def record_usage(conn, org_id: str, provider: str,
                  governance_cost: Optional[dict] = None,
                  behavior_snapshot: Optional[dict] = None,
                  campaign_binding: Optional[dict] = None,
+                 composition_verdict: Optional[dict] = None,
                  commit: bool = True) -> MeterResult:
     """Meter one LLM/agent call. Returns a :class:`MeterResult`.
 
@@ -231,6 +233,41 @@ def record_usage(conn, org_id: str, provider: str,
         valid, errors = validate_prebind(prebind)
         if not valid:
             raise ValueError("invalid prebind: " + ", ".join(errors))
+    composition_json: Optional[str] = None
+    composition_hash: Optional[str] = None
+    composition_schema: Optional[str] = None
+    composition_policy_version: Optional[str] = None
+    composition_policy_hash: Optional[str] = None
+    composition_state_hash: Optional[str] = None
+    composition_profile_hash: Optional[str] = None
+    composition_action_id: Optional[str] = None
+    composition_lineage_id: Optional[str] = None
+    composition_verdict_value: Optional[str] = None
+    composition_projection: Optional[dict] = None
+    if composition_verdict is not None:
+        if not isinstance(composition_verdict, dict):
+            raise ValueError("composition verdict must be a dict")
+        valid, errors = validate_verdict(composition_verdict)
+        if not valid or composition_verdict.get("outcome") != "allow":
+            detail = ", ".join(errors) if errors else "outcome is not allow"
+            raise ValueError("invalid composition verdict: " + detail)
+        binding = composition_binding(composition_verdict)
+        if not verify_persisted_admission(conn, org_id, composition_verdict):
+            raise ValueError("composition verdict is not a durable admission")
+        composition_projection = binding
+        composition_json = json.dumps(binding, sort_keys=True, separators=(",", ":"))
+        composition_schema = binding["schema"]
+        composition_policy_version = binding["policy_version"]
+        composition_policy_hash = binding["policy_hash"]
+        composition_state_hash = binding["state_hash"]
+        composition_profile_hash = binding["profile_digest"]
+        composition_action_id = binding["action_id"]
+        composition_lineage_id = binding["task_lineage_id"]
+        composition_verdict_value = binding["verdict"]
+        composition_hash = binding["composition_hash"]
+    if composition_projection is not None and (
+            prebind is None or prebind.get("composition_binding") != composition_projection):
+        raise ValueError("composition verdict is not bound into the prebind")
     evidence_hashes_json = _canonical_evidence_hashes(evidence_hashes)
     policy_version = _optional_text(policy_version, "policy_version")
     correction_ref = _optional_text(correction_ref, "correction_ref")
@@ -677,6 +714,17 @@ def record_usage(conn, org_id: str, provider: str,
         "campaign_id": campaign_id,
         "campaign_binding_json": campaign_binding_json,
         "campaign_binding_hash": campaign_binding_hash,
+        # v24 (#266): composition verdict projection and its explicit digests.
+        "composition_schema": composition_schema,
+        "composition_policy_version": composition_policy_version,
+        "composition_policy_hash": composition_policy_hash,
+        "composition_state_hash": composition_state_hash,
+        "composition_profile_hash": composition_profile_hash,
+        "composition_action_id": composition_action_id,
+        "composition_lineage_id": composition_lineage_id,
+        "composition_verdict": composition_verdict_value,
+        "composition_json": composition_json,
+        "composition_hash": composition_hash,
     }
     row_hash = db.compute_row_hash(prev_hash, row_fields, hmac_key=chain_hmac_key)
     conn.execute(
@@ -691,8 +739,11 @@ def record_usage(conn, org_id: str, provider: str,
         "governance_cost_json,governance_cost_hash,"
         "behavior_snapshot_json,behavior_snapshot_hash,"
         "campaign_id,campaign_binding_json,campaign_binding_hash,"
+        "composition_schema,composition_policy_version,composition_policy_hash,composition_state_hash,"
+        "composition_profile_hash,composition_action_id,composition_lineage_id,composition_verdict,"
+        "composition_json,composition_hash,"
         "estimated,source,ts,prev_hash,row_hash) "
-        "VALUES(" + ",".join("?" for _ in range(57)) + ")",
+        "VALUES(" + ",".join("?" for _ in range(67)) + ")",
         (eid, org_id, workspace_id, provider, model, task_type,
          int(input_tokens), int(output_tokens), int(cache_read_tokens),
          (int(cache_write_tokens) if cache_write_tokens is not None else None),
@@ -712,6 +763,9 @@ def record_usage(conn, org_id: str, provider: str,
          governance_cost_json, governance_cost_hash,
          behavior_snapshot_json, behavior_snapshot_hash,
          campaign_id, campaign_binding_json, campaign_binding_hash,
+         composition_schema, composition_policy_version, composition_policy_hash,
+         composition_state_hash, composition_profile_hash, composition_action_id,
+         composition_lineage_id, composition_verdict_value, composition_json, composition_hash,
          int(estimated), source, ts, prev_hash, row_hash),
     )
 

@@ -159,6 +159,10 @@ def _tools() -> list[dict[str, Any]]:
                     "description": "Hash-only acceptance-campaign cell/lane/config/"
                                    "checkpoint binding (#256/#257).",
                 },
+                "composition_verdict": {
+                    "type": "object",
+                    "description": "Durable hash-only action-composition allow verdict (#266).",
+                },
             },
             required=["provider"],
         ),
@@ -270,6 +274,7 @@ def _handle_record(meter: client.Meter, args: dict) -> dict:
         behavior_snapshot=args.get("behavior_snapshot"),
         authority_manifest_custody=args.get("authority_manifest_custody"),
         campaign_binding=args.get("campaign_binding"),
+        composition_verdict=args.get("composition_verdict"),
         source="mcp",
     )
     return asdict(res)

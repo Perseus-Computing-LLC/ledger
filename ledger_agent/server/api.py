@@ -212,6 +212,8 @@ def audit_json(conn, org_id: str, *, hmac_key: bytes | None = None,
                 if row["behavior_snapshot_json"] is not None else None,
                 "campaign_binding": json.loads(row["campaign_binding_json"])
                 if row["campaign_binding_json"] is not None else None,
+                "composition": json.loads(row["composition_json"])
+                if row["composition_json"] is not None else None,
                 "action_authorization": {
                     "agent_id": row["agent_id"],
                     "authority_manifest_ref": row["authority_manifest_ref"],

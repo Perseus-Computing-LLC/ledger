@@ -177,6 +177,10 @@
      "campaign_binding": {
       "type": "object",
       "description": "Hash-only acceptance-campaign cell/lane/config/checkpoint binding (#256/#257)."
+     },
+     "composition_verdict": {
+      "type": "object",
+      "description": "Durable hash-only action-composition allow verdict (#266)."
      }
     },
     "required": [

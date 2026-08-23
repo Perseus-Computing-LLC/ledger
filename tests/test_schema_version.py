@@ -32,6 +32,7 @@ _DOCUMENTED_MIGRATIONS = {
     "21": {"behavior_snapshot_json", "behavior_snapshot_hash"},
     "22": {"authority_manifest_custody"},
     "23": {"acceptance_campaigns", "acceptance_checks", "campaign_id", "campaign_binding_json", "campaign_binding_hash"},
+    "24": {"composition_lineages", "composition_admissions", "composition_schema", "composition_policy_version", "composition_policy_hash", "composition_state_hash", "composition_profile_hash", "composition_action_id", "composition_lineage_id", "composition_verdict", "composition_json", "composition_hash"},
 }
 
 
@@ -81,8 +82,8 @@ class TestSchemaVersion(unittest.TestCase):
         docs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs", "schema.md")
         with open(docs_path, encoding="utf-8") as handle:
             docs = handle.read()
-        self.assertEqual(db.SCHEMA_VERSION, 23)
-        self.assertIn("SCHEMA_VERSION=23", docs)
+        self.assertEqual(db.SCHEMA_VERSION, 24)
+        self.assertIn("SCHEMA_VERSION=24", docs)
 
         table_rows = {}
         for line in docs.splitlines():
@@ -104,6 +105,9 @@ class TestSchemaVersion(unittest.TestCase):
             "resource_constraints_version", "resource_constraints_hash",
             "prebind_json", "prebind_hash", "reconciliation_note",
             "campaign_id", "campaign_binding_json", "campaign_binding_hash",
+            "composition_schema", "composition_policy_version", "composition_policy_hash",
+            "composition_state_hash", "composition_profile_hash", "composition_action_id",
+            "composition_lineage_id", "composition_verdict", "composition_json", "composition_hash",
         } <= columns)
         conn.close()
 

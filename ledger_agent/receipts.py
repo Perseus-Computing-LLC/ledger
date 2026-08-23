@@ -113,7 +113,8 @@ def build_prebind_v2(*, attempted_action: str, actor_ref: str, authority_ref: st
                      uncertainty: Optional[str] = None,
                      request_hash: Optional[str] = None,
                      nonce: Optional[str] = None,
-                     epoch: Optional[int | str] = None) -> dict[str, Any]:
+                     epoch: Optional[int | str] = None,
+                     composition_binding: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Build a v2 prebind block with stage-aware fields."""
     block: dict[str, Any] = {
         "schema_version": PREBIND_V2_SCHEMA,
@@ -137,6 +138,8 @@ def build_prebind_v2(*, attempted_action: str, actor_ref: str, authority_ref: st
         "nonce": _opt_nonce(nonce),
         "epoch": _opt_epoch(epoch),
     }
+    if composition_binding is not None:
+        block["composition_binding"] = composition_binding
     block["prebind_hash"] = _sha({k: v for k, v in block.items() if k != "prebind_hash"})
     return block
 

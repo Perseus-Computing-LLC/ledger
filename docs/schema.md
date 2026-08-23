@@ -9,7 +9,7 @@ schema — the database half of the frozen contract whose API half is
 
 `ledger_agent.db.SCHEMA_VERSION` is an integer bumped on every schema change and
 stamped into the `meta` table key `schema_version` on `init_schema()`. The
-runtime currently declares **`SCHEMA_VERSION=23`**. Read the stored value with
+runtime currently declares **`SCHEMA_VERSION=24`**. Read the stored value with
 `db.get_schema_version(conn)`; a fresh database is stamped with the runtime
 value after all additive migrations have run.
 
@@ -35,6 +35,7 @@ value after all additive migrations have run.
 | 21 | Adds nullable hash-covered behavior-snapshot receipt pin (#238): `behavior_snapshot_json`/`behavior_snapshot_hash` — the sha256 of a canonical agent-run snapshot, re-verifiable with `ledger diff --require-target-digest`. |
 | 22 | Adds nullable hash-covered custody disclosure for the referenced authority manifest (#241): `authority_manifest_custody` — 1f916 taxonomy label; missing/unknown custody renders as labeled uncertainty in verification output. |
 | 23 | Adds `acceptance_campaigns`/`acceptance_checks` plus nullable hash-covered `usage_events` campaign bindings (`campaign_id`, `campaign_binding_json`, `campaign_binding_hash`) for acceptance integrity, budget guards, and correction/resume lineage (#256/#257). |
+| 24 | Adds durable action-composition lineages/admissions (`composition_lineages`, `composition_admissions`) and nullable hash-covered `usage_events` composition bindings (`composition_schema`, `composition_policy_version`, `composition_policy_hash`, `composition_state_hash`, `composition_profile_hash`, `composition_action_id`, `composition_lineage_id`, `composition_verdict`, `composition_json`, `composition_hash`) for trusted taxonomy resolution, serialized session/task composition admission, and hash-only evidence binding (#266). |
 
 ## The contract (within the 1.0 major line)
 

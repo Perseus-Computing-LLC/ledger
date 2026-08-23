@@ -23,6 +23,7 @@ from .. import __version__, bridge, campaigns, config as cfgmod, db, pricing
 from ..billing import StripeClient, BillingError, handle_webhook_event
 from ..utils import strict_int
 from ..prebind import validate_prebind
+from ..composition import validate_verdict
 from . import api, views, auth as authmod, errorhook
 
 # Paths reachable without a session when auth is enabled.
@@ -33,6 +34,7 @@ _PUBLIC_PATHS = {"/", "/index.html",  # public landing for logged-out visitors
                  "/v1/checkpoints",  # Bearer-auth tamper-evidence anchors (#121)
                  "/v1/campaigns", "/v1/campaigns/checks", "/v1/campaigns/finalize",
                  "/api/audit",  # Bearer-auth evidence receipts (org-scoped API key)
+                 "/v1/composition/admit",  # Bearer-auth composition admission (#266)
                  "/v1/admin/orgs", "/v1/admin/credits", "/v1/admin/keys",  # admin-token (#66)
                  "/v1/admin/keys/rotate", "/v1/admin/keys/revoke",  # admin-token key lifecycle
                  "/v1/admin/verify",  # ledger tamper-evidence (#108), admin-token
@@ -96,7 +98,7 @@ class _OrgRequired(Exception):
 
 class _Ctx:
     """Shared, read-mostly server context."""
-    def __init__(self, cfg, db_path, demo=False):
+    def __init__(self, cfg, db_path, demo=False, composition_engine=None):
         self.cfg = cfg
         self.db_path = db_path
         self.demo = demo
@@ -107,6 +109,9 @@ class _Ctx:
         # Fix #65: per-key ingest token buckets {key_hash: [tokens, last_ts]}.
         self._buckets: dict[str, list] = {}
         self._bucket_lock = threading.Lock()
+        # Configured by an embedding application from trusted infrastructure;
+        # never constructed from request-supplied taxonomy or policy data.
+        self.composition_engine = composition_engine
 
     def runway(self, authed: bool = False):
         """Cached monitor bridge (refresh at most every 60s).
@@ -506,8 +511,8 @@ class Handler(BaseHTTPRequestHandler):
             needs_csrf_check = (
                 self.ctx.auth_on and
                 path not in {"/v1/usage", "/webhook/stripe",
-                             "/v1/checkpoints", "/v1/campaigns",
-                             "/v1/campaigns/checks", "/v1/campaigns/finalize"} and  # Bearer-auth (#121)
+                             "/v1/checkpoints", "/v1/composition/admit",
+                             "/v1/campaigns", "/v1/campaigns/checks", "/v1/campaigns/finalize"} and
                 self._user is not None  # Cookie-authenticated
             )
             if needs_csrf_check and not (self._same_origin() or self._csrf_token_ok()):
@@ -517,6 +522,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._auth_logout(conn)
             if path == "/v1/usage":
                 return self._ingest_usage(conn)
+            if path == "/v1/composition/admit":
+                return self._composition_admit(conn)
             if path == "/v1/checkpoints":
                 return self._checkpoints_post(conn)
             if path in {"/v1/campaigns", "/v1/campaigns/checks", "/v1/campaigns/finalize"}:
@@ -746,6 +753,75 @@ class Handler(BaseHTTPRequestHandler):
                                     "detail": "no chained events yet"})
         return self._json(200, {"recorded": True, "checkpoint": cp})
 
+    def _composition_admit(self, conn):
+        """POST /v1/composition/admit — evaluate one action against a
+        server-configured trusted taxonomy/policy.  The request can select a
+        tool endpoint and arguments, but it cannot submit a registry, policy, or
+        profile/risk values.  The returned verdict is hash-only and must be
+        supplied to a subsequent usage receipt before recording the effect.
+        """
+        engine = getattr(self.ctx, "composition_engine", None)
+        org_id = self._bearer_org(conn)
+        if not org_id:
+            return self._json(401, {"error": "invalid or missing API key"})
+        if engine is None:
+            return self._json(503, {"error": "composition admission is not configured"})
+        try:
+            payload = json.loads(self._body() or b"{}")
+        except Exception:
+            return self._json(400, {"error": "body must be JSON"})
+        if not isinstance(payload, dict):
+            return self._json(400, {"error": "body must be a JSON object"})
+        allowed = {
+            "task_lineage_id", "session_id", "workspace_scope", "authority_action_id",
+            "authority_ref", "context_head_digest", "action_id", "tool_endpoint",
+            "arguments", "idempotency_key", "override", "lineage_authorization",
+        }
+        if set(payload) - allowed:
+            return self._json(400, {"error": "unknown or caller-owned composition field"})
+        if any(field in payload for field in (
+                "taxonomy", "policy", "profile", "claimed_profile", "risk", "cost",
+                "claimed_impact", "claimed_cost", "claimed_classification", "impact",
+                "classification", "budget_cost")):
+            return self._json(400, {"error": "taxonomy, policy, and profile values are server-owned"})
+        lineage_authorization = payload.get("lineage_authorization")
+        if lineage_authorization is not None:
+            try:
+                engine.start_lineage(
+                    conn,
+                    org_id=org_id,
+                    task_lineage_id=payload.get("task_lineage_id"),
+                    session_id=payload.get("session_id"),
+                    workspace_scope=payload.get("workspace_scope"),
+                    authority_action_id=payload.get("authority_action_id"),
+                    authority_ref=payload.get("authority_ref"),
+                    context_head_digest=payload.get("context_head_digest"),
+                    authorization=lineage_authorization,
+                )
+            except (TypeError, ValueError):
+                return self._json(400, {"error": "invalid lineage authorization"})
+        try:
+            verdict = engine.admit(
+                conn,
+                org_id=org_id,
+                task_lineage_id=payload.get("task_lineage_id"),
+                session_id=payload.get("session_id"),
+                workspace_scope=payload.get("workspace_scope"),
+                authority_action_id=payload.get("authority_action_id"),
+                authority_ref=payload.get("authority_ref"),
+                context_head_digest=payload.get("context_head_digest"),
+                action_id=payload.get("action_id"),
+                tool_endpoint=payload.get("tool_endpoint"),
+                arguments=payload.get("arguments", {}),
+                idempotency_key=payload.get("idempotency_key"),
+                override=payload.get("override"),
+            )
+        except (TypeError, ValueError) as exc:
+            # Engine contract errors are returned as a bounded review/hold where
+            # possible; never echo raw argument or exception content.
+            return self._json(400, {"error": "invalid composition request"})
+        return self._json(200, verdict)
+
     def _usage_response(self, conn, org_id, out, n_blocked, n_over_balance, cfg):
         """Build the (code, body) for a recorded /v1/usage batch. Called inside the
         db.immediate block so the stored idempotent response commits atomically
@@ -928,6 +1004,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not valid:
                     return self._json(400, {"error": "invalid campaign_binding", "fields": errors})
 
+            if ev.get("composition_verdict") is not None:
+                if not isinstance(ev["composition_verdict"], dict):
+                    return self._json(400, {"error": "composition_verdict must be an object"})
+                valid, errors = validate_verdict(ev["composition_verdict"])
+                if not valid or ev["composition_verdict"].get("outcome") != "allow":
+                    return self._json(400, {"error": "invalid composition_verdict", "fields": errors})
+
         # All valid — record the whole batch as one serialized transaction.
         # Fix #27/#30: db.immediate() takes the write lock up front (BEGIN
         # IMMEDIATE) so the per-event quota / prepaid hard-stop reads can't race
@@ -996,6 +1079,7 @@ class Handler(BaseHTTPRequestHandler):
                             governance_cost=ev.get("governance_cost"),
                             behavior_snapshot=ev.get("behavior_snapshot"),
                             campaign_binding=ev.get("campaign_binding"),
+                            composition_verdict=ev.get("composition_verdict"),
                             user_id=ev.get("user_id"),
                             source=ev.get("source", "api"),
                             pricing_overrides=cfg.get("pricing", {}).get("overrides"),
@@ -1381,8 +1465,13 @@ def _guard_insecure_bind(host, auth_on, cfg):
 
 
 def serve(host=None, port=None, db_path=None, demo=False, cfg=None,
-          open_browser=False):
-    """Start the dashboard/API server. Blocks until interrupted."""
+          open_browser=False, composition_engine=None):
+    """Start the dashboard/API server. Blocks until interrupted.
+
+    ``composition_engine`` must be constructed from trusted taxonomy/policy
+    configuration by the embedding application; request bodies never configure
+    it. When omitted, the composition endpoint remains fail-closed (503).
+    """
     # Fix (#17): PyYAML is a hard dependency; fail fast rather than silently
     # degrading to the minimal config parser (which could reset a security config
     # such as allowed_emails to defaults when run from source without deps).
@@ -1400,7 +1489,7 @@ def serve(host=None, port=None, db_path=None, demo=False, cfg=None,
     db.init_schema(c)
     c.close()
 
-    ctx = _Ctx(cfg, db_path, demo=demo)
+    ctx = _Ctx(cfg, db_path, demo=demo, composition_engine=composition_engine)
     _guard_insecure_bind(host, ctx.auth_on, cfg)
     httpd = _Server((host, port), Handler, ctx)
     url = f"http://{host}:{port}/"
