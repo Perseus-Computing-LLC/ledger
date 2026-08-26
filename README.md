@@ -50,11 +50,13 @@ This is a product and architecture position, not a claim of handling CUI or sati
 
 | Product | Question it answers |
 |---|---|
-| **Perseus** | What verified workspace state should be available before an agent acts? |
+| **Perseus Context Engine** | What verified workspace state should be available before an agent acts? |
 | **Perseus Vault** | What durable, time-valid knowledge did the system have? |
 | **Perseus Ledger** | What happened, under what authority and evidence, and can we prove it? |
 
 Each product is useful on its own and integrates through documented, runtime-neutral contracts. Ledger does not require Perseus, Vault, or any specific agent runtime.
+
+**Explore the system:** [Perseus Context Engine](https://github.com/Perseus-Computing-LLC/perseus) · [Perseus Vault](https://github.com/Perseus-Computing-LLC/perseus-vault) · [Vault MCP API reference](https://perseus.observer/vault/mcp-reference/) · [Perseus benchmarks](https://perseus.observer/benchmarks/)
 
 For the governance bridge between durable memory decisions, recall posture, and
 hash-only Ledger evidence, see [Memory governance and Ledger provenance](docs/memory-governance-provenance.md).
@@ -82,7 +84,7 @@ are the canonical interfaces.
 
 ### MCP server
 
-`ledger mcp` serves a curated 5-tool MCP surface (record / query / verify /
+`ledger mcp` serves a curated MCP surface (record / query / verify /
 receipt / health) over stdio so agents can meter themselves:
 
 ```bash
@@ -96,10 +98,10 @@ contract, remote mode, and the official-registry listing.
 ```python
 from ledger_agent import Meter
 
-ledger = Meter(org="Acme Autonomous Systems")
+ledger = Meter(org="example-organization")
 ledger.track(
     provider="anthropic",
-    model="claude-opus-4-8",
+    model="example-model",
     task_type="evidence_review",
     workspace="mission-analysis",
     input_tokens=8200,
