@@ -53,6 +53,20 @@ invarium = ["invarium>=0.3"]
 all = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "sentry-sdk>=2.0,<3", "invarium>=0.3; python_version >= '3.10'", "jsonschema>=4.18,<5"]
 dev = ["stripe>=7.0,<14", "reportlab>=4.0,<5", "boto3>=1.28", "pytest>=7.0,<10", "sentry-sdk>=2.0,<3", "invarium>=0.3; python_version >= '3.10'", "jsonschema>=4.18,<5"]
 
+# ``uv run`` installs the default ``dev`` group, so the documented local test
+# gate is self-provisioning. Keep this separate from runtime dependencies and
+# mirror the optional ``dev`` extra above for pip consumers.
+[dependency-groups]
+dev = [
+    "stripe>=7.0,<14",
+    "reportlab>=4.0,<5",
+    "boto3>=1.28",
+    "pytest>=7.0,<10",
+    "sentry-sdk>=2.0,<3",
+    "invarium>=0.3; python_version >= '3.10'",
+    "jsonschema>=4.18,<5",
+]
+
 [project.urls]
 Homepage = "https://perseus.observer/ledger/"
 Repository = "https://github.com/Perseus-Computing-LLC/ledger"

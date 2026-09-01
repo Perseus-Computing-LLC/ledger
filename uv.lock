@@ -275,6 +275,17 @@ stripe = [
     { name = "stripe" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "boto3" },
+    { name = "invarium" },
+    { name = "jsonschema" },
+    { name = "pytest" },
+    { name = "reportlab" },
+    { name = "sentry-sdk" },
+    { name = "stripe" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "boto3", marker = "extra == 'all'", specifier = ">=1.28" },
@@ -299,6 +310,17 @@ requires-dist = [
     { name = "stripe", marker = "extra == 'stripe'", specifier = ">=7.0,<14" },
 ]
 provides-extras = ["stripe", "sentry", "pdf", "fetchers", "invarium", "all", "dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "boto3", specifier = ">=1.28" },
+    { name = "invarium", marker = "python_full_version >= '3.10'", specifier = ">=0.3" },
+    { name = "jsonschema", specifier = ">=4.18,<5" },
+    { name = "pytest", specifier = ">=7.0,<10" },
+    { name = "reportlab", specifier = ">=4.0,<5" },
+    { name = "sentry-sdk", specifier = ">=2.0,<3" },
+    { name = "stripe", specifier = ">=7.0,<14" },
+]
 
 [[package]]
 name = "pillow"
