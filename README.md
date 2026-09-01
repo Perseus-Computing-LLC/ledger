@@ -94,6 +94,8 @@ claude mcp add ledger -- ledger mcp
 
 See [docs/mcp.md](docs/mcp.md) for the tool table, action-provenance
 contract, remote mode, and the official-registry listing.
+See the [Evaluator Guide](docs/EVALUATOR_GUIDE.md) for the three-tier architecture
+and the boundary between context, memory, and provenance.
 
 ```python
 from ledger_agent import Meter
