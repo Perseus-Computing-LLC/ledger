@@ -180,7 +180,13 @@ def cmd_meter(args):
         workspace=args.workspace, cost_usd=args.cost,
         baseline_cost_usd=getattr(args, "baseline", None),
         optimal_cost_usd=getattr(args, "optimal", None),
-        external_ref=getattr(args, "ref", None), source="cli",
+        external_ref=getattr(args, "ref", None),
+        evidence_hashes=getattr(args, "evidence_hash", None),
+        policy_version=getattr(args, "policy_version", None),
+        result_hash=getattr(args, "result_hash", None),
+        human_review=getattr(args, "human_review", None),
+        correction_ref=getattr(args, "correction_ref", None),
+        source="cli",
         pricing_overrides=cfg.get("pricing", {}).get("overrides"),
         alert_cfg=cfg.get("alerts", {}),
         block_over_limit=bool(cfg.get("pricing", {}).get("block_over_free_limit")),
@@ -1281,6 +1287,16 @@ def build_parser():
     pm.add_argument("--ref", dest="ref",
                     help="per-task/per-question attribution id (e.g. an Invarium "
                          "task_id); links this event to the task that produced it")
+    pm.add_argument("--evidence-hash", action="append", metavar="SHA256",
+                    help="SHA-256 digest of a source artifact; repeat for multiple artifacts")
+    pm.add_argument("--policy-version",
+                    help="approved policy or template version identifier")
+    pm.add_argument("--result-hash", metavar="SHA256",
+                    help="SHA-256 digest of the result or handoff outcome")
+    pm.add_argument("--human-review", choices=["approved", "rejected", "corrected"],
+                    help="controlled human reviewer disposition")
+    pm.add_argument("--correction-ref",
+                    help="opaque correction reference, required with corrected review")
     pm.add_argument("--json", action="store_true")
     pm.set_defaults(func=cmd_meter)
 
